@@ -1,15 +1,22 @@
 import torch
 from torch import nn
 import torch.nn.functional as F
-import torchsort
+try:
+    import torchsort
+    def _soft_rank(x, **kw):
+        return torchsort.soft_rank(x, **kw)
+except ImportError:
+    from scipy.stats import rankdata
+    def _soft_rank(x, **kw):
+        return torch.tensor(rankdata(x.detach().cpu().numpy(), axis=-1), dtype=torch.float32)
 
 from spacecutter.losses import cumulative_link_loss
 
 
 def spearmanr(pred, target, **kw):
     device = pred.device
-    pred = torchsort.soft_rank(pred.cpu(), **kw).to(device)
-    target = torchsort.soft_rank(target.cpu(), **kw).to(device)
+    pred = _soft_rank(pred.cpu(), **kw).to(device)
+    target = _soft_rank(target.cpu(), **kw).to(device)
     pred = pred - pred.mean()
     pred = pred / (pred.norm() + 1e-8)
     target = target - target.mean()
