@@ -38,7 +38,7 @@ def main(args):
     dataset = PatchedMultiImageDataset.from_paths(args.data, **dataset_params)
     print(f'[  DATA] {dataset}')
 
-    loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=8)
+    loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=0)
 
     model_param_string = ', '.join(f'{k}={v}' for k, v in cfg.model.module.items() if not k.startswith('_'))
     model = hydra.utils.instantiate(cfg.model.module, skip_weights_loading=True)
@@ -84,7 +84,7 @@ def main(args):
         dataset = RandomAccessMultiImageDataset.from_paths_and_locs(paths, locs, **dataset_params)
         print(f'[  DATA] {dataset}')
 
-        loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=8)
+        loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=0)
 
         model_params = cfg.model.get('wrapper', cfg.model.base)
         model = hydra.utils.instantiate(model_params)
@@ -103,7 +103,7 @@ def main(args):
             ckpt_path = run_path / 'last.pth'
 
         print(f"[  CKPT] {ckpt_path}")
-        checkpoint = torch.load(ckpt_path, map_location=device)
+        checkpoint = torch.load(ckpt_path, map_location=device, weights_only=False)
         model.load_state_dict(checkpoint['model'])
 
         scores = score_patches(loader, model, device, cfg)

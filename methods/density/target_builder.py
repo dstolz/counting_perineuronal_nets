@@ -2,7 +2,7 @@ from methods.base_target_builder import BaseTargetBuilder
 import numpy as np
 
 from math import floor
-from scipy.signal import gaussian
+from scipy.signal.windows import gaussian
 from skimage.filters import gaussian as gaussian_filter
 
 from methods.base_target_builder import BaseTargetBuilder
