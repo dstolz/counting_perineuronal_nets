@@ -146,4 +146,6 @@ datasets/trash/
 *.tif
 *.tiff
 *.h5
+*log.csv
+*best.pth
 .*
