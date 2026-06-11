@@ -1,0 +1,13 @@
+tqdm
+Pillow==8.4.0
+tensorboard
+matplotlib
+hydra-core==1.1.1
+omegaconf
+h5py
+pandas
+prefetch_generator
+scikit-image==0.19.2
+seaborn==0.11.2
+scikit-learn
+spacecutter
