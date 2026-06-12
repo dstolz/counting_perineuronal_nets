@@ -167,9 +167,20 @@ def ordinal_regression(sample, model, device, cfg):
     scores = model.predictor(x)
     y_pred = model.link(scores)
 
-    loss = cumulative_link_loss(y_pred, y_true.reshape(-1, 1), class_weights=cfg.optim.class_weights)
+    class_weights = cfg.optim.get('class_weights', None)
+
+    loss = cumulative_link_loss(
+        y_pred,
+        y_true.reshape(-1, 1),
+        class_weights=class_weights
+    )
+
     terms = _score_metrics(scores, cfg, targets=y_true)
-    metrics = { 'loss': loss, **terms }
+
+    metrics = {
+        'loss': loss,
+        **terms
+    }
 
     return metrics, scores
 
