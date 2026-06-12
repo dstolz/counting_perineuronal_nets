@@ -468,6 +468,7 @@ processing.
 - Verify the correct staining channel is selected (`STAINING = "WFA"` → C1 files,
   `STAINING = "PV"` → C2 files).
 - Check the image is 1-channel grayscale. RGB images will cause unexpected behaviour.
+- The original paper's dataset used pixel size of 0.645 µm. If your images have a very different resolution, the model may struggle. Try resizing the image to match the original pixel size. You may also need to subtract background prior to detection.
 
 ### `FileNotFoundError: No checkpoint found in ...`
 
@@ -476,6 +477,14 @@ The model folder is missing or incomplete. It must contain:
 <model_folder>/
 ├── .hydra/config.yaml
 └── best.pth
+```
+
+### ValueError: numpy.dtype size changed, may indicate binary incompatibility. Expected 96 from C header, got 88 from PyObject
+This is caused by a mismatch between the Python environment used to train the model and the one used for inference. The model was trained with scikit-image 0.19.3, which uses a newer numpy API. If your environment has an older scikit-image, it may be incompatible with the model checkpoint. To fix this, force-reinstall scikit-image to the correct version:
+
+```
+conda activate countpnn
+pip install --force-reinstall scikit-image
 ```
 
 ---
