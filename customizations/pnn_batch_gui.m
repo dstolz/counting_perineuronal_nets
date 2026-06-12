@@ -1,41 +1,41 @@
 classdef pnn_batch_gui < handle
-% PNN_BATCH_GUI   Batch GUI for PNN/PV cell detection via predict.py.
-%   Open the GUI:
-%       pnn_batch_gui()          % open window (object managed internally)
-%       app = pnn_batch_gui();   % optionally retain the object handle
-%
-%   Features:
-%     - Recursive directory search with regex file filter
-%     - Detection model + optional rescoring model (Stage 2) selection
-%     - Multi-page TIFF support: process pages separately, with a
-%       per-page model mapping (e.g. page 1 = PNN model, page 2 = PV
-%       model). Single-page files use page 1's mapping row.
-%     - Optional image preprocessing applied before detection:
-%       morphological background subtraction (disk radius) and resize;
-%       preprocessing may be set globally or per page.
-%     - Full predict.py argument exposure (device, batch-size, threshold)
-%     - Real-time stdout/stderr streaming to the MATLAB Command Window
-%     - Stop button that kills the active Python subprocess
-%     - Per-file CSV output placed next to the source image:
-%         <image_stem>[_page<k>]_localizations.csv
-%       When resizing is used, a second CSV in resized-image coordinates
-%       is also written: <image_stem>[_page<k>]_localizations_resized.csv
-%     - Result figure with colormap, auto-contrast, scatter overlay,
-%       stats annotation; figure is reused across files. The raw page or
-%       the preprocessed image may be shown (user-selectable).
-%     - Optional PNG export of the annotated result
-%     - Ignore or Overwrite existing results
-%     - All user preferences persisted across MATLAB sessions
-%
-%   Requirements:
-%     - MATLAB R2014b+ with Java enabled (default)
-%     - Python with predict.py dependencies installed
-%     - predict.py must be locatable: either in the same folder as this
-%       file or one level up (e.g. when this file is in a subdirectory)
-%
-%   NOTE: If this file lives in a subdirectory of the repo (e.g.
-%   customizations/), add that subdirectory to the MATLAB path:
-%       addpath('customizations')
+    % PNN_BATCH_GUI   Batch GUI for PNN/PV cell detection via predict.py.
+    %   Open the GUI:
+    %       pnn_batch_gui()          % open window (object managed internally)
+    %       app = pnn_batch_gui();   % optionally retain the object handle
+    %
+    %   Features:
+    %     - Recursive directory search with regex file filter
+    %     - Detection model + optional rescoring model (Stage 2) selection
+    %     - Multi-page TIFF support: process pages separately, with a
+    %       per-page model mapping (e.g. page 1 = PNN model, page 2 = PV
+    %       model). Single-page files use page 1's mapping row.
+    %     - Optional image preprocessing applied before detection:
+    %       morphological background subtraction (disk radius) and resize;
+    %       preprocessing may be set globally or per page.
+    %     - Full predict.py argument exposure (device, batch-size, threshold)
+    %     - Real-time stdout/stderr streaming to the MATLAB Command Window
+    %     - Stop button that kills the active Python subprocess
+    %     - Per-file CSV output placed next to the source image:
+    %         <image_stem>[_page<k>]_locs.csv
+    %       When resizing is used, a second CSV in resized-image coordinates
+    %       is also written: <image_stem>[_page<k>]_locs_resized.csv
+    %     - Result figure with colormap, auto-contrast, scatter overlay,
+    %       stats annotation; figure is reused across files. The raw page or
+    %       the preprocessed image may be shown (user-selectable).
+    %     - Optional PNG export of the annotated result
+    %     - Ignore or Overwrite existing results
+    %     - All user preferences persisted across MATLAB sessions
+    %
+    %   Requirements:
+    %     - MATLAB R2014b+ with Java enabled (default)
+    %     - Python with predict.py dependencies installed
+    %     - predict.py must be locatable: either in the same folder as this
+    %       file or one level up (e.g. when this file is in a subdirectory)
+    %
+    %   NOTE: If this file lives in a subdirectory of the repo (e.g.
+    %   customizations/), add that subdirectory to the MATLAB path:
+    %       addpath('customizations')
 
     %% ---- Constants -------------------------------------------------------
     properties (Constant, Access = private)
@@ -109,15 +109,15 @@ classdef pnn_batch_gui < handle
     methods (Access = public)
 
         function obj = pnn_batch_gui()
-        % Constructor — builds the GUI (or raises an existing window).
-        %   obj = pnn_batch_gui()
-        %
-        %   Call without capturing output — the GUI manages its own lifetime:
-        %       pnn_batch_gui()          % recommended
-        %       app = pnn_batch_gui();   % optional, for programmatic access
-        %
-        %   If callbacks stop working after editing this file, run:
-        %       clear classes; pnn_batch_gui()
+            % Constructor — builds the GUI (or raises an existing window).
+            %   obj = pnn_batch_gui()
+            %
+            %   Call without capturing output — the GUI manages its own lifetime:
+            %       pnn_batch_gui()          % recommended
+            %       app = pnn_batch_gui();   % optional, for programmatic access
+            %
+            %   If callbacks stop working after editing this file, run:
+            %       clear classes; pnn_batch_gui()
 
             % Re-use existing window if already open
             hExist = findobj(0, 'Tag', 'PNNBatchGUIMain');
@@ -134,7 +134,7 @@ classdef pnn_batch_gui < handle
         end
 
         function delete(obj)
-        % Destructor — stop timer, kill subprocess, close figure.
+            % Destructor — stop timer, kill subprocess, close figure.
             obj.cleanup();
             if ~isempty(obj.hFig) && isvalid(obj.hFig)
                 delete(obj.hFig);
@@ -146,12 +146,12 @@ classdef pnn_batch_gui < handle
     %% ---- Private methods -------------------------------------------------
     methods (Access = private)
 
-        
+
         %% App setup
-        
+
 
         function loadPrefs(obj)
-        % Build defaults struct, then override with any saved preferences.
+            % Build defaults struct, then override with any saved preferences.
             defaults = struct( ...
                 'parentDir',       obj.repoRoot, ...
                 'fileRegex',       '(?i)\.tif$', ...
@@ -166,14 +166,10 @@ classdef pnn_batch_gui < handle
                 'autoContrast',    true, ...
                 'savePng',         false, ...
                 'dotColorIdx',     1, ...
-                'dotSize',         '15', ...
-                'perPageEnable',   false, ...
-                'preprocGlobal',   true, ...
-                'globalBgRadius',  '0', ...
-                'globalResize',    '1', ...
+                'dotSize',         '5', ...
                 'displayPreproc',  false, ...
                 'pageMapData',     {pnn_batch_gui.defaultPageMap()} ...
-            );
+                );
             obj.P = defaults;
             flds = fieldnames(defaults);
             for k = 1:numel(flds)
@@ -185,7 +181,7 @@ classdef pnn_batch_gui < handle
         end
 
         function savePrefs(obj)
-        % Read current control values and persist all preferences.
+            % Read current control values and persist all preferences.
             if isempty(obj.hFig) || ~isvalid(obj.hFig), return; end
             obj.P.parentDir       = obj.hDirEdit.Value;
             obj.P.fileRegex       = obj.hRegexEdit.Value;
@@ -201,11 +197,6 @@ classdef pnn_batch_gui < handle
             obj.P.savePng         = obj.hSavePng.Value;
             obj.P.dotColorIdx     = find(strcmp(obj.hDotColorPop.Items, obj.hDotColorPop.Value), 1);
             obj.P.dotSize         = obj.hDotSizeEdit.Value;
-            obj.P.perPageEnable   = obj.hPerPageChk.Value;
-            obj.P.preprocGlobal   = obj.hPreprocGlobalChk.Value;
-            obj.P.globalBgRadius  = obj.hGlobalBgEdit.Value;
-            obj.P.globalResize    = obj.hGlobalResizeEdit.Value;
-            obj.P.displayPreproc  = obj.hDisplayPreprocChk.Value;
             obj.P.pageMapData     = obj.hPageTable.Data;
 
             flds = fieldnames(obj.P);
@@ -215,8 +206,8 @@ classdef pnn_batch_gui < handle
         end
 
         function discoverModels(obj)
-        % Scan repo root for subdirs containing best.pth; split by type.
-        % Names containing 'fasterrcnn' -> detection; all others -> rescore.
+            % Scan repo root for subdirs containing best.pth; split by type.
+            % Names containing 'fasterrcnn' -> detection; all others -> rescore.
             d       = dir(obj.repoRoot);
             subdirs = {d([d.isdir]).name};
             subdirs = subdirs(~ismember(subdirs, {'.', '..'}));
@@ -226,9 +217,9 @@ classdef pnn_batch_gui < handle
             for k = 1:numel(subdirs)
                 if exist(fullfile(obj.repoRoot, subdirs{k}, 'best.pth'), 'file')
                     if ~isempty(regexpi(subdirs{k}, 'fasterrcnn', 'once'))
-                        obj.detModels{end+1} = subdirs{k}; %#ok<AGROW>
+                        obj.detModels{end+1} = subdirs{k};
                     else
-                        obj.rescoreModels{end+1} = subdirs{k}; %#ok<AGROW>
+                        obj.rescoreModels{end+1} = subdirs{k}; 
                     end
                 end
             end
@@ -236,9 +227,9 @@ classdef pnn_batch_gui < handle
             obj.rescoreModels = sort(obj.rescoreModels);
         end
 
-        
+
         %% GUI construction
-        
+
 
         function buildGUI(obj)
             % ---- Figure --------------------------------------------------
@@ -377,14 +368,6 @@ classdef pnn_batch_gui < handle
             gMP.ColumnWidth   = {230, 90, 80, 70, 80, 70, 'fit', '1x'};
 
             % --- Row 1: per-page enable + add/remove ---
-            obj.hPerPageChk = uicheckbox(gMP, ...
-                'Text', 'Enable per-page processing (multi-page TIFFs)', ...
-                'Value', logical(obj.P.perPageEnable), 'Tag', 'perPageChk', ...
-                'Tooltip', ['When on, each page of a multi-page TIFF is processed separately using ' ...
-                            'the model mapped to that page below. Single-page files use page 1''s row.'], ...
-                'ValueChangedFcn', @obj.onPerPageChange);
-            obj.hPerPageChk.Layout.Row = 1; obj.hPerPageChk.Layout.Column = [1 2];
-
             obj.hAddPageBtn = uibutton(gMP, 'Text', 'Add page', ...
                 'Tooltip', 'Add a page-mapping row', ...
                 'ButtonPushedFcn', @obj.onAddPageRow);
@@ -401,37 +384,12 @@ classdef pnn_batch_gui < handle
             lbl.Layout.Row = 1; lbl.Layout.Column = [6 8];
 
             % --- Row 2: preprocessing controls ---
-            obj.hPreprocGlobalChk = uicheckbox(gMP, ...
-                'Text', 'Same preprocessing for all pages', ...
-                'Value', logical(obj.P.preprocGlobal), 'Tag', 'preprocGlobalChk', ...
-                'Tooltip', ['When on, the Bg radius / Resize fields here apply to every processed page ' ...
-                            'and the table''s Bg/Resize columns are ignored. When off, each page uses ' ...
-                            'its own Bg/Resize values from the table.'], ...
-                'ValueChangedFcn', @obj.onPreprocGlobalChange);
-            obj.hPreprocGlobalChk.Layout.Row = 2; obj.hPreprocGlobalChk.Layout.Column = [1 2];
-
-            lbl = uilabel(gMP, 'Text', 'Bg radius:', 'HorizontalAlignment', 'right');
-            lbl.Layout.Row = 2; lbl.Layout.Column = 3;
-            obj.hGlobalBgEdit = uieditfield(gMP, 'text', ...
-                'Value', obj.P.globalBgRadius, 'Tag', 'globalBgEdit', ...
-                'Tooltip', 'Morphological background-subtraction radius (disk, pixels). 0 = off (imtophat).', ...
-                'ValueChangedFcn', @obj.onGlobalBgChange);
-            obj.hGlobalBgEdit.Layout.Row = 2; obj.hGlobalBgEdit.Layout.Column = 4;
-
-            lbl = uilabel(gMP, 'Text', 'Resize x:', 'HorizontalAlignment', 'right');
-            lbl.Layout.Row = 2; lbl.Layout.Column = 5;
-            obj.hGlobalResizeEdit = uieditfield(gMP, 'text', ...
-                'Value', obj.P.globalResize, 'Tag', 'globalResizeEdit', ...
-                'Tooltip', 'Resize factor applied before detection. 1 = off. e.g. 0.5 halves each dimension.', ...
-                'ValueChangedFcn', @obj.onGlobalResizeChange);
-            obj.hGlobalResizeEdit.Layout.Row = 2; obj.hGlobalResizeEdit.Layout.Column = 6;
-
             obj.hDisplayPreprocChk = uicheckbox(gMP, ...
                 'Text', 'Show preprocessed image in results (default: raw page)', ...
                 'Value', logical(obj.P.displayPreproc), 'Tag', 'displayPreprocChk', ...
                 'Tooltip', ['When on, the result figure/PNG show the preprocessed image the model saw ' ...
-                            '(background-subtracted / resized). When off, the raw page is shown with ' ...
-                            'detections mapped onto it.'], ...
+                '(background-subtracted / resized). When off, the raw page is shown with ' ...
+                'detections mapped onto it.'], ...
                 'ValueChangedFcn', @obj.onDisplayPreprocChange);
             obj.hDisplayPreprocChk.Layout.Row = 2; obj.hDisplayPreprocChk.Layout.Column = [7 8];
 
@@ -442,10 +400,10 @@ classdef pnn_batch_gui < handle
 
             obj.hPageTable = uitable(gMP, ...
                 'Data',          tableData, ...
-                'ColumnName',    {'Page', 'Detection Model', 'Rescore Model', 'Bg radius', 'Resize x'}, ...
-                'ColumnFormat',  {'numeric', detChoices, rescoreChoices, 'numeric', 'numeric'}, ...
-                'ColumnEditable', [true true true true true], ...
-                'ColumnWidth',   {50, 220, 200, 80, 70}, ...
+                'ColumnName',    {'Page','Suffix', 'Detection Model', 'Rescore Model', 'Bg radius', 'Resize x'}, ...
+                'ColumnFormat',  {'numeric', 'char', detChoices, rescoreChoices, 'numeric', 'numeric'}, ...
+                'ColumnEditable', [true true true true true true], ...
+                'ColumnWidth',   {50, 70, 220, 300, 80, 70}, ...
                 'RowName',       {}, ...
                 'Tag',           'pageTable', ...
                 'CellEditCallback',      @obj.onPageTableEdit, ...
@@ -508,7 +466,7 @@ classdef pnn_batch_gui < handle
                 'Position', [140 2 110 22]);
 
             lbl = uilabel(gPred, ...
-                'Text', 'Output per file:  <image_stem>[_page<k>]_localizations.csv  placed in the image''s own subdirectory', ...
+                'Text', 'Output per file:  <image_stem>[_page<k>]_locs.csv  placed in the image''s own subdirectory', ...
                 'HorizontalAlignment', 'left', 'FontColor', [0.45 0.45 0.45], 'FontSize', 11);
             lbl.Layout.Row = 3; lbl.Layout.Column = [1 8];
 
@@ -559,7 +517,7 @@ classdef pnn_batch_gui < handle
             obj.hSavePng = uicheckbox(gDisp, ...
                 'Text', 'Save annotated PNG alongside each result CSV', ...
                 'Value', logical(obj.P.savePng), 'Tag', 'savePng', ...
-                'Tooltip', 'Exports  <stem>_localizations.png  in the image subdirectory', ...
+                'Tooltip', 'Exports  <stem>_locs.png  in the image subdirectory', ...
                 'ValueChangedFcn', @obj.onSavePngChange);
             obj.hSavePng.Layout.Row = 2; obj.hSavePng.Layout.Column = [1 8];
 
@@ -592,14 +550,11 @@ classdef pnn_batch_gui < handle
             obj.hProgressLabel = uilabel(gRun, 'Text', 'Ready.', ...
                 'HorizontalAlignment', 'left', 'FontSize', 12);
             obj.hProgressLabel.Layout.Row = 1; obj.hProgressLabel.Layout.Column = 3;
-
-            % Apply initial enable states for the multi-page / preprocessing controls.
-            obj.updatePreprocEnableStates();
         end
 
-        
+
         %% File search
-        
+
 
         function doSearch(obj)
             rootDir  = strtrim(obj.hDirEdit.Value);
@@ -647,9 +602,9 @@ classdef pnn_batch_gui < handle
             obj.hFileCountLabel.FontColor = pnn_batch_gui.ternary(n > 0, [0.1 0.45 0.1], [0.6 0.4 0]);
         end
 
-        
+
         %% Callbacks: directory & search
-        
+
 
         function onClose(obj, src, ~)
             obj.cleanup();
@@ -687,9 +642,9 @@ classdef pnn_batch_gui < handle
             obj.doSearch();
         end
 
-        
+
         %% Callbacks: Python environment
-        
+
 
         function onPyEdit(obj, src, ~)
             obj.P.pythonExe = src.Value;
@@ -729,12 +684,12 @@ classdef pnn_batch_gui < handle
         end
 
         function envStatus = onTestEnv(obj, ~, ~)
-        % Run a quick synchronous check that Python + required modules are importable.
+            % Run a quick synchronous check that Python + required modules are importable.
             pyExe    = strtrim(obj.hPyEdit.Value);
             condaExe = strtrim(obj.hCondaExeEdit.Value);
             condaEnv = strtrim(obj.hCondaEdit.Value);
 
-            
+
             obj.hProgressLabel.Text = 'Checking Python environment ...';
             drawnow;
             fprintf('[CHECK] Verifying Python environment ...\n');
@@ -762,32 +717,32 @@ classdef pnn_batch_gui < handle
                 obj.hProgressLabel.Text = sprintf('Environment test FAILED (exit %d) — see Command Window', envStatus);
             end
 
-            
-            if envStatus ~= 0 || isempty(strfind(envOut, 'OK'))
+
+            if envStatus ~= 0 || ~contains(envOut, 'OK')
                 % Build a helpful diagnostic message
                 if isempty(condaEnv)
                     hint = sprintf( ...
                         ['Python executable "%s" cannot import hydra or torch.\n\n' ...
-                         'Fix options:\n' ...
-                         '  1. Enter your conda environment name in the\n' ...
-                         '     "Conda env name" field (e.g.  countpnn)\n' ...
-                         '     and leave Python executable as  python\n\n' ...
-                         '  2. Set Python executable to the full path of\n' ...
-                         '     your conda env''s python.exe, e.g.:\n' ...
-                         '     C:\\...\\conda\\envs\\countpnn\\python.exe\n\n' ...
-                         'Use the "Test env" button to verify your settings.\n\n' ...
-                         'Error output:\n%s'], pyExe, envOut);
+                        'Fix options:\n' ...
+                        '  1. Enter your conda environment name in the\n' ...
+                        '     "Conda env name" field (e.g.  countpnn)\n' ...
+                        '     and leave Python executable as  python\n\n' ...
+                        '  2. Set Python executable to the full path of\n' ...
+                        '     your conda env''s python.exe, e.g.:\n' ...
+                        '     C:\\...\\conda\\envs\\countpnn\\python.exe\n\n' ...
+                        'Use the "Test env" button to verify your settings.\n\n' ...
+                        'Error output:\n%s'], pyExe, envOut);
                 else
                     hint = sprintf( ...
                         ['conda env "%s" cannot import hydra or torch.\n\n' ...
-                         'Check that:\n' ...
-                         '  - The environment name is spelled correctly\n' ...
-                         '  - The conda executable path is correct\n' ...
-                         '  - The environment has the repo dependencies:\n' ...
-                         '      conda activate %s\n' ...
-                         '      pip install -r requirements.txt\n\n' ...
-                         'Use the "Test env" button to verify your settings.\n\n' ...
-                         'Error output:\n%s'], condaEnv, condaEnv, envOut);
+                        'Check that:\n' ...
+                        '  - The environment name is spelled correctly\n' ...
+                        '  - The conda executable path is correct\n' ...
+                        '  - The environment has the repo dependencies:\n' ...
+                        '      conda activate %s\n' ...
+                        '      pip install -r requirements.txt\n\n' ...
+                        'Use the "Test env" button to verify your settings.\n\n' ...
+                        'Error output:\n%s'], condaEnv, condaEnv, envOut);
                 end
                 obj.hProgressLabel.Text = 'Environment check failed — see error dialog.';
                 errordlg(hint, 'Python Environment Error');
@@ -795,9 +750,9 @@ classdef pnn_batch_gui < handle
             end
         end
 
-        
+
         %% Callbacks: model selection
-        
+
 
         function onDetModelChange(obj, src, ~)
             obj.P.detModelIdx = find(strcmp(src.Items, src.Value), 1);
@@ -823,14 +778,13 @@ classdef pnn_batch_gui < handle
 
         function onPerPageChange(obj, src, ~)
             obj.P.perPageEnable = src.Value;
-            obj.updatePreprocEnableStates();
             obj.savePrefs();
         end
 
         function onAddPageRow(obj, ~, ~)
             data = obj.hPageTable.Data;
             detChoices     = pnn_batch_gui.detChoiceList(obj.detModels, obj.SKIP_LABEL);
-            rescoreChoices = [{obj.NONE_LABEL}, obj.rescoreModels];
+
             % New row defaults: next page index, first available detection model.
             if isempty(data)
                 nextPage = 1;
@@ -839,7 +793,7 @@ classdef pnn_batch_gui < handle
                 nextPage = max(pages) + 1;
             end
             defDet = detChoices{min(2, numel(detChoices))};   % first real model if any, else (skip)
-            newRow = {nextPage, defDet, obj.NONE_LABEL, 0, 1};
+            newRow = {nextPage, sprintf('page%d',nextPage), defDet, obj.NONE_LABEL, 0, 1};
             obj.hPageTable.Data = [data; newRow];
             obj.P.pageMapData   = obj.hPageTable.Data;
             obj.savePrefs();
@@ -871,11 +825,6 @@ classdef pnn_batch_gui < handle
             end
         end
 
-        function onPreprocGlobalChange(obj, src, ~)
-            obj.P.preprocGlobal = src.Value;
-            obj.updatePreprocEnableStates();
-            obj.savePrefs();
-        end
 
         function onGlobalBgChange(obj, src, ~)
             obj.P.globalBgRadius = src.Value;
@@ -892,35 +841,10 @@ classdef pnn_batch_gui < handle
             obj.savePrefs();
         end
 
-        function updatePreprocEnableStates(obj)
-        % Reflect the per-page / global toggles in control enable states.
-            perPage = obj.hPerPageChk.Value;
-            global_ = obj.hPreprocGlobalChk.Value;
-
-            % Page table + add/remove only matter in per-page mode.
-            obj.hPageTable.Enable  = pnn_batch_gui.ternary(perPage, 'on', 'off');
-            obj.hAddPageBtn.Enable = perPage;
-            obj.hDelPageBtn.Enable = perPage;
-
-            % The "global preprocessing" toggle only applies in per-page mode;
-            % in single-page mode global preprocessing is the only option.
-            obj.hPreprocGlobalChk.Enable = perPage;
-
-            % Global Bg/Resize fields are used whenever global preprocessing
-            % applies: in single-page mode (always) or per-page + global toggle.
-            useGlobalFields = ~perPage || global_;
-            obj.hGlobalBgEdit.Enable     = useGlobalFields;
-            obj.hGlobalResizeEdit.Enable = useGlobalFields;
-
-            % Per-page Bg/Resize table columns are editable only in per-page
-            % mode with per-page (non-global) preprocessing.
-            perPagePre = perPage && ~global_;
-            obj.hPageTable.ColumnEditable = [true true true perPagePre perPagePre];
-        end
 
 
         %% Callbacks: predict.py options
-        
+
 
         function onDeviceEdit(obj, src, ~)
             obj.P.device = src.Value;
@@ -944,9 +868,9 @@ classdef pnn_batch_gui < handle
             obj.savePrefs();
         end
 
-        
+
         %% Callbacks: display & export options
-        
+
 
         function onColormapChange(obj, src, ~)
             obj.P.colormapIdx = find(strcmp(src.Items, src.Value), 1);
@@ -973,9 +897,9 @@ classdef pnn_batch_gui < handle
             obj.savePrefs();
         end
 
-        
+
         %% Start / Stop
-        
+
 
         function onStart(obj, ~, ~)
             pyExe    = strtrim(obj.hPyEdit.Value);
@@ -1008,8 +932,8 @@ classdef pnn_batch_gui < handle
             if isempty(selVals) || numel(selVals) == numel(allFiles)
                 queue = allFiles;
             else
-                selIdx = find(ismember(obj.hFileList.Items, selVals));
-                queue  = allFiles(selIdx);
+                selInd = ismember(obj.hFileList.Items, selVals);
+                queue  = allFiles(selInd);
             end
 
             % --- Expand the selected files into a queue of per-page jobs ---
@@ -1020,13 +944,6 @@ classdef pnn_batch_gui < handle
                 obj.setUIEnable(true);
                 obj.hStartBtn.Enable = true;
                 obj.hStopBtn.Enable  = false;
-                if obj.hPerPageChk.Value
-                    errordlg(['No pages to process. In per-page mode, assign a detection model ' ...
-                        '(not "(skip)") to at least one page in the mapping table, and make sure ' ...
-                        'the selected files have those pages.'], 'Nothing to do');
-                else
-                    errordlg('No pages to process.', 'Nothing to do');
-                end
                 obj.hProgressLabel.Text = 'Ready.';
                 return;
             end
@@ -1034,7 +951,7 @@ classdef pnn_batch_gui < handle
             % Scratch directory for preprocessed page images.
             obj.tmpDir = fullfile(tempdir, 'pnn_batch_gui');
             if ~isfolder(obj.tmpDir)
-                try, mkdir(obj.tmpDir); catch, end
+                try mkdir(obj.tmpDir); catch, end
             end
 
             obj.jobQueue      = jobs;
@@ -1075,16 +992,10 @@ classdef pnn_batch_gui < handle
 
 
         function jobs = buildJobs(obj, files)
-        % Expand a list of image files into a list of per-page jobs based on
-        % the current per-page / preprocessing settings. Each job is one
-        % (file, page) unit run through predict.py independently.
+            % Expand a list of image files into a list of per-page jobs based on
+            % the current per-page / preprocessing settings. Each job is one
+            % (file, page) unit run through predict.py independently.
             jobs = {};
-
-            perPage      = obj.hPerPageChk.Value;
-            useGlobalPre = obj.hPreprocGlobalChk.Value;
-            gBg          = pnn_batch_gui.parseNum(obj.hGlobalBgEdit.Value, 0);
-            gRz          = pnn_batch_gui.parseNum(obj.hGlobalResizeEdit.Value, 1);
-            if gRz <= 0, gRz = 1; end
 
             mapData = obj.hPageTable.Data;   % only used in per-page mode
 
@@ -1094,51 +1005,34 @@ classdef pnn_batch_gui < handle
                 if isempty(fdir), fdir = pwd; end
                 nPages = pnn_batch_gui.countPages(f);
 
-                if perPage
-                    for r = 1:size(mapData, 1)
-                        pg   = pnn_batch_gui.parseNum(mapData{r,1}, 0);
-                        detM = mapData{r,2};
-                        if pg < 1, continue; end
-                        if ~ischar(detM) || strcmp(detM, obj.SKIP_LABEL) || isempty(detM)
-                            continue;   % page not assigned a detection model
-                        end
-                        if pg > nPages
-                            % Single-page files therefore only ever match page 1.
-                            fprintf('[SKIP] %s has %d page(s); skipping mapped page %d\n', ...
-                                stem, nPages, pg);
-                            continue;
-                        end
-                        rescM = mapData{r,3};
-                        if ~ischar(rescM) || strcmp(rescM, obj.NONE_LABEL), rescM = ''; end
-                        if useGlobalPre
-                            bg = gBg; rz = gRz;
-                        else
-                            bg = pnn_batch_gui.parseNum(mapData{r,4}, 0);
-                            rz = pnn_batch_gui.parseNum(mapData{r,5}, 1);
-                            if rz <= 0, rz = 1; end
-                        end
-                        jobs{end+1} = pnn_batch_gui.makeJob( ...
-                            f, fdir, stem, ext, pg, nPages, true, detM, rescM, bg, rz); %#ok<AGROW>
+                for r = 1:size(mapData, 1)
+                    pg   = pnn_batch_gui.parseNum(mapData{r,1}, 0);
+                    detM = mapData{r,3};
+                    if pg < 1, continue; end
+                    if ~ischar(detM) || strcmp(detM, obj.SKIP_LABEL) || isempty(detM)
+                        continue;   % page not assigned a detection model
                     end
-                else
-                    % Single job: page 1, top detection model + optional rescore.
-                    if isempty(obj.detModels), continue; end
-                    detIdx = find(strcmp(obj.hDetList.Items, obj.hDetList.Value), 1);
-                    detM   = obj.detModels{min(detIdx, numel(obj.detModels))};
-                    rescM  = '';
-                    if obj.hUseRescore.Value && ~isempty(obj.rescoreModels)
-                        rsIdx = find(strcmp(obj.hRescoreList.Items, obj.hRescoreList.Value), 1);
-                        rescM = obj.rescoreModels{min(rsIdx, numel(obj.rescoreModels))};
+                    if pg > nPages
+                        % Single-page files therefore only ever match page 1.
+                        fprintf('[SKIP] %s has %d page(s); skipping mapped page %d\n', ...
+                            stem, nPages, pg);
+                        continue;
                     end
+                    rescM = mapData{r,4};
+                    if ~ischar(rescM) || strcmp(rescM, obj.NONE_LABEL), rescM = ''; end
+
+                    bg = pnn_batch_gui.parseNum(mapData{r,5}, 0);
+                    rz = pnn_batch_gui.parseNum(mapData{r,6}, 1);
+                    if rz <= 0, rz = 1; end
                     jobs{end+1} = pnn_batch_gui.makeJob( ...
-                        f, fdir, stem, ext, 1, nPages, false, detM, rescM, gBg, gRz); %#ok<AGROW>
+                        f, fdir, stem, ext, mapData{r,2}, pg, nPages, true, detM, rescM, bg, rz); %#ok<AGROW>
                 end
             end
         end
 
-        
+
         %% Timer callback (main batch processing loop)
-        
+
 
         function timerCallback(obj)
             if isempty(obj.hFig) || ~isvalid(obj.hFig), return; end
@@ -1321,14 +1215,14 @@ classdef pnn_batch_gui < handle
             end
         end
 
-        
+
         %% Per-file post-processing: display + optional PNG export
-        
+
 
         function postProcess(obj, job)
-        % Read predict.py output (in preprocessed/resized coordinates),
-        % map detections back to original-image space, write the final
-        % CSV(s), and render/optionally export the result figure.
+            % Read predict.py output (in preprocessed/resized coordinates),
+            % map detections back to original-image space, write the final
+            % CSV(s), and render/optionally export the result figure.
             imgDir = job.imgDir;
 
             if ~exist(job.tmpCsv, 'file')
@@ -1484,7 +1378,7 @@ classdef pnn_batch_gui < handle
             drawnow;
 
             if savePng
-                pngFile = fullfile(imgDir, [job.base '_localizations.png']);
+                pngFile = fullfile(imgDir, [job.base '_locs.png']);
                 saved   = false;
                 if exist('exportgraphics', 'file')
                     try
@@ -1508,9 +1402,9 @@ classdef pnn_batch_gui < handle
             end
         end
 
-        
+
         %% Batch cleanup: stop timer, kill process, re-enable UI
-        
+
 
         function batchCleanup(obj)
             if isempty(obj.hFig) || ~isvalid(obj.hFig), return; end
@@ -1549,14 +1443,11 @@ classdef pnn_batch_gui < handle
             obj.hStopBtn.Enable  = false;
             obj.hStartBtn.Enable = true;
 
-            % Re-apply per-page / preprocessing enable states (setUIEnable
-            % turned everything back on; some controls are mode-dependent).
-            obj.updatePreprocEnableStates();
         end
 
-        
+
         %% Enable / disable all interactive controls
-        
+
 
         function setUIEnable(obj, state)
             ctrls = { ...
@@ -1572,13 +1463,13 @@ classdef pnn_batch_gui < handle
                 obj.hDisplayPreprocChk, obj.hPageTable, ...
                 obj.hFileList,    obj.hStartBtn};
             for k = 1:numel(ctrls)
-                try, ctrls{k}.Enable = state; catch, end
+                try ctrls{k}.Enable = state; catch, end
             end
         end
 
-        
+
         %% Internal cleanup (timer + process only; no figure delete)
-        
+
 
         function cleanup(obj)
             if ~isempty(obj.timerObj) && isvalid(obj.timerObj)
@@ -1587,7 +1478,7 @@ classdef pnn_batch_gui < handle
                 obj.timerObj = [];
             end
             if ~isempty(obj.jProcess)
-                try, obj.jProcess.destroyForcibly(); catch, end
+                try obj.jProcess.destroyForcibly(); catch, end
                 obj.jProcess = [];
                 obj.jReader  = [];
             end
@@ -1599,9 +1490,9 @@ classdef pnn_batch_gui < handle
     methods (Static, Access = private)
 
         function condaExe = detectConda()
-        % Auto-detect the conda executable on Windows from common install
-        % locations. Returns 'conda' (bare name) if nothing is found, which
-        % works when the user has conda on their PATH.
+            % Auto-detect the conda executable on Windows from common install
+            % locations. Returns 'conda' (bare name) if nothing is found, which
+            % works when the user has conda on their PATH.
             candidates = { ...
                 fullfile(getenv('USERPROFILE'), 'miniconda3',  'Scripts', 'conda.exe'), ...
                 fullfile(getenv('USERPROFILE'), 'miniconda3',  'condabin', 'conda.bat'), ...
@@ -1615,7 +1506,7 @@ classdef pnn_batch_gui < handle
                 'C:\ProgramData\miniconda3\condabin\conda.bat', ...
                 'C:\ProgramData\anaconda3\Scripts\conda.exe', ...
                 'C:\ProgramData\anaconda3\condabin\conda.bat' ...
-            };
+                };
             for k = 1:numel(candidates)
                 if exist(candidates{k}, 'file')
                     condaExe = candidates{k};
@@ -1625,11 +1516,11 @@ classdef pnn_batch_gui < handle
             condaExe = '';   % not found; leave blank so user browses
         end
 
-        function job = makeJob(f, fdir, stem, ext, pg, nPages, multiPage, detM, rescM, bg, rz)
-        % Assemble a single processing-job struct. Output filenames use a
-        % per-page suffix only for genuine multi-page jobs.
+        function job = makeJob(f, fdir, stem, ext, suffix, pg, nPages, multiPage, detM, rescM, bg, rz)
+            % Assemble a single processing-job struct. Output filenames use a
+            % per-page suffix only for genuine multi-page jobs.
             if multiPage
-                base    = sprintf('%s_page%d', stem, pg);
+                base    = sprintf('%s_%s%d', stem, suffix, pg);
                 imgName = base;                              % identity in CSV
                 label   = sprintf('%s  (page %d/%d)', stem, pg, nPages);
             else
@@ -1651,9 +1542,9 @@ classdef pnn_batch_gui < handle
             job.rescoreModel = rescM;     % '' = no rescoring
             job.bgRadius     = bg;        % 0 = no background subtraction
             job.resize       = rz;        % 1 = no resizing
-            job.outCsvOrig   = fullfile(fdir, [base '_localizations.csv']);
+            job.outCsvOrig   = fullfile(fdir, [base '_locs.csv']);
             if rz ~= 1
-                job.outCsvResized = fullfile(fdir, [base '_localizations_resized.csv']);
+                job.outCsvResized = fullfile(fdir, [base '_locs_resized.csv']);
             else
                 job.outCsvResized = '';
             end
@@ -1663,7 +1554,7 @@ classdef pnn_batch_gui < handle
         end
 
         function v = parseNum(x, dflt)
-        % Robustly coerce a table cell / edit-field value to a scalar double.
+            % Robustly coerce a table cell / edit-field value to a scalar double.
             if isnumeric(x)
                 if isempty(x) || ~isscalar(x) || isnan(x), v = dflt; else, v = double(x); end
                 return;
@@ -1673,7 +1564,7 @@ classdef pnn_batch_gui < handle
         end
 
         function n = countPages(f)
-        % Number of pages/frames in an image file (1 for non-multi-image formats).
+            % Number of pages/frames in an image file (1 for non-multi-image formats).
             try
                 n = numel(imfinfo(f));
             catch
@@ -1682,8 +1573,8 @@ classdef pnn_batch_gui < handle
         end
 
         function img = readPage(f, page, nPages)
-        % Read a specific page. For single-image formats, omit the index
-        % (some formats reject a frame index argument).
+            % Read a specific page. For single-image formats, omit the index
+            % (some formats reject a frame index argument).
             if nPages <= 1
                 img = imread(f);
             else
@@ -1692,10 +1583,10 @@ classdef pnn_batch_gui < handle
         end
 
         function img = applyPreprocess(img, bgRadius, resizeFactor)
-        % Optional preprocessing applied before detection:
-        %   - morphological background subtraction (imtophat, disk strel)
-        %   - resize by a scalar factor
-        % Background subtraction runs at full resolution, then resizing.
+            % Optional preprocessing applied before detection:
+            %   - morphological background subtraction (imtophat, disk strel)
+            %   - resize by a scalar factor
+            % Background subtraction runs at full resolution, then resizing.
             if bgRadius > 0
                 se = strel('disk', round(bgRadius));
                 if size(img, 3) == 1
@@ -1712,14 +1603,14 @@ classdef pnn_batch_gui < handle
         end
 
         function deleteFileQuiet(p)
-        % Delete a file if it exists, ignoring any error.
+            % Delete a file if it exists, ignoring any error.
             if ~isempty(p) && exist(p, 'file')
-                try, delete(p); catch, end
+                try delete(p); catch, end
             end
         end
 
         function lst = detChoiceList(detModels, skipLabel)
-        % Dropdown choices for the page-map detection-model column.
+            % Dropdown choices for the page-map detection-model column.
             if isempty(detModels)
                 lst = {skipLabel};
             else
@@ -1728,16 +1619,16 @@ classdef pnn_batch_gui < handle
         end
 
         function data = defaultPageMap()
-        % One default page-map row. The empty detection-model cell is coerced
-        % to the first real model by sanitizePageMap once models are known.
-            data = {1, '', '(none)', 0, 1};
+            % One default page-map row. The empty detection-model cell is coerced
+            % to the first real model by sanitizePageMap once models are known.
+            data = {1, '', '(none)', 0, 1, 1};
         end
 
         function data = sanitizePageMap(data, detChoices, rescoreChoices)
-        % Validate/repair saved page-map table data against the currently
-        % available model lists, so a stale or malformed pref never breaks
-        % the uitable (whose dropdown columns require valid members).
-            if isempty(data) || ~iscell(data) || size(data, 2) ~= 5
+            % Validate/repair saved page-map table data against the currently
+            % available model lists, so a stale or malformed pref never breaks
+            % the uitable (whose dropdown columns require valid members).
+            if isempty(data) || ~iscell(data) || size(data, 2) ~= 6
                 data = pnn_batch_gui.defaultPageMap();
             end
             detFallback = detChoices{min(2, numel(detChoices))};   % first real model if any
@@ -1747,27 +1638,32 @@ classdef pnn_batch_gui < handle
                 if p < 1, p = 1; end
                 data{r,1} = round(p);
                 % Detection model (must be a valid dropdown member)
-                v = data{r,2};
-                if ~ischar(v) || ~ismember(v, detChoices), data{r,2} = detFallback; end
-                % Rescore model
+                % Suffix
+                s = data{r,2};
+                if ~ischar(s), s = sprintf('page%d',r); end
+                data{r,2} = s;
+                % Detection model (must be a valid dropdown member)
                 v = data{r,3};
-                if ~ischar(v) || ~ismember(v, rescoreChoices), data{r,3} = rescoreChoices{1}; end
+                if ~ischar(v) || ~ismember(v, detChoices), data{r,3} = detFallback; end
+                % Rescore model
+                v = data{r,4};
+                if ~ischar(v) || ~ismember(v, rescoreChoices), data{r,4} = rescoreChoices{1}; end
                 % Background radius (>= 0)
-                b = pnn_batch_gui.parseNum(data{r,4}, 0);
+                b = pnn_batch_gui.parseNum(data{r,5}, 0);
                 if b < 0, b = 0; end
-                data{r,4} = b;
+                data{r,5} = b;
                 % Resize factor (> 0)
-                z = pnn_batch_gui.parseNum(data{r,5}, 1);
+                z = pnn_batch_gui.parseNum(data{r,6}, 1);
                 if z <= 0, z = 1; end
-                data{r,5} = z;
+                data{r,6} = z;
             end
         end
 
         function root = detectRepoRoot()
-        % Locate the repo root (the directory containing predict.py).
-        % Searches the class file's own directory, then one level up,
-        % so the class works whether it lives at the repo root or in a
-        % subdirectory such as customizations/.
+            % Locate the repo root (the directory containing predict.py).
+            % Searches the class file's own directory, then one level up,
+            % so the class works whether it lives at the repo root or in a
+            % subdirectory such as customizations/.
             classFile = which('pnn_batch_gui');
             if isempty(classFile)
                 root = pwd;
@@ -1787,8 +1683,8 @@ classdef pnn_batch_gui < handle
         end
 
         function files = recDir(rootDir)
-        % Recursively list all files under rootDir.
-        % Returns an Nx1 cell array of absolute paths.
+            % Recursively list all files under rootDir.
+            % Returns an Nx1 cell array of absolute paths.
             files = {};
             d = dir(rootDir);
             for k = 1:numel(d)
@@ -1812,10 +1708,10 @@ classdef pnn_batch_gui < handle
         end
 
         function writeScratchTiff(img, path)
-        % Write a scratch TIFF that accepts any numeric pixel class.
-        % imwrite() rejects single-precision (float32) data for TIFF — the
-        % Tiff low-level class is used instead so float32, uint8, uint16,
-        % int16, and uint32 source images are all handled correctly.
+            % Write a scratch TIFF that accepts any numeric pixel class.
+            % imwrite() rejects single-precision (float32) data for TIFF — the
+            % Tiff low-level class is used instead so float32, uint8, uint16,
+            % int16, and uint32 source images are all handled correctly.
             if isa(img, 'double')
                 img = single(img);   % Tiff supports float32; float64 is exotic
             end
@@ -1852,9 +1748,9 @@ classdef pnn_batch_gui < handle
         end
 
         function parts = quotedArgs(cmdParts)
-        % Return cmdParts with any element containing a space wrapped in
-        % double-quotes. Used only for the CMD: log line — ProcessBuilder
-        % does NOT need quoting (each element is a separate argument).
+            % Return cmdParts with any element containing a space wrapped in
+            % double-quotes. Used only for the CMD: log line — ProcessBuilder
+            % does NOT need quoting (each element is a separate argument).
             parts = cellfun(@(x) pnn_batch_gui.quoteIfSpaced(x), ...
                 cmdParts, 'UniformOutput', false);
         end
@@ -1866,8 +1762,8 @@ classdef pnn_batch_gui < handle
         end
 
         function rel = makeRelPath(absPath, rootDir)
-        % Return absPath relative to rootDir (case-insensitive on Windows).
-        % Falls back to absPath if absPath does not start with rootDir.
+            % Return absPath relative to rootDir (case-insensitive on Windows).
+            % Falls back to absPath if absPath does not start with rootDir.
             if isempty(rootDir)
                 rel = absPath;
                 return;
