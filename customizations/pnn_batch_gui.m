@@ -979,8 +979,6 @@ classdef pnn_batch_gui < handle
 
         function onStart(obj, ~, ~)
             pyExe    = strtrim(obj.hPyEdit.Value);
-            condaExe = strtrim(obj.hCondaExeEdit.Value);
-            condaEnv = strtrim(obj.hCondaEdit.Value);
 
             if isempty(pyExe)
                 errordlg('Please specify a Python executable.', 'Missing Input');
