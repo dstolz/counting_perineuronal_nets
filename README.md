@@ -1,4 +1,4 @@
-# Counting Perineuronal Nets
+# Counting Perineuronal Nets -- ADAPTED FROM THE ORIGINAL REPOSITORY FOR THE CARAS LAB
 
 <img src="pnn-banner.gif" width="100%">
 
