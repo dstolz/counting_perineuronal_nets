@@ -76,10 +76,7 @@ classdef CellLocalizationQCApp < handle
         MontageImage
         MontageVisibleRows double = []
         MontageTileBounds double = zeros(0, 4)
-        MontageTileRows double = 0
-        MontageTileColumns double = 0
         MontageMarkerPositions cell = {}
-        MontageTileMessages string = strings(0, 1)
         HeldClassIndex double = NaN
         HeldClassKey string = ""
         HeldClassUsedForClick logical = false
@@ -2316,10 +2313,7 @@ classdef CellLocalizationQCApp < handle
 
             app.MontageVisibleRows = [];
             app.MontageTileBounds = zeros(0, 4);
-            app.MontageTileRows = 0;
-            app.MontageTileColumns = 0;
             app.MontageMarkerPositions = {};
-            app.MontageTileMessages = strings(0, 1);
             app.MontageImage = [];
 
             if ~isempty(app.MontageAxes) && isvalid(app.MontageAxes)
@@ -2348,11 +2342,8 @@ classdef CellLocalizationQCApp < handle
 
             nVisible = numel(visibleRows);
             app.MontageVisibleRows = visibleRows(:);
-            app.MontageTileRows = nRows;
-            app.MontageTileColumns = nCols;
             app.MontageTileBounds = zeros(nVisible, 4);
             app.MontageMarkerPositions = cell(nVisible, 1);
-            app.MontageTileMessages = strings(nVisible, 1);
 
             if nVisible == 0
                 app.clearTiles("No detections match the current source/filter.");
@@ -2374,10 +2365,8 @@ classdef CellLocalizationQCApp < handle
                     cropMarkers{k} = crop.Markers;
                     tileCropHeight = max(tileCropHeight, size(imageForTile, 1));
                     tileCropWidth = max(tileCropWidth, size(imageForTile, 2));
-                    app.MontageTileMessages(k) = "";
                 else
                     cropImages{k} = [];
-                    app.MontageTileMessages(k) = crop.Message;
                 end
             end
 
@@ -2572,29 +2561,6 @@ classdef CellLocalizationQCApp < handle
             hold(app.MontageAxes, 'off')
         end
 
-        function textString = montageTileText(app, tileIndex, rowIdx, label)
-            arguments
-                app
-                tileIndex (1,1) double {mustBeInteger, mustBePositive}
-                rowIdx (1,1) double {mustBeInteger, mustBePositive}
-                label (1,1) string
-            end
-
-            prefix = string(tileIndex) + ": row " + string(app.ActiveReviewTable.QCSourceRow(rowIdx));
-            parts = [prefix, label];
-            names = string(app.ActiveReviewTable.Properties.VariableNames);
-            if ismember("score", names)
-                parts(end + 1) = "score " + app.scalarToString(app.ActiveReviewTable.score(rowIdx)); %#ok<AGROW>
-            end
-            if ismember("rescore", names)
-                parts(end + 1) = "rescore " + app.scalarToString(app.ActiveReviewTable.rescore(rowIdx)); %#ok<AGROW>
-            end
-            if strlength(app.MontageTileMessages(tileIndex)) > 0
-                parts(end + 1) = app.MontageTileMessages(tileIndex); %#ok<AGROW>
-            end
-            textString = strjoin(parts, " | ");
-        end
-
         function color = categoryEdgeColor(app, label)
             arguments
                 app
@@ -2751,63 +2717,6 @@ classdef CellLocalizationQCApp < handle
             categoryIndex = [];
             if ~isnan(app.HeldClassIndex) && app.HeldClassIndex >= 1 && app.HeldClassIndex <= numel(app.Categories)
                 categoryIndex = app.HeldClassIndex;
-            end
-        end
-
-        function renderTile(app, tileIndex, rowIdx, nRows, nCols)
-            arguments
-                app
-                tileIndex (1,1) double
-                rowIdx (1,1) double
-                nRows (1,1) double
-                nCols (1,1) double
-            end
-
-            panel = uipanel(app.TileGrid, "BorderType", "line", "ButtonDownFcn", @(src, event) app.selectVisibleTile(tileIndex));
-            panel.Layout.Row = ceil(tileIndex / nCols);
-            panel.Layout.Column = tileIndex - (panel.Layout.Row - 1) * nCols;
-            panel.BackgroundColor = app.tileBackgroundColor(tileIndex, rowIdx);
-
-            tileGrid = uigridlayout(panel, [3 1]);
-            tileGrid.RowHeight = {'1x', 18, 18};
-            tileGrid.ColumnWidth = {'1x'};
-            tileGrid.Padding = [2 2 2 2];
-            tileGrid.RowSpacing = 1;
-
-            ax = uiaxes(tileGrid);
-            ax.XTick = [];
-            ax.YTick = [];
-            ax.Toolbar.Visible = "off";
-            ax.ButtonDownFcn = @(src, event) app.selectVisibleTile(tileIndex);
-            disableDefaultInteractivity(ax);
-
-            crop = app.composeCropDisplay(rowIdx);
-            if crop.IsValid
-                if ndims(crop.Image) == 3
-                    hImage = imshow(crop.Image, 'Parent', ax);
-                elseif isempty(crop.Range)
-                    hImage = imshow(crop.Image, [], 'Parent', ax);
-                else
-                    hImage = imshow(crop.Image, crop.Range, 'Parent', ax);
-                end
-                hImage.ButtonDownFcn = @(src, event) app.selectVisibleTile(tileIndex);
-                hold(ax, 'on')
-                if app.Settings.MarkerVisible && ~isempty(crop.Markers)
-                    app.plotMarkers(ax, crop.Markers);
-                end
-                hold(ax, 'off')
-            else
-                cla(ax)
-                text(ax, 0.5, 0.5, crop.Message, 'Units', 'normalized', 'HorizontalAlignment', 'center');
-            end
-            axis(ax, 'image')
-            ax.XTick = [];
-            ax.YTick = [];
-
-            meta = uibutton(tileGrid, "push", "Text", app.tileMetadataText(rowIdx), "FontSize", 10, "ButtonPushedFcn", @(src, event) app.selectVisibleTile(tileIndex));
-            qc = uibutton(tileGrid, "push", "Text", app.tileQCText(rowIdx), "FontWeight", "bold", "FontSize", 10, "ButtonPushedFcn", @(src, event) app.selectVisibleTile(tileIndex));
-            if ismember(tileIndex, app.SelectedVisibleIndices)
-                qc.Text = ">> " + string(qc.Text);
             end
         end
 
@@ -3004,14 +2913,39 @@ classdef CellLocalizationQCApp < handle
             field = sprintf('p%d', pageIndex);
             if ~isfield(app.ActiveImagePages, field)
                 imagePath = app.DatasetList.ImagePath(app.ActiveDatasetIndex);
+                preprocessedPath = app.preprocessedPathForImage(imagePath);
+                if isfile(preprocessedPath)
+                    loadPath = preprocessedPath;
+                    loadPage = pageIndex;
+                    try
+                        prepInfo = imfinfo(char(preprocessedPath));
+                        if pageIndex > numel(prepInfo)
+                            loadPage = 1;
+                        end
+                    catch
+                    end
+                else
+                    loadPath = imagePath;
+                    loadPage = pageIndex;
+                end
                 try
-                    app.ActiveImagePages.(field) = imread(char(imagePath), pageIndex);
+                    app.ActiveImagePages.(field) = imread(char(loadPath), loadPage);
                 catch ME
                     app.updateStatus("imread failed: " + string(ME.message));
                     return
                 end
             end
             imagePage = app.ActiveImagePages.(field);
+        end
+
+        function preprocessedPath = preprocessedPathForImage(app, imagePath)
+            arguments
+                app
+                imagePath (1,1) string
+            end
+
+            [folder, stem, ~] = fileparts(char(imagePath));
+            preprocessedPath = string(fullfile(folder, [stem '_preprocessed.tif']));
         end
 
         function [cropImage, marker, isValid, message] = extractCropFromImage(app, imagePage, x, y, width, height)
@@ -4363,40 +4297,6 @@ classdef CellLocalizationQCApp < handle
         function saveIfDirtyForTransition(app)
             if app.Dirty && app.Settings.AutosaveEnabled
                 app.saveCurrentQC();
-            end
-        end
-
-        function pathOut = uniquePath(app, pathIn)
-            arguments
-                app
-                pathIn
-            end
-
-            pathOut = char(pathIn);
-            if ~isfile(pathOut)
-                return
-            end
-            [folder, baseName, ext] = fileparts(pathOut);
-            counter = 2;
-            while isfile(pathOut)
-                pathOut = fullfile(folder, sprintf('%s_%03d%s', baseName, counter, ext));
-                counter = counter + 1;
-            end
-        end
-
-        function values = safeStringColumn(app, values, nRows)
-            arguments
-                app
-                values
-                nRows (1,1) double
-            end
-
-            values = string(values);
-            values = values(:);
-            if numel(values) < nRows
-                values(end + 1:nRows, 1) = "";
-            elseif numel(values) > nRows
-                values = values(1:nRows);
             end
         end
 

@@ -37,9 +37,11 @@ linkaxes(ax)
 axis(a)
 
 %% Run Cell Discovery on Tifs
-clear CellDiscovery
 
 CellDiscovery;
+
+%% Fix neighbors
+CellNeighborResolverApp;
 
 
 %% Classify observations

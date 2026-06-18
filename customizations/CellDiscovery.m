@@ -88,6 +88,7 @@ classdef CellDiscovery < handle
         hGlobalResizeEdit       % global resize factor
         hDisplayPreprocChk      % show preprocessed image instead of raw page
         hLSMOptionsBtn          % edit advanced bidirectional LSM correction options
+        hSaveLsmTif             % save final preprocessed image as TIF alongside CSV
         pageTableSelRow = []    % last-selected page-table row (for Remove)
 
         % --- App state ---
@@ -167,6 +168,7 @@ classdef CellDiscovery < handle
                 'colormapIdx',     1, ...
                 'autoContrast',    true, ...
                 'savePng',         false, ...
+                'saveLsmTif',      false, ...
                 'dotColorIdx',     1, ...
                 'dotSize',         '5', ...
                 'displayPreproc',  false, ...
@@ -198,6 +200,7 @@ classdef CellDiscovery < handle
             obj.P.colormapIdx     = find(strcmp(obj.hColormapPop.Items, obj.hColormapPop.Value), 1);
             obj.P.autoContrast    = obj.hAutoContrast.Value;
             obj.P.savePng         = obj.hSavePng.Value;
+            obj.P.saveLsmTif      = obj.hSaveLsmTif.Value;
             obj.P.dotColorIdx     = find(strcmp(obj.hDotColorPop.Items, obj.hDotColorPop.Value), 1);
             obj.P.dotSize         = obj.hDotSizeEdit.Value;
             obj.P.displayPreproc  = obj.hDisplayPreprocChk.Value;
@@ -486,7 +489,7 @@ classdef CellDiscovery < handle
             %% ---- Row 5 — Display & Export ------------------------------
             pDisp = uipanel(rootGrid, 'Title', 'Display & Export Options');
             pDisp.Layout.Row = 5;
-            gDisp = uigridlayout(pDisp, [3 8]);
+            gDisp = uigridlayout(pDisp, [4 8]);
             gDisp.Padding       = [6 6 6 6];
             gDisp.RowSpacing    = 4;
             gDisp.ColumnSpacing = 4;
@@ -534,10 +537,19 @@ classdef CellDiscovery < handle
                 'ValueChangedFcn', @obj.onSavePngChange);
             obj.hSavePng.Layout.Row = 2; obj.hSavePng.Layout.Column = [1 8];
 
+            obj.hSaveLsmTif = uicheckbox(gDisp, ...
+                'Text', 'Save final preprocessed image as TIF alongside each result CSV', ...
+                'Value', logical(obj.P.saveLsmTif), 'Tag', 'saveLsmTif', ...
+                'Tooltip', ['Exports  <stem>_preprocessed.tif  in the image subdirectory. ' ...
+                'Saves the image after LSM correction, background subtraction, and resize — ' ...
+                'the exact image the detection model received.'], ...
+                'ValueChangedFcn', @obj.onSaveLsmTifChange);
+            obj.hSaveLsmTif.Layout.Row = 3; obj.hSaveLsmTif.Layout.Column = [1 8];
+
             lbl = uilabel(gDisp, ...
                 'Text', 'Display: raw page (or preprocessed image, see above) with detections overlaid; window is reused across pages', ...
                 'HorizontalAlignment', 'left', 'FontColor', [0.45 0.45 0.45], 'FontSize', 11);
-            lbl.Layout.Row = 3; lbl.Layout.Column = [1 8];
+            lbl.Layout.Row = 4; lbl.Layout.Column = [1 8];
 
             %% ---- Row 6 — Run Controls ----------------------------------
             pRun = uipanel(rootGrid, 'BorderType', 'line');
@@ -1005,6 +1017,11 @@ classdef CellDiscovery < handle
             obj.savePrefs();
         end
 
+        function onSaveLsmTifChange(obj, src, ~)
+            obj.P.saveLsmTif = src.Value;
+            obj.savePrefs();
+        end
+
         function onDotColorChange(obj, src, ~)
             obj.P.dotColorIdx = find(strcmp(src.Items, src.Value), 1);
             obj.savePrefs();
@@ -1388,6 +1405,18 @@ classdef CellDiscovery < handle
                 end
             end
 
+            % --- Optionally save the preprocessed image as TIF ---
+            if obj.hSaveLsmTif.Value
+                tifFile = fullfile(imgDir, [job.base '_preprocessed.tif']);
+                try
+                    preprocImg = imread(job.tmpImg);
+                    CellDiscovery.writeScratchTiff(preprocImg, tifFile);
+                    fprintf('[TIF ] Saved: %s\n', tifFile);
+                catch ME
+                    fprintf('[WARN] TIF save failed for %s: %s\n', job.label, ME.message);
+                end
+            end
+
             cmapName     = obj.hColormapPop.Value;
             autoContrast = obj.hAutoContrast.Value;
             savePng      = obj.hSavePng.Value;
@@ -1575,7 +1604,7 @@ classdef CellDiscovery < handle
                 obj.hDetList,     obj.hUseRescore,   obj.hRescoreList, ...
                 obj.hDeviceEdit,  obj.hBatchEdit,    obj.hThrEdit, ...
                 obj.hIgnoreRad,   obj.hOverwriteRad, ...
-                obj.hColormapPop, obj.hAutoContrast,  obj.hSavePng, ...
+                obj.hColormapPop, obj.hAutoContrast,  obj.hSavePng, obj.hSaveLsmTif, ...
                 obj.hDotColorPop, obj.hDotSizeEdit, ...
                 obj.hPerPageChk,  obj.hAddPageBtn,   obj.hDelPageBtn, ...
                 obj.hPreprocGlobalChk, obj.hGlobalBgEdit, obj.hGlobalResizeEdit, ...
