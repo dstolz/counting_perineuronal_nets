@@ -1,8 +1,8 @@
-classdef pnn_batch_gui < handle
-    % PNN_BATCH_GUI   Batch GUI for PNN/PV cell detection via predict.py.
+classdef CellDiscovery < handle
+    % CELLDISCOVERY   Batch GUI for PNN/PV cell detection via predict.py.
     %   Open the GUI:
-    %       pnn_batch_gui()          % open window (object managed internally)
-    %       app = pnn_batch_gui();   % optionally retain the object handle
+    %       CellDiscovery()          % open window (object managed internally)
+    %       app = CellDiscovery();   % optionally retain the object handle
     %
     %   Features:
     %     - Recursive directory search with regex file filter
@@ -12,7 +12,8 @@ classdef pnn_batch_gui < handle
     %       model). Single-page files use page 1's mapping row.
     %     - Optional image preprocessing applied before detection:
     %       morphological background subtraction (disk radius) and resize;
-    %       preprocessing may be set globally or per page.
+    %       optional bidirectional LSM artifact correction can also be run
+    %       before detection, configured per page.
     %     - Full predict.py argument exposure (device, batch-size, threshold)
     %     - Real-time stdout/stderr streaming to the MATLAB Command Window
     %     - Stop button that kills the active Python subprocess
@@ -86,6 +87,7 @@ classdef pnn_batch_gui < handle
         hGlobalBgEdit           % global background-subtraction radius
         hGlobalResizeEdit       % global resize factor
         hDisplayPreprocChk      % show preprocessed image instead of raw page
+        hLSMOptionsBtn          % edit advanced bidirectional LSM correction options
         pageTableSelRow = []    % last-selected page-table row (for Remove)
 
         % --- App state ---
@@ -108,16 +110,16 @@ classdef pnn_batch_gui < handle
     %% ---- Public interface ------------------------------------------------
     methods (Access = public)
 
-        function obj = pnn_batch_gui()
+        function obj = CellDiscovery()
             % Constructor — builds the GUI (or raises an existing window).
-            %   obj = pnn_batch_gui()
+            %   obj = CellDiscovery()
             %
             %   Call without capturing output — the GUI manages its own lifetime:
-            %       pnn_batch_gui()          % recommended
-            %       app = pnn_batch_gui();   % optional, for programmatic access
+            %       CellDiscovery()          % recommended
+            %       app = CellDiscovery();   % optional, for programmatic access
             %
             %   If callbacks stop working after editing this file, run:
-            %       clear classes; pnn_batch_gui()
+            %       clear classes; CellDiscovery()
 
             % Re-use existing window if already open
             hExist = findobj(0, 'Tag', 'PNNBatchGUIMain');
@@ -126,7 +128,7 @@ classdef pnn_batch_gui < handle
                 return;
             end
 
-            obj.repoRoot = pnn_batch_gui.detectRepoRoot();
+            obj.repoRoot = CellDiscovery.detectRepoRoot();
             obj.discoverModels();
             obj.loadPrefs();
             obj.buildGUI();  % stores obj in figure appdata — prevents GC
@@ -156,7 +158,7 @@ classdef pnn_batch_gui < handle
                 'parentDir',       obj.repoRoot, ...
                 'fileRegex',       '(?i)\.tif$', ...
                 'pythonExe',       'python', ...
-                'condaExe',        pnn_batch_gui.detectConda(), ...
+                'condaExe',        CellDiscovery.detectConda(), ...
                 'condaEnv',        '', ...
                 'device',          'cpu', ...
                 'batchSize',       '1', ...
@@ -168,7 +170,8 @@ classdef pnn_batch_gui < handle
                 'dotColorIdx',     1, ...
                 'dotSize',         '5', ...
                 'displayPreproc',  false, ...
-                'pageMapData',     {pnn_batch_gui.defaultPageMap()} ...
+                'lsmOptions',      CellDiscovery.defaultLSMOptions(), ...
+                'pageMapData',     {CellDiscovery.defaultPageMap()} ...
                 );
             obj.P = defaults;
             flds = fieldnames(defaults);
@@ -197,6 +200,8 @@ classdef pnn_batch_gui < handle
             obj.P.savePng         = obj.hSavePng.Value;
             obj.P.dotColorIdx     = find(strcmp(obj.hDotColorPop.Items, obj.hDotColorPop.Value), 1);
             obj.P.dotSize         = obj.hDotSizeEdit.Value;
+            obj.P.displayPreproc  = obj.hDisplayPreprocChk.Value;
+            obj.P.lsmOptions      = CellDiscovery.sanitizeLSMOptions(obj.P.lsmOptions);
             obj.P.pageMapData     = obj.hPageTable.Data;
 
             flds = fieldnames(obj.P);
@@ -378,6 +383,13 @@ classdef pnn_batch_gui < handle
                 'ButtonPushedFcn', @obj.onDelPageRow);
             obj.hDelPageBtn.Layout.Row = 1; obj.hDelPageBtn.Layout.Column = [4 5];
 
+            obj.hLSMOptionsBtn = uibutton(gMP, 'push', ...
+                'Text', 'LSM options...', ...
+                'Tooltip', ['Edit advanced name-value parameters passed to correctBidirectionalLSMArtifact. ' ...
+                'The button is enabled when at least one page row has Correct LSM checked.'], ...
+                'ButtonPushedFcn', @obj.onLSMOptionsButton);
+            obj.hLSMOptionsBtn.Layout.Row = 1; obj.hLSMOptionsBtn.Layout.Column = 2;
+
             lbl = uilabel(gMP, ...
                 'Text', 'Map a detection (and optional rescore) model to each TIFF page.', ...
                 'HorizontalAlignment', 'left', 'FontColor', [0.45 0.45 0.45], 'FontSize', 11);
@@ -394,21 +406,22 @@ classdef pnn_batch_gui < handle
             obj.hDisplayPreprocChk.Layout.Row = 2; obj.hDisplayPreprocChk.Layout.Column = [7 8];
 
             % --- Row 3: page-mapping table ---
-            detChoices     = pnn_batch_gui.detChoiceList(obj.detModels, obj.SKIP_LABEL);
+            detChoices     = CellDiscovery.detChoiceList(obj.detModels, obj.SKIP_LABEL);
             rescoreChoices = [{obj.NONE_LABEL}, obj.rescoreModels];
-            tableData      = pnn_batch_gui.sanitizePageMap(obj.P.pageMapData, detChoices, rescoreChoices);
+            tableData      = CellDiscovery.sanitizePageMap(obj.P.pageMapData, detChoices, rescoreChoices);
 
             obj.hPageTable = uitable(gMP, ...
                 'Data',          tableData, ...
-                'ColumnName',    {'Page','Suffix', 'Detection Model', 'Rescore Model', 'Bg radius', 'Resize x'}, ...
-                'ColumnFormat',  {'numeric', 'char', detChoices, rescoreChoices, 'numeric', 'numeric'}, ...
-                'ColumnEditable', [true true true true true true], ...
-                'ColumnWidth',   {50, 70, 220, 300, 80, 70}, ...
+                'ColumnName',    {'Page','Suffix', 'Detection Model', 'Rescore Model', 'Correct LSM', 'Bg radius', 'Resize x'}, ...
+                'ColumnFormat',  {'numeric', 'char', detChoices, rescoreChoices, 'logical', 'numeric', 'numeric'}, ...
+                'ColumnEditable', [true true true true true true true], ...
+                'ColumnWidth',   {50, 70, 220, 300, 80, 80, 70}, ...
                 'RowName',       {}, ...
                 'Tag',           'pageTable', ...
                 'CellEditCallback',      @obj.onPageTableEdit, ...
                 'CellSelectionCallback', @obj.onPageTableSelect);
             obj.hPageTable.Layout.Row = 3; obj.hPageTable.Layout.Column = [1 8];
+            obj.updateLSMOptionsButton();
 
             %% ---- Row 4 — predict.py Options ----------------------------
             pPred = uipanel(rootGrid, 'Title', 'predict.py Options');
@@ -572,7 +585,7 @@ classdef pnn_batch_gui < handle
             obj.hFileCountLabel.FontColor = [0.6 0.4 0];
             drawnow;
 
-            allFiles = pnn_batch_gui.recDir(rootDir);
+            allFiles = CellDiscovery.recDir(rootDir);
 
             if ~isempty(regexStr) && ~isempty(allFiles)
                 try
@@ -591,15 +604,15 @@ classdef pnn_batch_gui < handle
 
             n = numel(allFiles);
             if n > 0
-                relFiles = cellfun(@(f) pnn_batch_gui.makeRelPath(f, rootDir), ...
+                relFiles = cellfun(@(f) CellDiscovery.makeRelPath(f, rootDir), ...
                     allFiles, 'UniformOutput', false);
             else
                 relFiles = {};
             end
             obj.hFileList.Items = relFiles;
             obj.allAbsFiles = allFiles;
-            obj.hFileCountLabel.Text      = sprintf('%d file%s found', n, pnn_batch_gui.ternary(n == 1, '', 's'));
-            obj.hFileCountLabel.FontColor = pnn_batch_gui.ternary(n > 0, [0.1 0.45 0.1], [0.6 0.4 0]);
+            obj.hFileCountLabel.Text      = sprintf('%d file%s found', n, CellDiscovery.ternary(n == 1, '', 's'));
+            obj.hFileCountLabel.FontColor = CellDiscovery.ternary(n > 0, [0.1 0.45 0.1], [0.6 0.4 0]);
         end
 
 
@@ -625,6 +638,7 @@ classdef pnn_batch_gui < handle
         function onRegexEdit(obj, src, ~)
             obj.P.fileRegex = src.Value;
             obj.savePrefs();
+            obj.doSearch();
         end
 
         function onBrowseDir(obj, ~, ~)
@@ -783,19 +797,20 @@ classdef pnn_batch_gui < handle
 
         function onAddPageRow(obj, ~, ~)
             data = obj.hPageTable.Data;
-            detChoices     = pnn_batch_gui.detChoiceList(obj.detModels, obj.SKIP_LABEL);
+            detChoices     = CellDiscovery.detChoiceList(obj.detModels, obj.SKIP_LABEL);
 
             % New row defaults: next page index, first available detection model.
             if isempty(data)
                 nextPage = 1;
             else
-                pages    = cellfun(@(x) pnn_batch_gui.parseNum(x, 0), data(:,1));
+                pages    = cellfun(@(x) CellDiscovery.parseNum(x, 0), data(:,1));
                 nextPage = max(pages) + 1;
             end
             defDet = detChoices{min(2, numel(detChoices))};   % first real model if any, else (skip)
-            newRow = {nextPage, sprintf('page%d',nextPage), defDet, obj.NONE_LABEL, 0, 1};
+            newRow = {nextPage, sprintf('page%d',nextPage), defDet, obj.NONE_LABEL, false, 0, 1};
             obj.hPageTable.Data = [data; newRow];
             obj.P.pageMapData   = obj.hPageTable.Data;
+            obj.updateLSMOptionsButton();
             obj.savePrefs();
         end
 
@@ -811,11 +826,13 @@ classdef pnn_batch_gui < handle
             obj.pageTableSelRow = [];
             obj.hPageTable.Data  = data;
             obj.P.pageMapData    = data;
+            obj.updateLSMOptionsButton();
             obj.savePrefs();
         end
 
         function onPageTableEdit(obj, ~, ~)
             obj.P.pageMapData = obj.hPageTable.Data;
+            obj.updateLSMOptionsButton();
             obj.savePrefs();
         end
 
@@ -841,6 +858,107 @@ classdef pnn_batch_gui < handle
             obj.savePrefs();
         end
 
+
+
+
+        function updateLSMOptionsButton(obj)
+            % Enable the advanced LSM-options button only when at least one
+            % page row is configured to run bidirectional LSM correction.
+            if isempty(obj.hLSMOptionsBtn) || ~isvalid(obj.hLSMOptionsBtn)
+                return;
+            end
+            data = obj.hPageTable.Data;
+            useLSM = false;
+            if iscell(data) && size(data, 2) >= 5
+                for r = 1:size(data, 1)
+                    useLSM = useLSM || CellDiscovery.parseLogical(data{r,5}, false);
+                end
+            end
+            if useLSM
+                obj.hLSMOptionsBtn.Enable = 'on';
+            else
+                obj.hLSMOptionsBtn.Enable = 'off';
+            end
+        end
+
+        function onLSMOptionsButton(obj, ~, ~)
+            % Modal editor for the name-value parameters passed to
+            % correctBidirectionalLSMArtifact.
+            obj.P.lsmOptions = CellDiscovery.sanitizeLSMOptions(obj.P.lsmOptions);
+            opts = obj.P.lsmOptions;
+            names = fieldnames(opts);
+
+            dlg = uifigure('Name', 'Bidirectional LSM correction options', ...
+                'WindowStyle', 'modal', 'Position', [100 100 720 500]);
+            g = uigridlayout(dlg, [numel(names)+2, 3]);
+            g.Padding = [10 10 10 10];
+            g.RowSpacing = 6;
+            g.ColumnSpacing = 8;
+            g.ColumnWidth = {160, '1x', 90};
+            g.RowHeight = [repmat({26}, 1, numel(names)+1), {34}];
+
+            hdr1 = uilabel(g, 'Text', 'Parameter', 'FontWeight', 'bold');
+            hdr1.Layout.Row = 1; hdr1.Layout.Column = 1;
+            hdr2 = uilabel(g, 'Text', 'Value', 'FontWeight', 'bold');
+            hdr2.Layout.Row = 1; hdr2.Layout.Column = 2;
+            hdr3 = uilabel(g, 'Text', 'Default', 'FontWeight', 'bold');
+            hdr3.Layout.Row = 1; hdr3.Layout.Column = 3;
+
+            edits = struct();
+            defaults = CellDiscovery.defaultLSMOptions();
+            for k = 1:numel(names)
+                nm = names{k};
+                tip = CellDiscovery.lsmOptionTooltip(nm, defaults.(nm));
+
+                lab = uilabel(g, 'Text', nm, 'Tooltip', tip, 'HorizontalAlignment', 'right');
+                lab.Layout.Row = k + 1; lab.Layout.Column = 1;
+
+                edits.(nm) = uieditfield(g, 'text', ...
+                    'Value', CellDiscovery.lsmOptionValueToText(opts.(nm)), ...
+                    'Tooltip', tip);
+                edits.(nm).Layout.Row = k + 1; edits.(nm).Layout.Column = 2;
+
+                defLab = uilabel(g, 'Text', CellDiscovery.lsmOptionValueToText(defaults.(nm)), ...
+                    'Tooltip', tip, 'FontColor', [0.45 0.45 0.45]);
+                defLab.Layout.Row = k + 1; defLab.Layout.Column = 3;
+            end
+
+            btnGrid = uigridlayout(g, [1 3]);
+            btnGrid.Padding = [0 0 0 0];
+            btnGrid.ColumnWidth = {'1x', 100, 100};
+            btnGrid.Layout.Row = numel(names) + 2; btnGrid.Layout.Column = [1 3];
+
+            resetBtn = uibutton(btnGrid, 'push', 'Text', 'Reset defaults', ...
+                'Tooltip', 'Restore all correctBidirectionalLSMArtifact parameters to default values.', ...
+                'ButtonPushedFcn', @resetOptions);
+            resetBtn.Layout.Row = 1; resetBtn.Layout.Column = 1;
+
+            cancelBtn = uibutton(btnGrid, 'push', 'Text', 'Cancel', ...
+                'ButtonPushedFcn', @(~,~) delete(dlg));
+            cancelBtn.Layout.Row = 1; cancelBtn.Layout.Column = 2;
+
+            okBtn = uibutton(btnGrid, 'push', 'Text', 'OK', ...
+                'Tooltip', 'Save these LSM correction options and use them for every page with Correct LSM checked.', ...
+                'ButtonPushedFcn', @saveOptions);
+            okBtn.Layout.Row = 1; okBtn.Layout.Column = 3;
+
+            function resetOptions(~, ~)
+                dflt = CellDiscovery.defaultLSMOptions();
+                for q = 1:numel(names)
+                    edits.(names{q}).Value = CellDiscovery.lsmOptionValueToText(dflt.(names{q}));
+                end
+            end
+
+            function saveOptions(~, ~)
+                newOpts = struct();
+                for q = 1:numel(names)
+                    newOpts.(names{q}) = edits.(names{q}).Value;
+                end
+                obj.P.lsmOptions = CellDiscovery.sanitizeLSMOptions(newOpts);
+                obj.savePrefs();
+                delete(dlg);
+            end
+        end
 
 
         %% Callbacks: predict.py options
@@ -949,7 +1067,7 @@ classdef pnn_batch_gui < handle
             end
 
             % Scratch directory for preprocessed page images.
-            obj.tmpDir = fullfile(tempdir, 'pnn_batch_gui');
+            obj.tmpDir = fullfile(tempdir, 'CellDiscovery');
             if ~isfolder(obj.tmpDir)
                 try mkdir(obj.tmpDir); catch, end
             end
@@ -1003,10 +1121,10 @@ classdef pnn_batch_gui < handle
                 f = files{i};
                 [fdir, stem, ext] = fileparts(f);
                 if isempty(fdir), fdir = pwd; end
-                nPages = pnn_batch_gui.countPages(f);
+                nPages = CellDiscovery.countPages(f);
 
                 for r = 1:size(mapData, 1)
-                    pg   = pnn_batch_gui.parseNum(mapData{r,1}, 0);
+                    pg   = CellDiscovery.parseNum(mapData{r,1}, 0);
                     detM = mapData{r,3};
                     if pg < 1, continue; end
                     if ~ischar(detM) || strcmp(detM, obj.SKIP_LABEL) || isempty(detM)
@@ -1021,11 +1139,12 @@ classdef pnn_batch_gui < handle
                     rescM = mapData{r,4};
                     if ~ischar(rescM) || strcmp(rescM, obj.NONE_LABEL), rescM = ''; end
 
-                    bg = pnn_batch_gui.parseNum(mapData{r,5}, 0);
-                    rz = pnn_batch_gui.parseNum(mapData{r,6}, 1);
+                    correctLSM = CellDiscovery.parseLogical(mapData{r,5}, false);
+                    bg = CellDiscovery.parseNum(mapData{r,6}, 0);
+                    rz = CellDiscovery.parseNum(mapData{r,7}, 1);
                     if rz <= 0, rz = 1; end
-                    jobs{end+1} = pnn_batch_gui.makeJob( ...
-                        f, fdir, stem, ext, mapData{r,2}, pg, nPages, true, detM, rescM, bg, rz); %#ok<AGROW>
+                    jobs{end+1} = CellDiscovery.makeJob( ...
+                        f, fdir, stem, ext, mapData{r,2}, pg, nPages, true, detM, rescM, correctLSM, bg, rz, obj.P.lsmOptions); %#ok<AGROW>
                 end
             end
         end
@@ -1097,8 +1216,8 @@ classdef pnn_batch_gui < handle
                             obj.fileIdx, total, exitCode, job.label);
                     end
 
-                    pnn_batch_gui.deleteFileQuiet(job.tmpImg);   % drop scratch page image
-                    pnn_batch_gui.deleteFileQuiet(job.tmpCsv);
+                    CellDiscovery.deleteFileQuiet(job.tmpImg);   % drop scratch page image
+                    CellDiscovery.deleteFileQuiet(job.tmpCsv);
 
                     obj.jProcess = [];
                     obj.jReader  = [];
@@ -1135,8 +1254,8 @@ classdef pnn_batch_gui < handle
 
             % --- Read + preprocess the requested page into a scratch image ---
             try
-                img = pnn_batch_gui.readPage(job.imgFile, job.page, job.nPages);
-                img = pnn_batch_gui.applyPreprocess(img, job.bgRadius, job.resize);
+                img = CellDiscovery.readPage(job.imgFile, job.page, job.nPages);
+                img = CellDiscovery.applyPreprocess(img, job.correctLSM, job.lsmOptions, job.bgRadius, job.resize);
             catch ME
                 fprintf(2,'[ERROR] (%d/%d) could not read/preprocess %s: %s\n', ...
                     obj.fileIdx, total, job.label, ME.message);
@@ -1149,7 +1268,7 @@ classdef pnn_batch_gui < handle
             job.tmpImg   = fullfile(obj.tmpDir, [tmpStem '.tif']);
             job.tmpCsv   = fullfile(obj.tmpDir, [tmpStem '_loc.csv']);
             try
-                pnn_batch_gui.writeScratchTiff(img, job.tmpImg);
+                CellDiscovery.writeScratchTiff(img, job.tmpImg);
             catch ME
                 fprintf(2,'[ERROR] (%d/%d) could not write scratch image: %s\n', ...
                     obj.fileIdx, total, ME.message);
@@ -1193,7 +1312,7 @@ classdef pnn_batch_gui < handle
             end
 
             fprintf('[RUN ] (%d/%d) %s\n', obj.fileIdx, total, job.label);
-            fprintf('  CMD: %s\n', strjoin(pnn_batch_gui.quotedArgs(cmdParts), ' '));
+            fprintf('  CMD: %s\n', strjoin(CellDiscovery.quotedArgs(cmdParts), ' '));
 
             try
                 n    = numel(cmdParts);
@@ -1284,7 +1403,7 @@ classdef pnn_batch_gui < handle
                     img = imread(job.tmpImg);   % preprocessed (resized) image
                     if hasX && hasY, plotsX = locs.X;     plotsY = locs.Y;     end
                 else
-                    img = pnn_batch_gui.readPage(job.imgFile, job.page, job.nPages);
+                    img = CellDiscovery.readPage(job.imgFile, job.page, job.nPages);
                     if hasX && hasY, plotsX = locsOrig.X; plotsY = locsOrig.Y; end
                 end
             catch ME
@@ -1420,8 +1539,8 @@ classdef pnn_batch_gui < handle
                 % Remove scratch files for the job that was in flight.
                 if obj.fileIdx >= 1 && obj.fileIdx <= numel(obj.jobQueue)
                     inflight = obj.jobQueue{obj.fileIdx};
-                    pnn_batch_gui.deleteFileQuiet(inflight.tmpImg);
-                    pnn_batch_gui.deleteFileQuiet(inflight.tmpCsv);
+                    CellDiscovery.deleteFileQuiet(inflight.tmpImg);
+                    CellDiscovery.deleteFileQuiet(inflight.tmpCsv);
                 end
             end
 
@@ -1460,10 +1579,13 @@ classdef pnn_batch_gui < handle
                 obj.hDotColorPop, obj.hDotSizeEdit, ...
                 obj.hPerPageChk,  obj.hAddPageBtn,   obj.hDelPageBtn, ...
                 obj.hPreprocGlobalChk, obj.hGlobalBgEdit, obj.hGlobalResizeEdit, ...
-                obj.hDisplayPreprocChk, obj.hPageTable, ...
+                obj.hDisplayPreprocChk, obj.hLSMOptionsBtn, obj.hPageTable, ...
                 obj.hFileList,    obj.hStartBtn};
             for k = 1:numel(ctrls)
                 try ctrls{k}.Enable = state; catch, end
+            end
+            if isequal(state, true) || isequal(state, 'on')
+                obj.updateLSMOptionsButton();
             end
         end
 
@@ -1516,7 +1638,7 @@ classdef pnn_batch_gui < handle
             condaExe = '';   % not found; leave blank so user browses
         end
 
-        function job = makeJob(f, fdir, stem, ext, suffix, pg, nPages, multiPage, detM, rescM, bg, rz)
+        function job = makeJob(f, fdir, stem, ext, suffix, pg, nPages, multiPage, detM, rescM, correctLSM, bg, rz, lsmOptions)
             % Assemble a single processing-job struct. Output filenames use a
             % per-page suffix only for genuine multi-page jobs.
             if multiPage
@@ -1540,6 +1662,8 @@ classdef pnn_batch_gui < handle
             job.multiPage    = multiPage;
             job.detModel     = detM;
             job.rescoreModel = rescM;     % '' = no rescoring
+            job.correctLSM   = logical(correctLSM);  % true = correct bidirectional LSM artifact
+            job.lsmOptions   = CellDiscovery.sanitizeLSMOptions(lsmOptions);
             job.bgRadius     = bg;        % 0 = no background subtraction
             job.resize       = rz;        % 1 = no resizing
             job.outCsvOrig   = fullfile(fdir, [base '_locs.csv']);
@@ -1563,6 +1687,29 @@ classdef pnn_batch_gui < handle
             if isnan(v), v = dflt; end
         end
 
+        function tf = parseLogical(x, dflt)
+            % Robustly coerce table values to scalar logical.
+            if islogical(x)
+                tf = isscalar(x) && x;
+                return;
+            end
+            if isnumeric(x)
+                tf = isscalar(x) && x ~= 0 && ~isnan(x);
+                return;
+            end
+            if isstring(x) || ischar(x)
+                v = lower(strtrim(char(x)));
+                if ismember(v, {'true','t','yes','y','on','1'})
+                    tf = true;
+                    return;
+                elseif ismember(v, {'false','f','no','n','off','0',''})
+                    tf = false;
+                    return;
+                end
+            end
+            tf = logical(dflt);
+        end
+
         function n = countPages(f)
             % Number of pages/frames in an image file (1 for non-multi-image formats).
             try
@@ -1582,11 +1729,19 @@ classdef pnn_batch_gui < handle
             end
         end
 
-        function img = applyPreprocess(img, bgRadius, resizeFactor)
+        function img = applyPreprocess(img, correctLSM, lsmOptions, bgRadius, resizeFactor)
             % Optional preprocessing applied before detection:
+            %   - bidirectional LSM line artifact correction
             %   - morphological background subtraction (imtophat, disk strel)
             %   - resize by a scalar factor
-            % Background subtraction runs at full resolution, then resizing.
+            % LSM correction runs first, then background subtraction at full
+            % resolution, then resizing.
+            if correctLSM
+                if exist('correctBidirectionalLSMArtifact', 'file') ~= 2
+                    error('correctBidirectionalLSMArtifact.m must be on the MATLAB path to use Correct LSM.');
+                end
+                img = CellDiscovery.callCorrectBidirectionalLSMArtifact(img, lsmOptions);
+            end
             if bgRadius > 0
                 se = strel('disk', round(bgRadius));
                 if size(img, 3) == 1
@@ -1618,23 +1773,159 @@ classdef pnn_batch_gui < handle
             end
         end
 
+
+        function opts = defaultLSMOptions()
+            % Defaults for correctBidirectionalLSMArtifact name-value options.
+            opts = struct( ...
+                'ReverseRows', '"even"', ...
+                'MaxDisplacement', '8', ...
+                'NumIterations', '15', ...
+                'PyramidDownsample', '[4 2 1]', ...
+                'SmoothSigma', '4', ...
+                'StepSize', '0.75', ...
+                'UseAllChannels', 'true', ...
+                'RegistrationChannel', '1', ...
+                'ApplyGuidedFilter', 'false', ...
+                'GuidedNeighborhoodSize', '[5 5]', ...
+                'GuidedDegreeOfSmoothing', '0.01', ...
+                'FillValue', 'NaN' ...
+                );
+        end
+
+        function opts = sanitizeLSMOptions(opts)
+            % Keep stored LSM options restricted to supported correction inputs.
+            dflt = CellDiscovery.defaultLSMOptions();
+            if ~isstruct(opts)
+                opts = dflt;
+                return;
+            end
+            names = fieldnames(dflt);
+            clean = struct();
+            for k = 1:numel(names)
+                nm = names{k};
+                if isfield(opts, nm) && ~isempty(opts.(nm))
+                    clean.(nm) = opts.(nm);
+                else
+                    clean.(nm) = dflt.(nm);
+                end
+            end
+            opts = clean;
+        end
+
+        function img = callCorrectBidirectionalLSMArtifact(img, opts)
+            % Call correctBidirectionalLSMArtifact with persisted name-value
+            % options.
+            args = CellDiscovery.lsmOptionsToNameValue(opts);
+            if isempty(args)
+                img = correctBidirectionalLSMArtifact(img);
+            else
+                img = correctBidirectionalLSMArtifact(img, args{:});
+            end
+        end
+
+        function args = lsmOptionsToNameValue(opts)
+            opts = CellDiscovery.sanitizeLSMOptions(opts);
+            names = fieldnames(opts);
+            args = cell(1, 2*numel(names));
+            for k = 1:numel(names)
+                args{2*k-1} = names{k};
+                args{2*k} = CellDiscovery.parseLSMOptionValue(opts.(names{k}));
+            end
+        end
+
+        function v = parseLSMOptionValue(v)
+            if isnumeric(v) || islogical(v)
+                return;
+            end
+            if isstring(v)
+                v = char(v);
+            end
+            if ~ischar(v)
+                return;
+            end
+            txt = strtrim(v);
+            low = lower(txt);
+            if any(strcmp(low, {'true','false'}))
+                v = strcmp(low, 'true');
+                return;
+            end
+            num = str2num(txt); %#ok<ST2NM>
+            if ~isempty(num)
+                v = num;
+                return;
+            end
+            if startsWith(txt, '"') && endsWith(txt, '"') && strlength(string(txt)) >= 2
+                v = extractBetween(string(txt), 2, strlength(string(txt))-1);
+                v = char(v);
+            end
+        end
+
+        function txt = lsmOptionValueToText(v)
+            if isnumeric(v) || islogical(v)
+                txt = mat2str(v);
+            elseif isstring(v)
+                txt = char(v);
+            elseif ischar(v)
+                txt = v;
+            else
+                txt = char(string(v));
+            end
+        end
+
+        function tip = lsmOptionTooltip(name, defaultValue)
+            dflt = CellDiscovery.lsmOptionValueToText(defaultValue);
+            switch lower(name)
+                case 'reverserows'
+                    desc = 'Rows scanned in the reverse direction and corrected. Use "even" or "odd".';
+                case 'maxdisplacement'
+                    desc = 'Maximum horizontal displacement in pixels.';
+                case 'numiterations'
+                    desc = 'Number of iterations per pyramid level.';
+                case 'pyramiddownsample'
+                    desc = 'Horizontal downsample factors, coarse to fine.';
+                case 'smoothsigma'
+                    desc = 'Gaussian smoothing sigma, in pixels, applied to the 1-D displacement after each update.';
+                case 'stepsize'
+                    desc = 'Update step size.';
+                case 'useallchannels'
+                    desc = 'If true, all channels drive registration. If false, only RegistrationChannel is used.';
+                case 'registrationchannel'
+                    desc = 'Channel used if UseAllChannels is false.';
+                case 'applyguidedfilter'
+                    desc = 'If true, apply imguidedfilter after geometric correction.';
+                case 'guidedneighborhoodsize'
+                    desc = 'Neighborhood size for imguidedfilter.';
+                case 'guideddegreeofsmoothing'
+                    desc = 'DegreeOfSmoothing for imguidedfilter.';
+                case 'fillvalue'
+                    desc = 'Value used outside image bounds during row warping. NaN triggers nearest-edge extrapolation.';
+                otherwise
+                    desc = sprintf('Name-value option passed to correctBidirectionalLSMArtifact: %s.', name);
+            end
+            tip = sprintf('%s Default: %s', desc, dflt);
+        end
+
         function data = defaultPageMap()
             % One default page-map row. The empty detection-model cell is coerced
             % to the first real model by sanitizePageMap once models are known.
-            data = {1, '', '(none)', 0, 1, 1};
+            data = {1, '', '(none)', '(none)', false, 0, 1};
         end
 
         function data = sanitizePageMap(data, detChoices, rescoreChoices)
             % Validate/repair saved page-map table data against the currently
             % available model lists, so a stale or malformed pref never breaks
             % the uitable (whose dropdown columns require valid members).
-            if isempty(data) || ~iscell(data) || size(data, 2) ~= 6
-                data = pnn_batch_gui.defaultPageMap();
+            if isempty(data) || ~iscell(data)
+                data = CellDiscovery.defaultPageMap();
+            elseif size(data, 2) == 6
+                data = [data(:,1:4), repmat({false}, size(data,1), 1), data(:,5:6)];
+            elseif size(data, 2) ~= 7
+                data = CellDiscovery.defaultPageMap();
             end
             detFallback = detChoices{min(2, numel(detChoices))};   % first real model if any
             for r = 1:size(data, 1)
                 % Page index
-                p = pnn_batch_gui.parseNum(data{r,1}, 1);
+                p = CellDiscovery.parseNum(data{r,1}, 1);
                 if p < 1, p = 1; end
                 data{r,1} = round(p);
                 % Detection model (must be a valid dropdown member)
@@ -1648,14 +1939,16 @@ classdef pnn_batch_gui < handle
                 % Rescore model
                 v = data{r,4};
                 if ~ischar(v) || ~ismember(v, rescoreChoices), data{r,4} = rescoreChoices{1}; end
+                % Correct bidirectional LSM artifact
+                data{r,5} = CellDiscovery.parseLogical(data{r,5}, false);
                 % Background radius (>= 0)
-                b = pnn_batch_gui.parseNum(data{r,5}, 0);
+                b = CellDiscovery.parseNum(data{r,6}, 0);
                 if b < 0, b = 0; end
-                data{r,5} = b;
+                data{r,6} = b;
                 % Resize factor (> 0)
-                z = pnn_batch_gui.parseNum(data{r,6}, 1);
+                z = CellDiscovery.parseNum(data{r,7}, 1);
                 if z <= 0, z = 1; end
-                data{r,6} = z;
+                data{r,7} = z;
             end
         end
 
@@ -1664,7 +1957,7 @@ classdef pnn_batch_gui < handle
             % Searches the class file's own directory, then one level up,
             % so the class works whether it lives at the repo root or in a
             % subdirectory such as customizations/.
-            classFile = which('pnn_batch_gui');
+            classFile = which('CellDiscovery');
             if isempty(classFile)
                 root = pwd;
                 return;
@@ -1690,7 +1983,7 @@ classdef pnn_batch_gui < handle
             for k = 1:numel(d)
                 if d(k).isdir
                     if ~ismember(d(k).name, {'.', '..'})
-                        sub   = pnn_batch_gui.recDir(fullfile(rootDir, d(k).name));
+                        sub   = CellDiscovery.recDir(fullfile(rootDir, d(k).name));
                         files = [files; sub]; %#ok<AGROW>
                     end
                 else
@@ -1751,7 +2044,7 @@ classdef pnn_batch_gui < handle
             % Return cmdParts with any element containing a space wrapped in
             % double-quotes. Used only for the CMD: log line — ProcessBuilder
             % does NOT need quoting (each element is a separate argument).
-            parts = cellfun(@(x) pnn_batch_gui.quoteIfSpaced(x), ...
+            parts = cellfun(@(x) CellDiscovery.quoteIfSpaced(x), ...
                 cmdParts, 'UniformOutput', false);
         end
 
@@ -1782,4 +2075,4 @@ classdef pnn_batch_gui < handle
 
     end  % static methods
 
-end  % classdef pnn_batch_gui
+end  % classdef CellDiscovery

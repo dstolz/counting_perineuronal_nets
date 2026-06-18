@@ -49,6 +49,7 @@ classdef CellLocalizationQCApp < handle
         ParentDirEdit
         BrowseButton
         ScanButton
+        OpenDatasetFolderButton
         SourceDropDown
         CellsPerBlockSpinner
         CropWidthSpinner
@@ -64,7 +65,6 @@ classdef CellLocalizationQCApp < handle
         MarkerCheckBox
         AutoAdvanceCheckBox
         SaveButton
-        ExportGoodButton
         SettingsButton
         TileSummaryLabel
         BlockNavigationGrid
@@ -90,9 +90,13 @@ classdef CellLocalizationQCApp < handle
         ThresholdClassifyButton
         HistogramButton
         TissuePlotButton
+        RecenterButton
+        RecenterMode logical = false
         TissueFigure = []
         TissueAxes = []
         TissueImage = []
+        TissueClassPointHandle = []
+        TissueClassPointRows double = []
         TissueSelectionHandle = []
         TissueContextMenu = []
         NotesEdit
@@ -141,15 +145,19 @@ classdef CellLocalizationQCApp < handle
             end
             app.UIFigure.CloseRequestFcn = @(src, event) app.handleCloseRequest(src, event);
 
+            exportMenu = uimenu(app.UIFigure, "Text", "Export");
+            uimenu(exportMenu, "Text", "Export observation CSV...", ...
+                "MenuSelectedFcn", @(src, event) app.exportObservationCsvDialog());
+
             app.RootGrid = uigridlayout(app.UIFigure, [3 1]);
             app.RootGrid.RowHeight = {76, '1x', 26};
             app.RootGrid.ColumnWidth = {'1x'};
             app.RootGrid.Padding = [8 8 8 8];
             app.RootGrid.RowSpacing = 6;
 
-            app.ToolbarGrid = uigridlayout(app.RootGrid, [2 16]);
+            app.ToolbarGrid = uigridlayout(app.RootGrid, [2 18]);
             app.ToolbarGrid.RowHeight = {24, 28};
-            app.ToolbarGrid.ColumnWidth = {70, '2x', 68, 54, 96, 66, 62, 62, 54, '1x', 86, '1x', 96, 96, 58, 86};
+            app.ToolbarGrid.ColumnWidth = {70, '2x', 68, 54, 92, 58, 74, 74, 74, 54, 70, '1x', 86, '1x', 86, 58, 72, 88};
             app.ToolbarGrid.ColumnSpacing = 5;
             app.ToolbarGrid.Padding = [0 0 0 0];
 
@@ -162,94 +170,89 @@ classdef CellLocalizationQCApp < handle
             app.BrowseButton.Layout.Row = 1;
             app.BrowseButton.Layout.Column = 3;
 
-            app.ScanButton = uibutton(app.ToolbarGrid, "push", "Text", "Scan", "ButtonPushedFcn", @(src, event) app.scanParentDirectory(true));
+            app.ScanButton = uibutton(app.ToolbarGrid, "push", "Text", "Scan", "ButtonPushedFcn", @app.onScanButtonPushed);
             app.ScanButton.Layout.Row = 1;
             app.ScanButton.Layout.Column = 4;
 
-            app.addToolbarLabel("Source", 1, 5);
+            app.OpenDatasetFolderButton = uibutton(app.ToolbarGrid, "push", ...
+                "Text", "Open Folder", ...
+                "ButtonPushedFcn", @(src, event) app.openActiveDatasetFolder());
+            app.OpenDatasetFolderButton.Layout.Row = 1;
+            app.OpenDatasetFolderButton.Layout.Column = 5;
+
+            app.addToolbarLabel("Source", 1, 6);
             app.SourceDropDown = uidropdown(app.ToolbarGrid, "Items", ["No source"], "ValueChangedFcn", @(src, event) app.onSourceChanged(src, event));
             app.SourceDropDown.Layout.Row = 1;
-            app.SourceDropDown.Layout.Column = [6 8];
+            app.SourceDropDown.Layout.Column = [7 9];
 
-            app.addToolbarLabel("Display", 1, 9);
+            app.addToolbarLabel("Display", 1, 10);
             app.DisplayModeDropDown = uidropdown(app.ToolbarGrid, ...
                 "Items", ["Target channel only", "Companion channel only", "Side-by-side channel view", "False-color overlay"], ...
                 "ValueChangedFcn", @(src, event) app.onDisplaySettingsChanged());
             app.DisplayModeDropDown.Layout.Row = 1;
-            app.DisplayModeDropDown.Layout.Column = [10 11];
+            app.DisplayModeDropDown.Layout.Column = [11 12];
 
             app.ContrastModeDropDown = uidropdown(app.ToolbarGrid, ...
                 "Items", ["Auto per crop", "Auto per channel / dataset", "Manual min-max", "Percentile stretch"], ...
                 "ValueChangedFcn", @(src, event) app.onDisplaySettingsChanged());
             app.ContrastModeDropDown.Layout.Row = 1;
-            app.ContrastModeDropDown.Layout.Column = [12 13];
+            app.ContrastModeDropDown.Layout.Column = [13 14];
 
             app.SettingsButton = uibutton(app.ToolbarGrid, "push", "Text", "Settings", "ButtonPushedFcn", @(src, event) app.openSettingsDialog());
             app.SettingsButton.Layout.Row = 1;
-            app.SettingsButton.Layout.Column = 14;
+            app.SettingsButton.Layout.Column = 15;
 
             app.SaveButton = uibutton(app.ToolbarGrid, "push", "Text", "Save", "ButtonPushedFcn", @(src, event) app.saveCurrentQC());
             app.SaveButton.Layout.Row = 1;
-            app.SaveButton.Layout.Column = 15;
+            app.SaveButton.Layout.Column = 16;
 
-            app.ExportGoodButton = uibutton(app.ToolbarGrid, "push", "Text", "Export Good", "ButtonPushedFcn", @(src, event) app.exportReviewedData("Good"));
-            app.ExportGoodButton.Layout.Row = 1;
-            app.ExportGoodButton.Layout.Column = 16;
+            app.addToolbarLabel("Cells/block", 2, 3);
+            app.CellsPerBlockSpinner = uispinner(app.ToolbarGrid, "Limits", [1 200], "RoundFractionalValues", "on", "ValueChangedFcn", @(src, event) app.onBlockSettingsChanged());
+            app.CellsPerBlockSpinner.Layout.Row = 2;
+            app.CellsPerBlockSpinner.Layout.Column = 4;
 
-            app.addToolbarLabel("Cells/block", 2, 1);
-            cellsBlockGrid = uigridlayout(app.ToolbarGrid, [1 2]);
-            cellsBlockGrid.Layout.Row = 2;
-            cellsBlockGrid.Layout.Column = 2;
-            cellsBlockGrid.ColumnWidth = {70, '1x'};
-            cellsBlockGrid.RowHeight = {'1x'};
-            cellsBlockGrid.Padding = [0 0 0 0];
-            cellsBlockGrid.ColumnSpacing = 0;
-            app.CellsPerBlockSpinner = uispinner(cellsBlockGrid, "Limits", [1 200], "RoundFractionalValues", "on", "ValueChangedFcn", @(src, event) app.onBlockSettingsChanged());
-            app.CellsPerBlockSpinner.Layout.Row = 1;
-            app.CellsPerBlockSpinner.Layout.Column = 1;
-
-            app.addToolbarLabel("Crop W", 2, 3);
+            app.addToolbarLabel("Crop W", 2, 5);
             app.CropWidthSpinner = uispinner(app.ToolbarGrid, "Limits", [8 2048], "RoundFractionalValues", "on", "ValueChangedFcn", @(src, event) app.onCropSettingsChanged(true));
             app.CropWidthSpinner.Layout.Row = 2;
-            app.CropWidthSpinner.Layout.Column = 4;
+            app.CropWidthSpinner.Layout.Column = 6;
 
-            app.addToolbarLabel("Crop H", 2, 5);
+            app.addToolbarLabel("Crop H", 2, 7);
             app.CropHeightSpinner = uispinner(app.ToolbarGrid, "Limits", [8 2048], "RoundFractionalValues", "on", "ValueChangedFcn", @(src, event) app.onCropSettingsChanged(false));
             app.CropHeightSpinner.Layout.Row = 2;
-            app.CropHeightSpinner.Layout.Column = 6;
+            app.CropHeightSpinner.Layout.Column = 8;
 
             app.LinkedSquareCheckBox = uicheckbox(app.ToolbarGrid, "Text", "Square", "ValueChangedFcn", @(src, event) app.onCropSettingsChanged(true));
             app.LinkedSquareCheckBox.Layout.Row = 2;
-            app.LinkedSquareCheckBox.Layout.Column = 7;
+            app.LinkedSquareCheckBox.Layout.Column = 9;
 
             app.MarkerCheckBox = uicheckbox(app.ToolbarGrid, "Text", "Marker", "ValueChangedFcn", @(src, event) app.onDisplaySettingsChanged());
             app.MarkerCheckBox.Layout.Row = 2;
-            app.MarkerCheckBox.Layout.Column = 8;
+            app.MarkerCheckBox.Layout.Column = 10;
 
-            app.addToolbarLabel("Sort", 2, 9);
+            app.addToolbarLabel("Sort", 2, 11);
             app.Sort1DropDown = uidropdown(app.ToolbarGrid, "Items", ["Original row order"], "ValueChangedFcn", @(src, event) app.onSortOrFilterChanged());
             app.Sort1DropDown.Layout.Row = 2;
-            app.Sort1DropDown.Layout.Column = 10;
+            app.Sort1DropDown.Layout.Column = 12;
 
             app.Sort1DirectionDropDown = uidropdown(app.ToolbarGrid, "Items", ["Ascending", "Descending"], "ValueChangedFcn", @(src, event) app.onSortOrFilterChanged());
             app.Sort1DirectionDropDown.Layout.Row = 2;
-            app.Sort1DirectionDropDown.Layout.Column = 11;
+            app.Sort1DirectionDropDown.Layout.Column = 13;
 
             app.Sort2DropDown = uidropdown(app.ToolbarGrid, "Items", ["None"], "ValueChangedFcn", @(src, event) app.onSortOrFilterChanged());
             app.Sort2DropDown.Layout.Row = 2;
-            app.Sort2DropDown.Layout.Column = 12;
+            app.Sort2DropDown.Layout.Column = 14;
 
             app.Sort2DirectionDropDown = uidropdown(app.ToolbarGrid, "Items", ["Ascending", "Descending"], "ValueChangedFcn", @(src, event) app.onSortOrFilterChanged());
             app.Sort2DirectionDropDown.Layout.Row = 2;
-            app.Sort2DirectionDropDown.Layout.Column = 13;
+            app.Sort2DirectionDropDown.Layout.Column = 15;
 
             app.FilterDropDown = uidropdown(app.ToolbarGrid, "Items", ["Show all", "Show unreviewed only", "Show reviewed only", "Good only", "Bad only", "Uncertain only"], "ValueChangedFcn", @(src, event) app.onSortOrFilterChanged());
             app.FilterDropDown.Layout.Row = 2;
-            app.FilterDropDown.Layout.Column = 14;
+            app.FilterDropDown.Layout.Column = 16;
 
             app.AutoAdvanceCheckBox = uicheckbox(app.ToolbarGrid, "Text", "Auto advance", "ValueChangedFcn", @(src, event) app.onDisplaySettingsChanged());
             app.AutoAdvanceCheckBox.Layout.Row = 2;
-            app.AutoAdvanceCheckBox.Layout.Column = [15 16];
+            app.AutoAdvanceCheckBox.Layout.Column = [17 18];
 
             app.MainGrid = uigridlayout(app.RootGrid, [1 3]);
             app.MainGrid.ColumnWidth = {360, '1x', 330};
@@ -305,6 +308,7 @@ classdef CellLocalizationQCApp < handle
             app.TileGrid.Padding = [2 2 2 2];
             app.TileGrid.RowSpacing = 0;
             app.TileGrid.ColumnSpacing = 0;
+            app.TileGrid.BackgroundColor = 'k';
 
             app.MontageAxes = uiaxes(app.TileGrid);
             app.MontageAxes.Layout.Row = 1;
@@ -319,8 +323,8 @@ classdef CellLocalizationQCApp < handle
             disableDefaultInteractivity(app.MontageAxes);
 
             app.RightPanel = uipanel(app.MainGrid, "Title", "Selected detection");
-            rightGrid = uigridlayout(app.RightPanel, [11 1]);
-            rightGrid.RowHeight = {230, 38, 48, 30, 30, 30, 24, 32, 24, '1x', 24};
+            rightGrid = uigridlayout(app.RightPanel, [12 1]);
+            rightGrid.RowHeight = {230, 38, 48, 30, 30, 30, 30, 24, 32, 24, '1x', 24};
             rightGrid.ColumnWidth = {'1x'};
             rightGrid.Padding = [4 4 4 4];
 
@@ -348,6 +352,10 @@ classdef CellLocalizationQCApp < handle
                 "Text", "Plot full image QC map...", ...
                 "ButtonPushedFcn", @(src, event) app.openTissuePlot());
 
+            app.RecenterButton = uibutton(rightGrid, "push", ...
+                "Text", "Update coordinate by click...", ...
+                "ButtonPushedFcn", @(src, event) app.armCoordinateUpdate());
+
             uilabel(rightGrid, "Text", "Notes");
             app.NotesEdit = uieditfield(rightGrid, "text", "ValueChangedFcn", @(src, event) app.onNotesChanged(src, event));
 
@@ -357,6 +365,7 @@ classdef CellLocalizationQCApp < handle
 
             app.StatusLabel = uilabel(app.RootGrid, "Text", "Ready", "FontWeight", "bold");
 
+            app.applyMainTooltips();
             app.bindKeyboardCallbacks();
         end
 
@@ -371,6 +380,62 @@ classdef CellLocalizationQCApp < handle
             label = uilabel(app.ToolbarGrid, "Text", text, "HorizontalAlignment", "right");
             label.Layout.Row = row;
             label.Layout.Column = col;
+        end
+
+        function setTooltip(app, component, tooltipText)
+            arguments
+                app
+                component
+                tooltipText (1,1) string
+            end
+
+            if isempty(component)
+                return
+            end
+
+            component = component(:);
+            for k = 1:numel(component)
+                if isvalid(component(k)) && isprop(component(k), 'Tooltip')
+                    component(k).Tooltip = char(tooltipText);
+                end
+            end
+        end
+
+        function applyMainTooltips(app)
+            app.setTooltip(app.ParentDirEdit, "Parent folder scanned recursively for image/localization datasets. Default: last used folder.");
+            app.setTooltip(app.BrowseButton, "Choose the parent folder containing nested datasets.");
+            app.setTooltip(app.ScanButton, "Scan parent folder for *_proj.tif images and *_locs.csv localization files.");
+            app.setTooltip(app.OpenDatasetFolderButton, "Open the folder containing the currently loaded dataset in the system file browser.");
+            app.setTooltip(app.SourceDropDown, "Select the active localization CSV/channel for review. Default: first valid source.");
+            app.setTooltip(app.DisplayModeDropDown, "Choose crop display channel mode. Default: Target channel only.");
+            app.setTooltip(app.ContrastModeDropDown, "Choose display-only contrast scaling. Default: Auto per crop.");
+            app.setTooltip(app.SettingsButton, "Open persistent app settings for file patterns, channels, categories, autosave, and markers.");
+            app.setTooltip(app.SaveButton, "Save the active review table to a separate *_QC.csv file. Shortcut: Ctrl+S or s.");
+            app.setTooltip(app.CellsPerBlockSpinner, "Number of detections displayed in each montage block. Default: 20.");
+            app.setTooltip(app.CropWidthSpinner, "Crop width in pixels around each detection. Default: 64.");
+            app.setTooltip(app.CropHeightSpinner, "Crop height in pixels around each detection. Default: 64.");
+            app.setTooltip(app.LinkedSquareCheckBox, "Keep crop width and height equal. Default: on.");
+            app.setTooltip(app.MarkerCheckBox, "Show or hide the localization marker in crop views. Default: on.");
+            app.setTooltip(app.Sort1DropDown, "Primary sort column for the active source. Default: Original row order.");
+            app.setTooltip(app.Sort1DirectionDropDown, "Primary sort direction. Default: Ascending.");
+            app.setTooltip(app.Sort2DropDown, "Optional secondary sort column. Default: None.");
+            app.setTooltip(app.Sort2DirectionDropDown, "Secondary sort direction. Default: Ascending.");
+            app.setTooltip(app.FilterDropDown, "Limit displayed detections without deleting rows. Default: Show all.");
+            app.setTooltip(app.AutoAdvanceCheckBox, "After single-cell classification, move to the next unreviewed visible cell. Default: on.");
+            app.setTooltip(app.DatasetTable, "Select a dataset to load. The current dataset row is highlighted.");
+            app.setTooltip(app.PreviousBlockButton, "Display previous montage block. Shortcuts: q or p.");
+            app.setTooltip(app.BlockDropDown, "Jump directly to a montage block in the current filtered order.");
+            app.setTooltip(app.NextBlockButton, "Display next montage block. Shortcuts: w or n.");
+            app.setTooltip(app.MontageAxes, "Click a crop to select it. Hold a class key while clicking to classify that cell.");
+            app.setTooltip(app.DetailAxes, "Large crop view for the selected detection.");
+            app.setTooltip(app.DetailLabel, "Selected detection identity, channel, coordinates, and current QC label.");
+            app.setTooltip(app.ThresholdClassifyButton, "Classify cells by score/rescore threshold using Above, Below, or Between.");
+            app.setTooltip(app.HistogramButton, "Plot score/rescore histograms overlaid by QC class colors.");
+            app.setTooltip(app.TissuePlotButton, "Open full-image QC map with class-colored points and ROI classification tools.");
+            app.setTooltip(app.RecenterButton, "Arm the selected detection crop so the next click replaces this observation's X/Y after confirmation.");
+            app.setTooltip(app.NotesEdit, "Optional notes for the selected detection; saved in QCNotes.");
+            app.setTooltip(app.MetadataTable, "Original localization metadata for the selected source row.");
+            app.setTooltip(app.StatusLabel, "Current dataset/source progress, save state, and warnings.");
         end
 
         function applySettingsToUI(app)
@@ -428,6 +493,7 @@ classdef CellLocalizationQCApp < handle
                     "ButtonPushedFcn", @(src, event) app.classifySelectedCellByIndex(k));
                 app.CategoryButtons{k}.Layout.Row = 1;
                 app.CategoryButtons{k}.Layout.Column = k;
+                app.setTooltip(app.CategoryButtons{k}, sprintf('Classify selected detection as %s. Shortcut: %s or %d.', char(string(cat.Name)), char(string(cat.Shortcut)), k));
             end
             app.bindKeyboardCallbacks();
         end
@@ -622,41 +688,98 @@ classdef CellLocalizationQCApp < handle
 
             x = double(app.ActiveReviewTable.X);
             y = double(app.ActiveReviewTable.Y);
-            isValid = isfinite(x) & isfinite(y);
+            rows = find(isfinite(x) & isfinite(y));
+            app.TissueClassPointHandle = [];
+            app.TissueClassPointRows = rows(:);
+            if isempty(rows)
+                return
+            end
+
+            colors = app.tissuePointColorsForRows(rows);
+            h = scatter(app.TissueAxes, x(rows), y(rows), 18, colors, 'filled', ...
+                'MarkerFaceAlpha', 0.75, ...
+                'MarkerEdgeColor', 'flat', ...
+                'HitTest', 'off', ...
+                'PickableParts', 'none', ...
+                'DisplayName', 'Cells');
+            h.Annotation.LegendInformation.IconDisplayStyle = 'off';
+            app.TissueClassPointHandle = h;
+            app.drawTissueClassLegend();
+        end
+
+        function drawTissueClassLegend(app)
+            if isempty(app.TissueAxes) || ~isvalid(app.TissueAxes)
+                return
+            end
 
             classLabels = app.reviewLabelsForHistogram();
-            plottedLabels = strings(1, 0);
+            legendHandles = gobjects(0);
             for k = 1:numel(classLabels)
                 label = classLabels(k);
-                mask = app.histogramLabelMask(label);
-                mask = mask(:) & isValid(:);
-                if ~any(mask)
-                    continue
-                end
                 color = app.categoryEdgeColor(label);
-                h = scatter(app.TissueAxes, x(mask), y(mask), 18, color, 'filled', ...
+                h = scatter(app.TissueAxes, NaN, NaN, 18, color, 'filled', ...
                     'MarkerFaceAlpha', 0.75, ...
                     'MarkerEdgeColor', color, ...
                     'HitTest', 'off', ...
                     'PickableParts', 'none', ...
                     'DisplayName', char(label));
-                h.Annotation.LegendInformation.IconDisplayStyle = 'on';
-                plottedLabels(end + 1) = label; %#ok<AGROW>
+                legendHandles(end + 1) = h; %#ok<AGROW>
             end
-            if ~isempty(plottedLabels)
-                legend(app.TissueAxes, 'Location', 'bestoutside', 'Interpreter', 'none')
+
+            if ~isempty(legendHandles)
+                legend(app.TissueAxes, legendHandles, 'Location', 'bestoutside', 'Interpreter', 'none')
             end
         end
 
-        function updateTissuePlotClasses(app)
+        function updateTissuePlotClasses(app, rows)
+            arguments
+                app
+                rows double = []
+            end
+
             if isempty(app.TissueAxes) || ~isvalid(app.TissueAxes)
                 return
             end
-            imagePage = app.getImagePage(double(app.ActiveSource.PageIndex));
-            if isempty(imagePage)
+            if isempty(app.TissueClassPointHandle) || ~isvalid(app.TissueClassPointHandle)
                 return
             end
-            app.renderTissuePlot(imagePage);
+            if isempty(app.TissueClassPointRows)
+                return
+            end
+
+            if isempty(rows)
+                rows = app.TissueClassPointRows;
+            else
+                rows = unique(rows(:));
+            end
+
+            [isPlotted, plottedIdx] = ismember(rows, app.TissueClassPointRows);
+            rows = rows(isPlotted);
+            plottedIdx = plottedIdx(isPlotted);
+            if isempty(rows)
+                return
+            end
+
+            colors = app.tissuePointColorsForRows(rows);
+            cData = app.TissueClassPointHandle.CData;
+            cData(plottedIdx, :) = colors;
+            app.TissueClassPointHandle.CData = cData;
+        end
+
+        function colors = tissuePointColorsForRows(app, rows)
+            arguments
+                app
+                rows double
+            end
+
+            rows = rows(:);
+            colors = zeros(numel(rows), 3);
+            labels = string(app.ActiveReviewTable.QCLabel(rows));
+            labels(ismissing(labels)) = "";
+            labels(strlength(labels) == 0) = "Unreviewed";
+            for k = 1:numel(rows)
+                colors(k, :) = app.categoryEdgeColor(labels(k));
+            end
         end
 
         function updateTissuePlotSelection(app)
@@ -800,6 +923,7 @@ classdef CellLocalizationQCApp < handle
 
             uilabel(grid, 'Text', 'Column', 'HorizontalAlignment', 'right');
             columnDropDown = uidropdown(grid, 'Items', columns, 'Value', char(defaultColumn));
+            app.setTooltip(columnDropDown, "Numeric score column to histogram. Default: rescore if present, otherwise score.");
 
             helpText = uilabel(grid, 'Text', 'Histograms are overlaid by current QC class using the same class colors as the montage borders.');
             helpText.Layout.Column = [1 2];
@@ -809,8 +933,10 @@ classdef CellLocalizationQCApp < handle
             buttonGrid.ColumnWidth = {'1x', 90, 90};
             buttonGrid.Padding = [0 0 0 0];
             uilabel(buttonGrid, 'Text', '');
-            uibutton(buttonGrid, 'push', 'Text', 'Plot', 'ButtonPushedFcn', @(src, event) app.applyHistogramDialog(dlg));
-            uibutton(buttonGrid, 'push', 'Text', 'Cancel', 'ButtonPushedFcn', @(src, event) delete(dlg));
+            plotButton = uibutton(buttonGrid, 'push', 'Text', 'Plot', 'ButtonPushedFcn', @(src, event) app.applyHistogramDialog(dlg));
+            cancelButton = uibutton(buttonGrid, 'push', 'Text', 'Cancel', 'ButtonPushedFcn', @(src, event) delete(dlg));
+            app.setTooltip(plotButton, "Create class-colored overlaid histogram in a new MATLAB figure.");
+            app.setTooltip(cancelButton, "Close without plotting.");
 
             controls = struct();
             controls.ColumnDropDown = columnDropDown;
@@ -1002,21 +1128,27 @@ classdef CellLocalizationQCApp < handle
 
             uilabel(grid, 'Text', 'Column', 'HorizontalAlignment', 'right');
             columnDropDown = uidropdown(grid, 'Items', numericColumns, 'Value', char(defaultColumn));
+            app.setTooltip(columnDropDown, "Numeric column used for threshold classification. Default: rescore if present.");
 
             uilabel(grid, 'Text', 'Condition', 'HorizontalAlignment', 'right');
             conditionDropDown = uidropdown(grid, 'Items', ["Above", "Below", "Between"], 'Value', char(app.validThresholdMode()));
+            app.setTooltip(conditionDropDown, "Threshold rule: above lower, below lower, or inclusive between lower and upper.");
 
             uilabel(grid, 'Text', 'Threshold', 'HorizontalAlignment', 'right');
             lowerEdit = uieditfield(grid, 'numeric', 'Value', app.validThresholdLower());
+            app.setTooltip(lowerEdit, "Lower threshold value. Default: last used value.");
 
             uilabel(grid, 'Text', 'Upper threshold', 'HorizontalAlignment', 'right');
             upperEdit = uieditfield(grid, 'numeric', 'Value', app.validThresholdUpper());
+            app.setTooltip(upperEdit, "Upper threshold for Between mode. Default: last used value.");
 
             uilabel(grid, 'Text', 'Class', 'HorizontalAlignment', 'right');
             classDropDown = uidropdown(grid, 'Items', string({app.Categories.Name}), 'Value', char(defaultClass));
+            app.setTooltip(classDropDown, "QC class assigned to matching cells. Default: last used class.");
 
             uilabel(grid, 'Text', 'Scope', 'HorizontalAlignment', 'right');
             scopeDropDown = uidropdown(grid, 'Items', ["All cells in active source", "Current filtered cells"], 'Value', char(app.validThresholdScope()));
+            app.setTooltip(scopeDropDown, "Apply to all active-source rows or only rows passing the current filter.");
 
             helpText = uilabel(grid, 'Text', 'Above/below use Threshold. Between is inclusive and uses Threshold through Upper threshold. NaN values are ignored.');
             helpText.Layout.Column = [1 2];
@@ -1026,8 +1158,10 @@ classdef CellLocalizationQCApp < handle
             buttonGrid.ColumnWidth = {'1x', 90, 90};
             buttonGrid.Padding = [0 0 0 0];
             uilabel(buttonGrid, 'Text', '');
-            uibutton(buttonGrid, 'push', 'Text', 'Apply', 'ButtonPushedFcn', @(src, event) app.applyThresholdClassificationDialog(dlg));
-            uibutton(buttonGrid, 'push', 'Text', 'Cancel', 'ButtonPushedFcn', @(src, event) delete(dlg));
+            applyButton = uibutton(buttonGrid, 'push', 'Text', 'Apply', 'ButtonPushedFcn', @(src, event) app.applyThresholdClassificationDialog(dlg));
+            cancelButton = uibutton(buttonGrid, 'push', 'Text', 'Cancel', 'ButtonPushedFcn', @(src, event) delete(dlg));
+            app.setTooltip(applyButton, "Classify all cells matching the threshold rule and save through normal QC workflow.");
+            app.setTooltip(cancelButton, "Close without changing classifications.");
 
             controls = struct();
             controls.ColumnDropDown = columnDropDown;
@@ -1207,6 +1341,35 @@ classdef CellLocalizationQCApp < handle
                     scope = savedScope;
                 end
             end
+        end
+
+        function onScanButtonPushed(app, src, event)
+            arguments
+                app
+                src
+                event
+            end
+
+            app.scanParentDirectory(true);
+        end
+
+        function openActiveDatasetFolder(app)
+            arguments
+                app
+            end
+
+            if app.ActiveDatasetIndex < 1 || isempty(app.DatasetList) || app.ActiveDatasetIndex > height(app.DatasetList)
+                uialert(app.UIFigure, "No dataset is currently loaded.", "Open Folder");
+                return
+            end
+
+            folderPath = string(app.DatasetList.Folder(app.ActiveDatasetIndex));
+            if strlength(folderPath) == 0 || ~isfolder(folderPath)
+                uialert(app.UIFigure, "The current dataset folder could not be found.", "Open Folder");
+                return
+            end
+
+            app.openFolderInSystemBrowser(folderPath);
         end
 
         function chooseParentDirectory(app)
@@ -1660,7 +1823,12 @@ classdef CellLocalizationQCApp < handle
             app.restoreLastBlock();
             app.showCurrentBlock();
             app.updateSelectedCellDetail();
-            app.updateTissuePlotClasses();
+            if ~isempty(app.TissueAxes) && isvalid(app.TissueAxes)
+                imagePage = app.getImagePage(double(app.ActiveSource.PageIndex));
+                if ~isempty(imagePage)
+                    app.renderTissuePlot(imagePage);
+                end
+            end
             app.updateProgress();
         end
 
@@ -1722,10 +1890,11 @@ classdef CellLocalizationQCApp < handle
             reviewTbl.QCVersion = repmat(string(app.QCVersion), n, 1);
             reviewTbl.QCUniqueID = app.makeUniqueIDs(source, n);
             reviewTbl.QCOutOfBounds = false(n, 1);
+            reviewTbl.QCIncludesImageBorder = false(n, 1);
             reviewTbl.QCWarning = strings(n, 1);
 
-            reviewTbl = app.markOutOfBounds(reviewTbl, source);
             reviewTbl = app.mergeExistingQC(reviewTbl, source);
+            reviewTbl = app.markOutOfBounds(reviewTbl, source);
         end
 
         function tbl = removeExistingQCColumns(app, tbl)
@@ -1764,13 +1933,54 @@ classdef CellLocalizationQCApp < handle
             if isempty(app.ActiveTiffInfo) || source.PageIndex > numel(app.ActiveTiffInfo)
                 return
             end
-            width = double(app.ActiveTiffInfo(source.PageIndex).Width);
-            height = double(app.ActiveTiffInfo(source.PageIndex).Height);
-            x = reviewTbl.X;
-            y = reviewTbl.Y;
-            out = x < 1 | x > width | y < 1 | y > height;
+
+            imageWidth = double(app.ActiveTiffInfo(source.PageIndex).Width);
+            imageHeight = double(app.ActiveTiffInfo(source.PageIndex).Height);
+            x = double(reviewTbl.X);
+            y = double(reviewTbl.Y);
+            out = x < 1 | x > imageWidth | y < 1 | y > imageHeight;
+            border = app.cropIncludesImageBorder(x, y, imageWidth, imageHeight);
+
             reviewTbl.QCOutOfBounds = out;
+            if ~ismember("QCWarning", string(reviewTbl.Properties.VariableNames))
+                reviewTbl.QCWarning = strings(height(reviewTbl), 1);
+            else
+                reviewTbl.QCWarning(:) = "";
+            end
+            if ~ismember("QCIncludesImageBorder", string(reviewTbl.Properties.VariableNames))
+                reviewTbl.QCIncludesImageBorder = false(height(reviewTbl), 1);
+            end
+            reviewTbl.QCIncludesImageBorder = border;
             reviewTbl.QCWarning(out) = "X/Y outside target image bounds";
+            reviewTbl.QCWarning(~out & border) = "Crop includes image border";
+        end
+
+        function border = cropIncludesImageBorder(app, x, y, imageWidth, imageHeight)
+            arguments
+                app
+                x double
+                y double
+                imageWidth (1,1) double
+                imageHeight (1,1) double
+            end
+
+            cropWidth = max(1, round(double(app.Settings.CropWidth)));
+            cropHeight = max(1, round(double(app.Settings.CropHeight)));
+            centerCol = round(x);
+            centerRow = round(y);
+            colStart = centerCol - floor(cropWidth / 2);
+            rowStart = centerRow - floor(cropHeight / 2);
+            colEnd = colStart + cropWidth - 1;
+            rowEnd = rowStart + cropHeight - 1;
+            border = colStart <= 1 | rowStart <= 1 | colEnd >= imageWidth | rowEnd >= imageHeight;
+        end
+
+        function updateActiveBorderFlags(app)
+            if isempty(app.ActiveReviewTable) || isempty(app.ActiveSource) || ~isfield(app.ActiveSource, 'PageIndex')
+                return
+            end
+
+            app.ActiveReviewTable = app.markOutOfBounds(app.ActiveReviewTable, app.ActiveSource);
         end
 
         function reviewTbl = mergeExistingQC(app, reviewTbl, source)
@@ -1830,7 +2040,7 @@ classdef CellLocalizationQCApp < handle
             switch col
                 case ["QCLabel", "QCReviewer", "QCNotes", "QCDatasetID", "QCChannel", "QCSourceCsv", "QCImagePath", "QCVersion", "QCUniqueID", "QCWarning"]
                     reviewTbl.(char(col))(targetRows) = string(oldValue(sourceRows));
-                case ["QCReviewed", "QCOutOfBounds"]
+                case ["QCReviewed", "QCOutOfBounds", "QCIncludesImageBorder"]
                     reviewTbl.(char(col))(targetRows) = app.toLogical(oldValue(sourceRows));
                 case ["QCCode", "QCCropWidth", "QCCropHeight", "QCSourceRow"]
                     reviewTbl.(char(col))(targetRows) = double(oldValue(sourceRows));
@@ -2002,6 +2212,10 @@ classdef CellLocalizationQCApp < handle
                             break
                         end
                     end
+            end
+
+            if app.Settings.IgnoreBorderObservations && ismember("QCIncludesImageBorder", string(app.ActiveReviewTable.Properties.VariableNames))
+                mask = mask & ~app.ActiveReviewTable.QCIncludesImageBorder(rows);
             end
 
             app.FilteredOrder = rows(mask);
@@ -2288,7 +2502,7 @@ classdef CellLocalizationQCApp < handle
                 targetSize (1,2) double {mustBeInteger, mustBePositive}
             end
 
-            if ndims(in) == 2
+            if ismatrix(in)
                 in = repmat(in, 1, 1, 3);
             end
             out = zeros(targetSize(1), targetSize(2), 3);
@@ -2301,6 +2515,9 @@ classdef CellLocalizationQCApp < handle
             if isempty(app.MontageVisibleRows) || isempty(app.MontageTileBounds)
                 return
             end
+            
+            
+
 
             for k = 1:numel(app.MontageVisibleRows)
                 rowIdx = app.MontageVisibleRows(k);
@@ -2310,18 +2527,26 @@ classdef CellLocalizationQCApp < handle
                     label = "Unreviewed";
                 end
 
-                edgeColor = app.categoryEdgeColor(label);
-                lineWidth = 1.5;
-                if ismember(k, app.SelectedVisibleIndices)
-                    lineWidth = 3.5;
-                end
 
+
+                if ismember(k, app.SelectedVisibleIndices)
+                    rectangle('Parent', app.MontageAxes, ...
+                        'Position', [bounds(1), bounds(2), bounds(3), bounds(4)]+[-2 -2 4 4], ...
+                        'EdgeColor', 'cyan', ...
+                        'LineWidth', 7, ...
+                        'HitTest', 'off', ...
+                        'PickableParts', 'none');
+                end
+                
+                edgeColor = app.categoryEdgeColor(label);
+                lineWidth = 2;
                 rectangle('Parent', app.MontageAxes, ...
                     'Position', [bounds(1) - 0.5, bounds(2) - 0.5, bounds(3), bounds(4)], ...
                     'EdgeColor', edgeColor, ...
                     'LineWidth', lineWidth, ...
                     'HitTest', 'off', ...
                     'PickableParts', 'none');
+
 
                 if app.Settings.MarkerVisible && k <= numel(app.MontageMarkerPositions) && ~isempty(app.MontageMarkerPositions{k})
                     app.plotMarkers(app.MontageAxes, app.MontageMarkerPositions{k});
@@ -2998,6 +3223,234 @@ classdef CellLocalizationQCApp < handle
             app.setSelectedVisibleTile(tileIndex);
         end
 
+        function armCoordinateUpdate(app)
+            if isempty(app.ActiveReviewTable) || isnan(app.SelectedGlobalRow)
+                uialert(app.UIFigure, 'Select a detection before updating its coordinate.', 'No detection selected');
+                return
+            end
+
+            app.RecenterMode = true;
+            app.updateStatus("Click the selected-detection crop at the new cell center. The coordinate will be confirmed before it is changed.");
+        end
+
+        function onSelectedDetectionImageClicked(app, ax)
+            arguments
+                app
+                ax
+            end
+
+            if app.RecenterMode
+                app.updateSelectedCoordinateFromClick(ax);
+            else
+                app.showSelectedCropFigure();
+            end
+        end
+
+        function updateSelectedCoordinateFromClick(app, ax)
+            arguments
+                app
+                ax
+            end
+
+            if isempty(app.ActiveReviewTable) || isnan(app.SelectedGlobalRow)
+                app.RecenterMode = false;
+                return
+            end
+
+            rowIdx = app.SelectedGlobalRow;
+            point = ax.CurrentPoint;
+            displayX = point(1, 1);
+            displayY = point(1, 2);
+            [newX, newY, isValid, message] = app.originalCoordinateFromCropClick(rowIdx, displayX, displayY);
+            if ~isValid
+                app.updateStatus(message);
+                return
+            end
+
+            oldX = double(app.ActiveReviewTable.X(rowIdx));
+            oldY = double(app.ActiveReviewTable.Y(rowIdx));
+            prompt = sprintf(['Replace coordinate for source row %d?\n\n' ...
+                'Old: X %.2f, Y %.2f\n' ...
+                'New: X %.2f, Y %.2f'], ...
+                app.ActiveReviewTable.QCSourceRow(rowIdx), oldX, oldY, newX, newY);
+            selection = uiconfirm(app.UIFigure, prompt, 'Confirm coordinate update', ...
+                'Options', {'Update', 'Cancel'}, ...
+                'DefaultOption', 'Update', ...
+                'CancelOption', 'Cancel');
+            if string(selection) ~= "Update"
+                app.RecenterMode = false;
+                app.updateStatus("Coordinate update canceled.");
+                return
+            end
+
+            app.pushUndo(rowIdx);
+            app.ActiveReviewTable.X(rowIdx) = newX;
+            app.ActiveReviewTable.Y(rowIdx) = newY;
+            sourceRow = app.ActiveReviewTable.QCSourceRow(rowIdx);
+            if sourceRow >= 1 && sourceRow <= height(app.ActiveLocalizationTable)
+                names = string(app.ActiveLocalizationTable.Properties.VariableNames);
+                if ismember("X", names)
+                    app.ActiveLocalizationTable.X(sourceRow) = newX;
+                end
+                if ismember("Y", names)
+                    app.ActiveLocalizationTable.Y(sourceRow) = newY;
+                end
+            end
+
+            app.ActiveReviewTable.QCCropWidth(rowIdx) = double(app.Settings.CropWidth);
+            app.ActiveReviewTable.QCCropHeight(rowIdx) = double(app.Settings.CropHeight);
+            app.Dirty = true;
+            app.RecenterMode = false;
+            app.buildDisplayOrder();
+            app.applyFilter(false);
+            app.selectGlobalRow(rowIdx);
+            app.refreshActiveSourceProgress();
+            app.updateDatasetTable();
+            app.refreshTissuePlotAfterCoordinateUpdate();
+            app.updateProgress();
+            app.updateStatus(sprintf('Updated source row %d coordinate to X %.2f, Y %.2f.', sourceRow, newX, newY));
+        end
+
+        function [newX, newY, isValid, message] = originalCoordinateFromCropClick(app, rowIdx, displayX, displayY)
+            arguments
+                app
+                rowIdx (1,1) double
+                displayX (1,1) double
+                displayY (1,1) double
+            end
+
+            newX = NaN;
+            newY = NaN;
+            isValid = false;
+            message = "Click was outside the selected detection crop.";
+
+            targetPage = double(app.ActiveSource.PageIndex);
+            [colStart, rowStart, cropWidth, cropHeight, geometryValid] = app.cropGeometryForRow(rowIdx, targetPage);
+            if ~geometryValid
+                message = "Selected detection crop is unavailable.";
+                return
+            end
+
+            localX = displayX;
+            localY = displayY;
+            mode = string(app.Settings.DisplayMode);
+            if mode == "Side-by-side channel view"
+                gap = 4;
+                if displayX >= 1 && displayX <= cropWidth
+                    localX = displayX;
+                elseif displayX > cropWidth + gap && displayX <= cropWidth + gap + cropWidth
+                    localX = displayX - cropWidth - gap;
+                else
+                    message = "Click the target or companion crop, not the side-by-side gap.";
+                    return
+                end
+            end
+
+            if localX < 0.5 || localX > cropWidth + 0.5 || localY < 0.5 || localY > cropHeight + 0.5
+                return
+            end
+
+            newX = colStart + localX - 1;
+            newY = rowStart + localY - 1;
+            imageWidth = double(app.ActiveTiffInfo(targetPage).Width);
+            imageHeight = double(app.ActiveTiffInfo(targetPage).Height);
+            newX = min(max(newX, 1), imageWidth);
+            newY = min(max(newY, 1), imageHeight);
+            isValid = true;
+            message = "";
+        end
+
+        function [colStart, rowStart, cropWidth, cropHeight, isValid] = cropGeometryForRow(app, rowIdx, pageIndex)
+            arguments
+                app
+                rowIdx (1,1) double
+                pageIndex (1,1) double
+            end
+
+            colStart = NaN;
+            rowStart = NaN;
+            cropWidth = NaN;
+            cropHeight = NaN;
+            isValid = false;
+            if isnan(pageIndex) || pageIndex < 1 || isempty(app.ActiveTiffInfo) || pageIndex > numel(app.ActiveTiffInfo)
+                return
+            end
+
+            x = double(app.ActiveReviewTable.X(rowIdx));
+            y = double(app.ActiveReviewTable.Y(rowIdx));
+            if ~isfinite(x) || ~isfinite(y)
+                return
+            end
+
+            imageWidth = double(app.ActiveTiffInfo(pageIndex).Width);
+            imageHeight = double(app.ActiveTiffInfo(pageIndex).Height);
+            width = max(1, round(double(app.Settings.CropWidth)));
+            height = max(1, round(double(app.Settings.CropHeight)));
+            centerCol = round(x);
+            centerRow = round(y);
+            requestedColStart = centerCol - floor(width / 2);
+            requestedRowStart = centerRow - floor(height / 2);
+            requestedColEnd = requestedColStart + width - 1;
+            requestedRowEnd = requestedRowStart + height - 1;
+
+            colStart = max(1, requestedColStart);
+            rowStart = max(1, requestedRowStart);
+            colEnd = min(imageWidth, requestedColEnd);
+            rowEnd = min(imageHeight, requestedRowEnd);
+            if colStart > colEnd || rowStart > rowEnd
+                return
+            end
+
+            cropWidth = colEnd - colStart + 1;
+            cropHeight = rowEnd - rowStart + 1;
+            isValid = true;
+        end
+
+        function refreshTissuePlotAfterCoordinateUpdate(app)
+            if isempty(app.TissueAxes) || ~isvalid(app.TissueAxes)
+                return
+            end
+            if ~isempty(app.TissueClassPointHandle) && isvalid(app.TissueClassPointHandle)
+                x = double(app.ActiveReviewTable.X(app.TissueClassPointRows));
+                y = double(app.ActiveReviewTable.Y(app.TissueClassPointRows));
+                app.TissueClassPointHandle.XData = x;
+                app.TissueClassPointHandle.YData = y;
+            end
+            app.updateTissuePlotSelection();
+        end
+
+        function syncActiveLocalizationCoordinates(app, rows)
+            arguments
+                app
+                rows double
+            end
+
+            if isempty(app.ActiveLocalizationTable) || isempty(rows)
+                return
+            end
+            names = string(app.ActiveLocalizationTable.Properties.VariableNames);
+            hasX = ismember("X", names);
+            hasY = ismember("Y", names);
+            if ~hasX && ~hasY
+                return
+            end
+
+            rows = rows(:);
+            rows = rows(rows >= 1 & rows <= height(app.ActiveReviewTable));
+            for k = 1:numel(rows)
+                sourceRow = app.ActiveReviewTable.QCSourceRow(rows(k));
+                if sourceRow < 1 || sourceRow > height(app.ActiveLocalizationTable)
+                    continue
+                end
+                if hasX
+                    app.ActiveLocalizationTable.X(sourceRow) = app.ActiveReviewTable.X(rows(k));
+                end
+                if hasY
+                    app.ActiveLocalizationTable.Y(sourceRow) = app.ActiveReviewTable.Y(rows(k));
+                end
+            end
+        end
+
         function updateSelectedCellDetail(app)
             if isempty(app.ActiveReviewTable) || isnan(app.SelectedGlobalRow) || app.SelectedGlobalRow < 1 || app.SelectedGlobalRow > height(app.ActiveReviewTable)
                 cla(app.DetailAxes)
@@ -3018,7 +3471,12 @@ classdef CellLocalizationQCApp < handle
                 else
                     hImage = imshow(crop.Image, crop.Range, 'Parent', app.DetailAxes);
                 end
-                hImage.ButtonDownFcn = @(src, event) app.showSelectedCropFigure();
+                hImage.HitTest = 'on';
+                hImage.PickableParts = 'all';
+                hImage.ButtonDownFcn = @(src, event) app.onSelectedDetectionImageClicked(app.DetailAxes);
+                app.DetailAxes.ButtonDownFcn = @(src, event) app.onSelectedDetectionImageClicked(app.DetailAxes);
+                app.DetailAxes.HitTest = 'on';
+                app.DetailAxes.PickableParts = 'all';
                 hold(app.DetailAxes, 'on')
                 if app.Settings.MarkerVisible && ~isempty(crop.Markers)
                     app.plotMarkers(app.DetailAxes, crop.Markers);
@@ -3051,7 +3509,7 @@ classdef CellLocalizationQCApp < handle
                 value = app.ActiveLocalizationTable.(char(vars(k)))(rowIdx);
                 values(k) = app.scalarToString(value);
             end
-            qcVars = ["QCLabel", "QCCode", "QCReviewed", "QCTimestamp", "QCOutOfBounds", "QCWarning"]';
+            qcVars = ["QCLabel", "QCCode", "QCReviewed", "QCTimestamp", "QCOutOfBounds", "QCIncludesImageBorder", "QCWarning"]';
             qcValues = strings(numel(qcVars), 1);
             for k = 1:numel(qcVars)
                 qcValues(k) = app.scalarToString(app.ActiveReviewTable.(char(qcVars(k)))(rowIdx));
@@ -3262,7 +3720,7 @@ classdef CellLocalizationQCApp < handle
             app.ClassificationsSinceSave = app.ClassificationsSinceSave + numel(rows);
             app.refreshActiveSourceProgress();
             app.updateDatasetTable();
-            app.updateTissuePlotClasses();
+            app.updateTissuePlotClasses(rows);
             app.updateTissuePlotSelection();
 
             if app.Settings.AutosaveEnabled && app.ClassificationsSinceSave >= app.Settings.AutosaveFrequency
@@ -3284,7 +3742,7 @@ classdef CellLocalizationQCApp < handle
             app.Dirty = true;
             app.refreshActiveSourceProgress();
             app.updateDatasetTable();
-            app.updateTissuePlotClasses();
+            app.updateTissuePlotClasses(rows);
             app.updateTissuePlotSelection();
             app.buildDisplayOrder();
             app.applyFilter(false);
@@ -3311,6 +3769,8 @@ classdef CellLocalizationQCApp < handle
             rows = rows(:);
             state = struct();
             state.Rows = rows;
+            state.X = app.ActiveReviewTable.X(rows);
+            state.Y = app.ActiveReviewTable.Y(rows);
             state.QCLabel = app.ActiveReviewTable.QCLabel(rows);
             state.QCCode = app.ActiveReviewTable.QCCode(rows);
             state.QCReviewed = app.ActiveReviewTable.QCReviewed(rows);
@@ -3333,6 +3793,12 @@ classdef CellLocalizationQCApp < handle
             app.UndoStack(end) = [];
             rows = state.Rows;
             rows = rows(rows >= 1 & rows <= height(app.ActiveReviewTable));
+            if isfield(state, 'X')
+                app.ActiveReviewTable.X(rows) = state.X;
+            end
+            if isfield(state, 'Y')
+                app.ActiveReviewTable.Y(rows) = state.Y;
+            end
             app.ActiveReviewTable.QCLabel(rows) = state.QCLabel;
             app.ActiveReviewTable.QCCode(rows) = state.QCCode;
             app.ActiveReviewTable.QCReviewed(rows) = state.QCReviewed;
@@ -3341,10 +3807,11 @@ classdef CellLocalizationQCApp < handle
             app.ActiveReviewTable.QCNotes(rows) = state.QCNotes;
             app.ActiveReviewTable.QCCropWidth(rows) = state.QCCropWidth;
             app.ActiveReviewTable.QCCropHeight(rows) = state.QCCropHeight;
+            app.syncActiveLocalizationCoordinates(rows);
             app.Dirty = true;
             app.refreshActiveSourceProgress();
             app.updateDatasetTable();
-            app.updateTissuePlotClasses();
+            app.updateTissuePlotClasses(rows);
             app.updateTissuePlotSelection();
             app.buildDisplayOrder();
             app.applyFilter(false);
@@ -3588,6 +4055,272 @@ classdef CellLocalizationQCApp < handle
             app.updateProgress();
         end
 
+
+        function exportObservationCsvDialog(app)
+            if isempty(app.DatasetList) || height(app.DatasetList) == 0 || isempty(app.SourceListByDataset)
+                uialert(app.UIFigure, 'No scanned datasets are available to export.', 'No data');
+                return
+            end
+
+            if app.Dirty
+                app.saveCurrentQC();
+            end
+
+            choice = uiconfirm(app.UIFigure, ...
+                'Include observations without a QC classification?', ...
+                'Export observation CSV', ...
+                'Options', {'Include unclassified', 'Classified only', 'Cancel'}, ...
+                'DefaultOption', 1, ...
+                'CancelOption', 3);
+            if strcmp(choice, 'Cancel')
+                return
+            end
+            includeUnclassified = strcmp(choice, 'Include unclassified');
+
+            defaultName = sprintf('CellLocalizationQC_observations_%s.csv', datestr(now, 'yyyymmdd_HHMMSS'));
+            if strlength(app.ParentDirectory) > 0 && isfolder(app.ParentDirectory)
+                defaultPath = fullfile(char(app.ParentDirectory), defaultName);
+            else
+                defaultPath = defaultName;
+            end
+
+            [fileName, folderName] = uiputfile({'*.csv', 'CSV files (*.csv)'}, ...
+                'Export observation CSV', defaultPath);
+            if isequal(fileName, 0) || isequal(folderName, 0)
+                return
+            end
+
+            outPath = fullfile(folderName, fileName);
+            try
+                exportTbl = app.buildObservationExportTable(includeUnclassified);
+                writetable(exportTbl, outPath);
+            catch ME
+                uialert(app.UIFigure, ME.message, 'Observation export failed');
+                app.updateStatus("Observation export failed: " + string(ME.message));
+                return
+            end
+
+            app.updateStatus(sprintf('Exported %d observation(s): %s', height(exportTbl), outPath));
+            uialert(app.UIFigure, sprintf('Exported %d observation(s).', height(exportTbl)), 'Observation export complete');
+        end
+
+        function exportTbl = buildObservationExportTable(app, includeUnclassified)
+            arguments
+                app
+                includeUnclassified (1,1) logical
+            end
+
+            pieces = cell(0, 1);
+            skipped = strings(0, 1);
+
+            for datasetIndex = 1:numel(app.SourceListByDataset)
+                sources = app.SourceListByDataset{datasetIndex};
+                for sourceIndex = 1:numel(sources)
+                    source = sources(sourceIndex);
+                    try
+                        sourceTbl = app.observationExportTableForSource(source, includeUnclassified);
+                    catch ME
+                        skipped(end + 1, 1) = sprintf('%s: %s', char(app.sourceIdentity(source)), ME.message); %#ok<AGROW>
+                        continue
+                    end
+
+                    if ~isempty(sourceTbl) && height(sourceTbl) > 0
+                        pieces{end + 1, 1} = sourceTbl; %#ok<AGROW>
+                    end
+                end
+            end
+
+            if isempty(pieces)
+                exportTbl = app.emptyObservationExportTable();
+            else
+                exportTbl = vertcat(pieces{:});
+            end
+
+            if ~isempty(skipped)
+                app.updateStatus(sprintf('Observation export skipped %d source(s).', numel(skipped)));
+            end
+        end
+
+        function outTbl = observationExportTableForSource(app, source, includeUnclassified)
+            arguments
+                app
+                source struct
+                includeUnclassified (1,1) logical
+            end
+
+            qcPath = app.qcPathForCsv(source.CsvPath);
+            useQC = isfile(qcPath);
+            if useQC
+                tbl = readtable(char(qcPath), 'TextType', 'string', 'VariableNamingRule', 'preserve');
+            else
+                if ~includeUnclassified
+                    outTbl = app.emptyObservationExportTable();
+                    return
+                end
+                tbl = readtable(char(source.CsvPath), 'TextType', 'string', 'VariableNamingRule', 'preserve');
+            end
+
+            n = height(tbl);
+            if n == 0
+                outTbl = app.emptyObservationExportTable();
+                return
+            end
+
+            x = app.tableNumericColumn(tbl, "X", NaN);
+            y = app.tableNumericColumn(tbl, "Y", NaN);
+            score = app.tableNumericColumn(tbl, "score", NaN);
+            rescore = app.tableNumericColumn(tbl, "rescore", NaN);
+            cropHeight = app.tableNumericColumn(tbl, "QCCropHeight", double(app.Settings.CropHeight));
+            cropWidth = app.tableNumericColumn(tbl, "QCCropWidth", double(app.Settings.CropWidth));
+
+            labels = app.tableStringColumn(tbl, "QCLabel", "");
+            labels = strtrim(labels);
+            isClassified = ~ismissing(labels) & strlength(labels) > 0;
+            if includeUnclassified
+                labels(~isClassified) = "Unclassified";
+                keep = true(n, 1);
+            else
+                keep = isClassified;
+            end
+
+            imagePath = repmat(string(source.ImagePath), n, 1);
+            pageNumber = repmat(double(source.PageIndex), n, 1);
+            pageAlias = repmat(string(source.ChannelName), n, 1);
+
+            observationId = app.observationMd5Ids(imagePath, pageAlias, x, y);
+
+            outTbl = table(observationId(keep), imagePath(keep), pageNumber(keep), pageAlias(keep), ...
+                x(keep), y(keep), score(keep), rescore(keep), ...
+                cropHeight(keep), cropWidth(keep), labels(keep), ...
+                'VariableNames', {'ObservationID', 'ImagePath', 'TiffPageNumber', 'PageAlias', 'X', 'Y', ...
+                'Score', 'Rescore', 'CropHeight', 'CropWidth', 'Classification'});
+        end
+
+        function ids = observationMd5Ids(app, imagePath, pageAlias, x, y)
+            arguments
+                app
+                imagePath (:,1) string
+                pageAlias (:,1) string
+                x (:,1) double
+                y (:,1) double
+            end
+
+            n = numel(imagePath);
+            ids = strings(n, 1);
+            for row = 1:n
+                key = sprintf('%s|%s|%.15g|%.15g', ...
+                    char(imagePath(row)), char(pageAlias(row)), x(row), y(row));
+                ids(row) = app.md5String(key);
+            end
+        end
+
+        function hashText = md5String(app, inputText)
+            arguments
+                app
+                inputText (1,:) char
+            end
+
+            digest = java.security.MessageDigest.getInstance('MD5');
+            rawHash = digest.digest(uint8(inputText));
+            hashBytes = typecast(rawHash, 'uint8');
+            hashText = string(lower(sprintf('%02x', hashBytes)));
+        end
+
+        function tbl = emptyObservationExportTable(app)
+            arguments
+                app
+            end
+
+            tbl = table(string.empty(0,1), string.empty(0,1), zeros(0,1), string.empty(0,1), ...
+                zeros(0,1), zeros(0,1), zeros(0,1), zeros(0,1), ...
+                zeros(0,1), zeros(0,1), string.empty(0,1), ...
+                'VariableNames', {'ObservationID', 'ImagePath', 'TiffPageNumber', 'PageAlias', 'X', 'Y', ...
+                'Score', 'Rescore', 'CropHeight', 'CropWidth', 'Classification'});
+        end
+
+        function values = tableNumericColumn(app, tbl, requestedName, defaultValue)
+            arguments
+                app
+                tbl table
+                requestedName (1,1) string
+                defaultValue (1,1) double = NaN
+            end
+
+            n = height(tbl);
+            values = repmat(defaultValue, n, 1);
+            varName = app.findTableVariable(tbl, requestedName);
+            if strlength(varName) == 0
+                return
+            end
+
+            raw = tbl.(char(varName));
+            if isnumeric(raw) || islogical(raw)
+                values = double(raw(:));
+            elseif isstring(raw) || iscellstr(raw) || iscategorical(raw)
+                values = str2double(string(raw(:)));
+            elseif iscell(raw)
+                values = str2double(string(raw(:)));
+            else
+                values = repmat(defaultValue, n, 1);
+            end
+
+            if numel(values) ~= n
+                values = values(:);
+                if numel(values) < n
+                    values(end + 1:n, 1) = defaultValue;
+                elseif numel(values) > n
+                    values = values(1:n);
+                end
+            end
+        end
+
+        function values = tableStringColumn(app, tbl, requestedName, defaultValue)
+            arguments
+                app
+                tbl table
+                requestedName (1,1) string
+                defaultValue (1,1) string = ""
+            end
+
+            n = height(tbl);
+            values = repmat(defaultValue, n, 1);
+            varName = app.findTableVariable(tbl, requestedName);
+            if strlength(varName) == 0
+                return
+            end
+
+            raw = tbl.(char(varName));
+            values = string(raw(:));
+            if numel(values) ~= n
+                values = values(:);
+                if numel(values) < n
+                    values(end + 1:n, 1) = defaultValue;
+                elseif numel(values) > n
+                    values = values(1:n);
+                end
+            end
+            values(ismissing(values)) = defaultValue;
+        end
+
+        function varName = findTableVariable(app, tbl, requestedName)
+            arguments
+                app
+                tbl table
+                requestedName (1,1) string
+            end
+
+            names = string(tbl.Properties.VariableNames);
+            idx = find(names == requestedName, 1, 'first');
+            if isempty(idx)
+                idx = find(strcmpi(cellstr(names), char(requestedName)), 1, 'first');
+            end
+            if isempty(idx)
+                varName = "";
+            else
+                varName = names(idx);
+            end
+        end
+
         function saveCurrentQC(app)
             if isempty(app.ActiveReviewTable) || isempty(app.ActiveSource) || ~isfield(app.ActiveSource, 'CsvPath')
                 return
@@ -3633,36 +4366,38 @@ classdef CellLocalizationQCApp < handle
             end
         end
 
-        function exportReviewedData(app, label)
+        function pathOut = uniquePath(app, pathIn)
             arguments
                 app
-                label (1,1) string = "Good"
+                pathIn
             end
 
-            if isempty(app.ActiveReviewTable) || isempty(app.ActiveSource) || ~isfield(app.ActiveSource, 'CsvPath')
+            pathOut = char(pathIn);
+            if ~isfile(pathOut)
                 return
             end
-            mask = string(app.ActiveReviewTable.QCLabel) == label;
-            exportTbl = app.ActiveReviewTable(mask, :);
-            [folder, baseName, ~] = fileparts(char(app.ActiveSource.CsvPath));
-            safeLabel = regexprep(char(label), '[^A-Za-z0-9_]', '');
-            exportPath = string(fullfile(folder, sprintf('%s_%sOnly.csv', baseName, safeLabel)));
-            tempPath = exportPath + ".tmp_" + string(char(java.util.UUID.randomUUID)) + ".csv";
-            try
-                writetable(exportTbl, char(tempPath));
-                if isfile(exportPath)
-                    delete(exportPath);
-                end
-                movefile(char(tempPath), char(exportPath), 'f');
-            catch ME
-                if isfile(tempPath)
-                    delete(tempPath);
-                end
-                uialert(app.UIFigure, ME.message, 'Export failed');
-                app.updateStatus("Export failed: " + string(ME.message));
-                return
+            [folder, baseName, ext] = fileparts(pathOut);
+            counter = 2;
+            while isfile(pathOut)
+                pathOut = fullfile(folder, sprintf('%s_%03d%s', baseName, counter, ext));
+                counter = counter + 1;
             end
-            app.updateStatus(sprintf('Exported %d %s detection(s) to %s', height(exportTbl), char(label), char(exportPath)));
+        end
+
+        function values = safeStringColumn(app, values, nRows)
+            arguments
+                app
+                values
+                nRows (1,1) double
+            end
+
+            values = string(values);
+            values = values(:);
+            if numel(values) < nRows
+                values(end + 1:nRows, 1) = "";
+            elseif numel(values) > nRows
+                values = values(1:nRows);
+            end
         end
 
         function onDatasetTableSelected(app, src, event)
@@ -3703,7 +4438,10 @@ classdef CellLocalizationQCApp < handle
                 end
             end
             app.readSettingsFromUI();
+            app.updateActiveBorderFlags();
             app.saveSettings();
+            app.buildDisplayOrder();
+            app.applyFilter(false);
             app.showCurrentBlock();
         end
 
@@ -3722,7 +4460,7 @@ classdef CellLocalizationQCApp < handle
         end
 
         function openSettingsDialog(app)
-            dlg = uifigure("Name", "Cell Localization QC Settings", "Position", [250 250 720 520]);
+            dlg = uifigure("Name", "Cell Localization QC Settings", "Position", [250 250 720 560]);
             mainGrid = uigridlayout(dlg, [2 1]);
             mainGrid.RowHeight = {'1x', 34};
             mainGrid.ColumnWidth = {'1x'};
@@ -3764,14 +4502,16 @@ classdef CellLocalizationQCApp < handle
             uilabel(categoriesGrid, "Text", "Numeric shortcuts 1-9 are always mapped to category order.");
 
             reviewTab = uitab(tabs, "Title", "Review");
-            reviewGrid = uigridlayout(reviewTab, [6 2]);
-            reviewGrid.RowHeight = {28, 28, 28, 28, 28, '1x'};
+            reviewGrid = uigridlayout(reviewTab, [7 2]);
+            reviewGrid.RowHeight = {28, 28, 28, 28, 28, 28, '1x'};
             reviewGrid.ColumnWidth = {170, '1x'};
             reviewGrid.Padding = [8 8 8 8];
             uilabel(reviewGrid, "Text", "Autosave enabled", "HorizontalAlignment", "right");
             controls.AutosaveCheckBox = uicheckbox(reviewGrid, "Text", "", "Value", logical(app.Settings.AutosaveEnabled));
             uilabel(reviewGrid, "Text", "Autosave frequency", "HorizontalAlignment", "right");
             controls.AutosaveFrequencySpinner = uispinner(reviewGrid, "Limits", [1 1000], "RoundFractionalValues", "on", "Value", double(app.Settings.AutosaveFrequency));
+            uilabel(reviewGrid, "Text", "Ignore border crops", "HorizontalAlignment", "right");
+            controls.IgnoreBorderCheckBox = uicheckbox(reviewGrid, "Text", "", "Value", logical(app.Settings.IgnoreBorderObservations));
             uilabel(reviewGrid, "Text", "Marker style", "HorizontalAlignment", "right");
             controls.MarkerStyleDropDown = uidropdown(reviewGrid, "Items", ["crosshair", "circle"], "Value", char(string(app.Settings.MarkerStyle)));
             uilabel(reviewGrid, "Text", "Marker size", "HorizontalAlignment", "right");
@@ -3780,18 +4520,35 @@ classdef CellLocalizationQCApp < handle
             contrastGrid = uigridlayout(reviewGrid, [1 2]);
             contrastGrid.Padding = [0 0 0 0];
             limits = double(app.Settings.ManualContrastLimits);
-            if numel(limits) ~= 2
-                limits = [NaN NaN];
+            if numel(limits) == 2 && all(isfinite(limits)) && limits(2) > limits(1)
+                manualLimitText = compose("%g", limits);
+            else
+                manualLimitText = ["", ""];
             end
-            controls.ManualMinEdit = uieditfield(contrastGrid, "numeric", "Value", limits(1));
-            controls.ManualMaxEdit = uieditfield(contrastGrid, "numeric", "Value", limits(2));
+            controls.ManualMinEdit = uieditfield(contrastGrid, "text", "Value", char(manualLimitText(1)));
+            controls.ManualMaxEdit = uieditfield(contrastGrid, "text", "Value", char(manualLimitText(2)));
+
+            app.setTooltip(controls.ImagePatternEdit, "Image filename pattern for recursive scan. Default: *_proj.tif.");
+            app.setTooltip(controls.LocalizationPatternEdit, "Localization CSV pattern for recursive scan. Default: *_locs.csv.");
+            app.setTooltip(controls.ReviewerEdit, "Reviewer name stored in QCReviewer when cells are classified.");
+            app.setTooltip(controls.ChannelTable, "Editable channel-to-TIFF-page mapping, for example ECM=1 and PV=2.");
+            app.setTooltip(controls.CategoryTable, "Editable QC categories, numeric codes, and key shortcuts.");
+            app.setTooltip(controls.AutosaveCheckBox, "Enable automatic QC CSV saving after classifications. Default: on.");
+            app.setTooltip(controls.AutosaveFrequencySpinner, "Number of classifications between autosaves. Default: 1.");
+            app.setTooltip(controls.IgnoreBorderCheckBox, "Exclude observations whose crop would touch or extend past an image border. Default: on.");
+            app.setTooltip(controls.MarkerStyleDropDown, "Localization marker style shown in crop views. Default: crosshair.");
+            app.setTooltip(controls.MarkerSizeSpinner, "Localization marker size in pixels. Default: 7.");
+            app.setTooltip(controls.ManualMinEdit, "Manual display contrast minimum used only in Manual min-max mode.");
+            app.setTooltip(controls.ManualMaxEdit, "Manual display contrast maximum used only in Manual min-max mode.");
 
             buttonGrid = uigridlayout(mainGrid, [1 3]);
             buttonGrid.ColumnWidth = {'1x', 90, 90};
             buttonGrid.Padding = [0 0 0 0];
             uilabel(buttonGrid, "Text", "Settings are persisted with setpref and a MAT file in prefdir.");
-            uibutton(buttonGrid, "push", "Text", "Apply", "ButtonPushedFcn", @(src, event) app.applySettingsDialog(dlg));
-            uibutton(buttonGrid, "push", "Text", "Cancel", "ButtonPushedFcn", @(src, event) delete(dlg));
+            applyButton = uibutton(buttonGrid, "push", "Text", "Apply", "ButtonPushedFcn", @(src, event) app.applySettingsDialog(dlg));
+            cancelButton = uibutton(buttonGrid, "push", "Text", "Cancel", "ButtonPushedFcn", @(src, event) delete(dlg));
+            app.setTooltip(applyButton, "Apply settings, persist them, and refresh the active source where needed.");
+            app.setTooltip(cancelButton, "Close without applying settings changes.");
 
             setappdata(dlg, 'Controls', controls);
         end
@@ -3833,9 +4590,23 @@ classdef CellLocalizationQCApp < handle
             app.Settings.Categories = categories;
             app.Settings.AutosaveEnabled = logical(controls.AutosaveCheckBox.Value);
             app.Settings.AutosaveFrequency = max(1, round(controls.AutosaveFrequencySpinner.Value));
+            app.Settings.IgnoreBorderObservations = logical(controls.IgnoreBorderCheckBox.Value);
             app.Settings.MarkerStyle = string(controls.MarkerStyleDropDown.Value);
             app.Settings.MarkerSize = max(3, round(controls.MarkerSizeSpinner.Value));
-            app.Settings.ManualContrastLimits = [controls.ManualMinEdit.Value, controls.ManualMaxEdit.Value];
+
+            manualMinText = strtrim(string(controls.ManualMinEdit.Value));
+            manualMaxText = strtrim(string(controls.ManualMaxEdit.Value));
+            if strlength(manualMinText) == 0 && strlength(manualMaxText) == 0
+                app.Settings.ManualContrastLimits = [NaN NaN];
+            else
+                manualMin = str2double(manualMinText);
+                manualMax = str2double(manualMaxText);
+                if ~isfinite(manualMin) || ~isfinite(manualMax) || manualMax <= manualMin
+                    uialert(dlg, 'Manual contrast limits must be blank or finite numeric values with max greater than min.', 'Invalid manual contrast');
+                    return
+                end
+                app.Settings.ManualContrastLimits = [manualMin, manualMax];
+            end
             app.Categories = app.sanitizeCategories(app.Settings.Categories);
             app.Settings.Categories = app.Categories;
             app.saveSettings();
@@ -3843,6 +4614,7 @@ classdef CellLocalizationQCApp < handle
             app.rebuildCategoryButtons();
 
             if ~isempty(app.ActiveReviewTable)
+                app.updateActiveBorderFlags();
                 app.refreshSortAndFilterControls();
                 app.buildDisplayOrder();
                 app.applyFilter(false);
@@ -4274,18 +5046,28 @@ classdef CellLocalizationQCApp < handle
             end
             crop = app.composeCropDisplay(app.SelectedGlobalRow);
             fig = uifigure("Name", "Selected detection crop", "Position", [200 200 650 650]);
-            grid = uigridlayout(fig, [1 1]);
+            grid = uigridlayout(fig, [2 1]);
+            grid.RowHeight = {30, '1x'};
+            uibutton(grid, "push", ...
+                "Text", "Update coordinate by next click", ...
+                "ButtonPushedFcn", @(src, event) app.armCoordinateUpdate());
             ax = uiaxes(grid);
             ax.Toolbar.Visible = "off";
             disableDefaultInteractivity(ax);
             if crop.IsValid
                 if ndims(crop.Image) == 3
-                    imshow(crop.Image, 'Parent', ax);
+                    hImage = imshow(crop.Image, 'Parent', ax);
                 elseif isempty(crop.Range)
-                    imshow(crop.Image, [], 'Parent', ax);
+                    hImage = imshow(crop.Image, [], 'Parent', ax);
                 else
-                    imshow(crop.Image, crop.Range, 'Parent', ax);
+                    hImage = imshow(crop.Image, crop.Range, 'Parent', ax);
                 end
+                hImage.HitTest = 'on';
+                hImage.PickableParts = 'all';
+                hImage.ButtonDownFcn = @(src, event) app.onSelectedDetectionImageClicked(ax);
+                ax.ButtonDownFcn = @(src, event) app.onSelectedDetectionImageClicked(ax);
+                ax.HitTest = 'on';
+                ax.PickableParts = 'all';
                 hold(ax, 'on')
                 if app.Settings.MarkerVisible && ~isempty(crop.Markers)
                     app.plotMarkers(ax, crop.Markers);
@@ -4525,7 +5307,7 @@ classdef CellLocalizationQCApp < handle
             end
 
             defaults = struct();
-            defaults.SettingsVersion = 1;
+            defaults.SettingsVersion = 2;
             defaults.SettingsSavedAt = 0;
             defaults.LastParentDirectory = "";
             defaults.ImagePattern = "*_proj.tif";
@@ -4533,10 +5315,10 @@ classdef CellLocalizationQCApp < handle
             defaults.ChannelMap = struct('Channel', {'ECM', 'PV'}, 'PageIndex', {1, 2});
             defaults.DefaultActiveChannel = "ECM";
             defaults.Categories = struct( ...
-                'Name', {'Good', 'Bad', 'Uncertain'}, ...
-                'Code', {1, 2, 3}, ...
-                'Shortcut', {'g', 'b', 'u'}, ...
-                'Color', {[0.20 0.65 0.20], [0.80 0.20 0.20], [0.75 0.55 0.15]});
+                'Name', {'Good', 'Bad', 'Uncertain', 'Ignore'}, ...
+                'Code', {1, 2, 3, 4}, ...
+                'Shortcut', {'g', 'b', 'u', 'i'}, ...
+                'Color', {[0.20 0.65 0.20], [0.80 0.20 0.20], [0.75 0.55 0.15], [0.45 0.45 0.45]});
             defaults.CropWidth = 64;
             defaults.CropHeight = 64;
             defaults.LinkedSquareCropMode = true;
@@ -4554,6 +5336,7 @@ classdef CellLocalizationQCApp < handle
             defaults.MarkerSize = 9;
             defaults.AutosaveEnabled = true;
             defaults.AutosaveFrequency = 1;
+            defaults.IgnoreBorderObservations = true;
             defaults.ReviewerName = "";
             defaults.LastActiveDataset = "";
             defaults.LastActiveLocalizationSource = "";
@@ -4636,6 +5419,100 @@ classdef CellLocalizationQCApp < handle
                     categories(k).Color = [0.5 0.5 0.5];
                 end
             end
+
+            categories = app.ensureIgnoreCategory(categories);
+        end
+
+        function categories = ensureIgnoreCategory(app, categories)
+            arguments
+                app
+                categories struct
+            end
+
+            names = string({categories.Name});
+            names(ismissing(names)) = "";
+            ignoreIdx = find(strcmpi(names, "Ignore"), 1, 'first');
+            if ~isempty(ignoreIdx)
+                categories(ignoreIdx).Name = 'Ignore';
+                if isempty(categories(ignoreIdx).Code) || ~isnumeric(categories(ignoreIdx).Code) || ~isfinite(double(categories(ignoreIdx).Code))
+                    categories(ignoreIdx).Code = app.nextCategoryCode(categories);
+                end
+                if strlength(string(categories(ignoreIdx).Shortcut)) == 0
+                    categories(ignoreIdx).Shortcut = app.firstAvailableShortcut(categories, ignoreIdx);
+                end
+                if isempty(categories(ignoreIdx).Color) || ~isnumeric(categories(ignoreIdx).Color) || numel(categories(ignoreIdx).Color) ~= 3
+                    categories(ignoreIdx).Color = [0.45 0.45 0.45];
+                end
+                return
+            end
+
+            ignoreCategory = struct( ...
+                'Name', 'Ignore', ...
+                'Code', app.nextCategoryCode(categories), ...
+                'Shortcut', app.firstAvailableShortcut(categories, []), ...
+                'Color', [0.45 0.45 0.45]);
+            categories(end + 1) = ignoreCategory;
+        end
+
+        function code = nextCategoryCode(app, categories)
+            arguments
+                app
+                categories struct
+            end
+
+            codes = zeros(numel(categories), 1);
+            for k = 1:numel(categories)
+                if isfield(categories, 'Code') && ~isempty(categories(k).Code) && isnumeric(categories(k).Code) && isfinite(double(categories(k).Code))
+                    codes(k) = double(categories(k).Code);
+                end
+            end
+            code = max([codes; 0]) + 1;
+        end
+
+        function shortcut = firstAvailableShortcut(app, categories, selfIndex)
+            arguments
+                app
+                categories struct
+                selfIndex = []
+            end
+
+            used = strings(0, 1);
+            for k = 1:numel(categories)
+                if ~isempty(selfIndex) && k == selfIndex
+                    continue
+                end
+                if isfield(categories, 'Shortcut')
+                    value = lower(strtrim(string(categories(k).Shortcut)));
+                    if strlength(value) > 0
+                        used(end + 1) = value; %#ok<AGROW>
+                    end
+                end
+            end
+
+            candidates = ["i", "0", "x", "semicolon"];
+            shortcut = 'i';
+            for k = 1:numel(candidates)
+                if ~any(used == candidates(k))
+                    shortcut = char(candidates(k));
+                    return
+                end
+            end
+        end
+
+        function openFolderInSystemBrowser(app, folderPath)
+            arguments
+                app
+                folderPath {mustBeTextScalar}
+            end
+
+            folderPath = char(string(folderPath));
+            if ispc
+                winopen(folderPath);
+            elseif ismac
+                system(sprintf('open "%s"', folderPath));
+            else
+                system(sprintf('xdg-open "%s" >/dev/null 2>&1 &', folderPath));
+            end
         end
 
         function matPath = settingsMatPath(app)
@@ -4679,7 +5556,7 @@ classdef CellLocalizationQCApp < handle
             end
 
             names = ["QCLabel", "QCCode", "QCReviewed", "QCReviewer", "QCTimestamp", "QCNotes", "QCCropWidth", "QCCropHeight", ...
-                "QCDatasetID", "QCChannel", "QCSourceCsv", "QCSourceRow", "QCImagePath", "QCVersion", "QCUniqueID", "QCOutOfBounds", "QCWarning"];
+                "QCDatasetID", "QCChannel", "QCSourceCsv", "QCSourceRow", "QCImagePath", "QCVersion", "QCUniqueID", "QCOutOfBounds", "QCIncludesImageBorder", "QCWarning"];
         end
 
         function qcPath = qcPathForCsv(app, csvPath)
