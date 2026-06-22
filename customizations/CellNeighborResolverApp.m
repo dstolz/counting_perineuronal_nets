@@ -5,6 +5,9 @@ classdef CellNeighborResolverApp < handle
 %   then resolve each pair using the action buttons or keyboard shortcuts.
 %   Results are saved back to the original CSV file in place.
 %
+%   Tick "Resized" in the scan toolbar to scan for *_locs_resized.csv files
+%   (resized-image coordinates) instead of the standard *_locs.csv.
+%
 %   Keyboard shortcuts (when a text field is not focused):
 %     a         Keep A (delete B)
 %     b         Keep B (delete A)
@@ -15,7 +18,13 @@ classdef CellNeighborResolverApp < handle
 %     Ctrl+S    Save
 %     Left/j    Previous pair
 %     Right/l   Next pair
+%     f         Fit / reset the tissue view to the full image
 %     Escape    Cancel armed merge
+%
+%   Mouse navigation (tissue plot):
+%     Scroll wheel              Zoom in/out centred on the cursor
+%     Middle-drag / Shift-drag  Pan the image
+%     Right-click menu          Reset view (fit image)
 
     % ------------------------------------------------------------------
     properties (Constant, Access = private)
@@ -23,6 +32,8 @@ classdef CellNeighborResolverApp < handle
         SettingsPrefKey   = 'Settings'
         AppVersion        = '1.0'
         MaxUndoDepth      = 200
+        DEFAULT_REGEX_LOCS         = '(?i)_locs\.csv$'
+        DEFAULT_REGEX_LOCS_RESIZED = '(?i)_locs_resized\.csv$'
         STATUS_UNRESOLVED = "Unresolved"
         STATUS_KEEP_A     = "Keep A"
         STATUS_KEEP_B     = "Keep B"
@@ -37,6 +48,7 @@ classdef CellNeighborResolverApp < handle
         Settings   struct  = struct()
         ParentDirectory string = ""
         AllAbsFiles cell   = {}
+        FileReviewState logical = []   % per-AllAbsFiles flag: CSV carries saved resolver annotations
 
         % --- Active file state ---
         ActiveCsvPath    string  = ""
@@ -45,6 +57,8 @@ classdef CellNeighborResolverApp < handle
         ActiveImagePages struct  = struct()
         ActiveLocTable   table   = table()
         ActiveDisplayPage double = 1
+        ActiveCsvPage    double = NaN     % TIFF page this CSV's detections belong to (NaN = unencoded)
+        CsvSpansMultiplePages logical = false   % combined CSV referencing >1 page => allow page navigation
         Dirty            logical = false
 
         % --- Neighbor / pair state ---
@@ -62,6 +76,7 @@ classdef CellNeighborResolverApp < handle
         DeletePointArmed    logical = false
         RelocatePointArmed  logical = false
         RelocateSelectedRow double  = NaN    % row in ActiveLocTable picked for relocation
+        AddPointArmed       logical = false
 
         % --- UI: top-level ---
         UIFigure
@@ -75,6 +90,7 @@ classdef CellNeighborResolverApp < handle
         BrowseButton
         RegexEdit
         ScanButton
+        ResizedCsvCheckBox
         FileCountLabel
 
         % --- UI: toolbar row 2 (neighbor settings) ---
@@ -84,16 +100,34 @@ classdef CellNeighborResolverApp < handle
         AutoAdvanceCheckBox
         AutoSaveCheckBox
         SaveButton
+        NextPageButton
         ShowPointsCheckBox
 
         % --- UI: left panel ---
         LeftPanel
-        FileListBox
+        FileTable
+        FileInclude         logical = []   % per-AllAbsFiles flag: include dataset in processing
+        FileObsCount        double  = []   % per-AllAbsFiles total observation count
+        FileNeighborCount   double  = []   % per-AllAbsFiles resolved neighbor-pair count
+        FileUnreviewedCount double  = []   % per-AllAbsFiles unreviewed observation count
+        ActiveFileRow       double  = NaN  % row index of the currently-active file in FileTable
+        DatasetProgressLabel
+        DatasetProgressTrack    % grey track panel
+        DatasetProgressFill     % green fill panel, sized manually within the track
+        DatasetProgressFraction double = 0   % 0..1 reviewed fraction (drives the fill width)
+        TrackPixelW double = 0   % pixel width captured in SizeChangedFcn (0 = not yet laid out)
+        TrackPixelH double = 0   % pixel height captured in SizeChangedFcn
         FilterDropDown
         PairProgressLabel
         PairTable
         PreviousPairButton
         NextPairButton
+
+        % --- UI: overview (left panel, bottom) ---
+        OverviewLabel
+        OverviewAxes
+        OverviewImageHandle = []
+        OverviewRectHandle  = []
 
         % --- UI: center panel ---
         CenterPanel
@@ -102,9 +136,16 @@ classdef CellNeighborResolverApp < handle
         TissueAxes
         TissueImageHandle   = []
         TissueAllPointsHandle = []
+        TissueNeighborPointsHandle = []
         TissuePointAHandle  = []
         TissuePointBHandle  = []
         TissueContextMenu   = []
+
+        % --- Image navigation (zoom / pan) state ---
+        TissueHomeXLim      double  = []          % full-image X limits ("home")
+        TissueHomeYLim      double  = []          % full-image Y limits ("home")
+        PanActive           logical = false       % true while a middle-drag pan is in progress
+        PanStartData        double  = [NaN NaN]   % data coord grabbed at pan start
 
         % --- UI: right panel ---
         RightPanel
@@ -114,6 +155,7 @@ classdef CellNeighborResolverApp < handle
         MergeButton
         DeletePointButton
         RelocatePointButton
+        AddPointButton
         SkipButton
         UndoButton
         TissueRelocateHandle
@@ -154,6 +196,7 @@ classdef CellNeighborResolverApp < handle
             app.UIFigure = uifigure("Name", "Cell Neighbor Resolver", "Position", pos);
             app.UIFigure.WindowKeyPressFcn  = @(s,e) app.handleKeyPress(s, e);
             app.UIFigure.CloseRequestFcn    = @(s,e) app.handleCloseRequest(s, e);
+            app.UIFigure.WindowScrollWheelFcn = @(s,e) app.onScrollWheel(s, e);
 
             % Root: toolbar | main | status
             app.RootGrid = uigridlayout(app.UIFigure, [3 1]);
@@ -176,7 +219,7 @@ classdef CellNeighborResolverApp < handle
             app.TopToolbarGrid.Layout.Row = 1;
             app.TopToolbarGrid.Layout.Column = 1;
             app.TopToolbarGrid.RowHeight   = {28, 28};
-            app.TopToolbarGrid.ColumnWidth = {30, '2x', 70, 45, '1x', 70, '1x', 110, 100, 70};
+            app.TopToolbarGrid.ColumnWidth = {30, '2x', 70, 45, '1x', 70, '1x', 110, 100, 70, 130};
             app.TopToolbarGrid.ColumnSpacing = 5;
             app.TopToolbarGrid.Padding = [0 4 0 4];
 
@@ -206,8 +249,14 @@ classdef CellNeighborResolverApp < handle
             app.ScanButton.Layout.Row = 1; app.ScanButton.Layout.Column = 6;
             app.setTooltip(app.ScanButton, "Recursively scan the parent directory for CSV files matching the filter pattern and populate the file list.");
 
+            app.ResizedCsvCheckBox = uicheckbox(app.TopToolbarGrid, "Text", "Resized", ...
+                "Value", app.Settings.UseResizedCsv, ...
+                "ValueChangedFcn", @(s,e) app.onResizedCsvToggled());
+            app.ResizedCsvCheckBox.Layout.Row = 1; app.ResizedCsvCheckBox.Layout.Column = 7;
+            app.setTooltip(app.ResizedCsvCheckBox, "Scan for resized-coordinate localization files (*_locs_resized.csv) instead of the standard *_locs.csv. Toggling overwrites the Filter pattern and re-scans.");
+
             app.FileCountLabel = uilabel(app.TopToolbarGrid, "Text", "No files scanned");
-            app.FileCountLabel.Layout.Row = 1; app.FileCountLabel.Layout.Column = [7 10];
+            app.FileCountLabel.Layout.Row = 1; app.FileCountLabel.Layout.Column = [8 11];
             app.setTooltip(app.FileCountLabel, "Number of CSV files found by the most recent scan.");
 
             % Row 2: neighbor settings
@@ -244,13 +293,19 @@ classdef CellNeighborResolverApp < handle
                 "ButtonPushedFcn", @(s,e) app.saveResolved());
             app.SaveButton.Layout.Row = 2; app.SaveButton.Layout.Column = 10;
             app.setTooltip(app.SaveButton, "Save changes back to the original CSV file, overwriting it in place. Shortcut: Ctrl+S.");
+
+            app.NextPageButton = uibutton(app.TopToolbarGrid, "push", ...
+                "Text", "Next Page/File  [Tab]", ...
+                "ButtonPushedFcn", @(s,e) app.advanceToNextPage());
+            app.NextPageButton.Layout.Row = 2; app.NextPageButton.Layout.Column = 11;
+            app.setTooltip(app.NextPageButton, "Advance to the next TIFF page (if the current TIFF has more pages) or to the next file in the list. Shortcut: Tab.");
         end
 
         function buildMainPanels(app)
             app.MainGrid = uigridlayout(app.RootGrid, [1 3]);
             app.MainGrid.Layout.Row = 2;
             app.MainGrid.Layout.Column = 1;
-            app.MainGrid.ColumnWidth  = {320, '1x', 240};
+            app.MainGrid.ColumnWidth  = {600, '1x', 375};
             app.MainGrid.RowHeight    = {'1x'};
             app.MainGrid.ColumnSpacing = 6;
             app.MainGrid.Padding = [0 0 0 0];
@@ -264,19 +319,54 @@ classdef CellNeighborResolverApp < handle
             app.LeftPanel = uipanel(app.MainGrid, "Title", "CSV Files & Neighbor Pairs");
             app.LeftPanel.Layout.Row = 1; app.LeftPanel.Layout.Column = 1;
 
-            g = uigridlayout(app.LeftPanel, [4 1]);
-            g.RowHeight = {160, 28, '1x', 28};
+            g = uigridlayout(app.LeftPanel, [5 1]);
+            g.RowHeight = {'0.6x', 38, 28, '0.4x', 28};
             g.ColumnWidth = {'1x'};
             g.Padding = [4 4 4 4];
             g.RowSpacing = 4;
 
-            app.FileListBox = uilistbox(g, "Items", {}, ...
-                "ValueChangedFcn", @(s,e) app.onFileListSelectionChanged(s, e));
-            app.FileListBox.Layout.Row = 1; app.FileListBox.Layout.Column = 1;
-            app.setTooltip(app.FileListBox, "CSV files found by the last scan, shown as paths relative to the parent directory. Click a file to load it.");
+            app.FileTable = uitable(g, ...
+                "ColumnName",     {'Filename', '# Obs', 'Neighbors', 'Unreviewed', 'Include'}, ...
+                "ColumnWidth",    {180, 50, 68, 68, 52}, ...
+                "ColumnEditable", [false false false false true], ...
+                "ColumnFormat",   {'char', 'numeric', 'numeric', 'numeric', 'logical'}, ...
+                "CellSelectionCallback", @(s,e) app.onFileTableCellSelected(s, e), ...
+                "CellEditCallback",      @(s,e) app.onFileTableCellEdited(s, e));
+            app.FileTable.Layout.Row = 1; app.FileTable.Layout.Column = 1;
+            app.setTooltip(app.FileTable, "CSV files found by the last scan. Click a row to load that file. 'Include' checkbox marks datasets for downstream processing (default: checked).");
+
+            % Overall progress across every scanned dataset: a label over a
+            % two-segment bar (green = reviewed, grey = remaining).
+            progGrid = uigridlayout(g, [2 1]);
+            progGrid.Layout.Row = 2; progGrid.Layout.Column = 1;
+            progGrid.RowHeight = {18, 12};
+            progGrid.ColumnWidth = {'1x'};
+            progGrid.RowSpacing = 2;
+            progGrid.Padding = [0 2 0 2];
+
+            app.DatasetProgressLabel = uilabel(progGrid, "Text", "Datasets reviewed: 0 / 0", ...
+                "FontSize", 11);
+            app.DatasetProgressLabel.Layout.Row = 1; app.DatasetProgressLabel.Layout.Column = 1;
+            app.setTooltip(app.DatasetProgressLabel, "How many scanned CSV files have been curated through this app (their saved file carries NeighborResolved annotations) out of all files found by the last scan.");
+
+            % The grey track holds a green fill panel sized manually in pixels.
+            % (uigridlayout column weights do NOT size a sub-bar reliably.)
+            app.DatasetProgressTrack = uipanel(progGrid, ...
+                "BorderType", "none", "BackgroundColor", [0.85 0.85 0.85], ...
+                "AutoResizeChildren", "off");
+            app.DatasetProgressTrack.Layout.Row = 2; app.DatasetProgressTrack.Layout.Column = 1;
+
+            app.DatasetProgressFill = uipanel(app.DatasetProgressTrack, ...
+                "BorderType", "none", "BackgroundColor", [0.2 0.7 0.3], ...
+                "Units", "pixels", "Position", [1 1 1 1], "Visible", "off");
+
+            % Re-fit the fill whenever the track resizes (window resize / layout).
+            % The handler caches the pixel size so layoutDatasetProgressFill can
+            % use it even when called outside of SizeChangedFcn (e.g. after scan).
+            app.DatasetProgressTrack.SizeChangedFcn = @(s,e) app.onDatasetProgressTrackResized(s);
 
             filterRow = uigridlayout(g, [1 2]);
-            filterRow.Layout.Row = 2; filterRow.Layout.Column = 1;
+            filterRow.Layout.Row = 3; filterRow.Layout.Column = 1;
             filterRow.ColumnWidth = {'1x', '1x'};
             filterRow.Padding = [0 0 0 0];
 
@@ -295,14 +385,14 @@ classdef CellNeighborResolverApp < handle
             app.PairTable = uitable(g, ...
                 "Data", {}, ...
                 "ColumnName", {'#', 'Row A', 'Row B', 'Dist (px)', 'Status'}, ...
-                "ColumnWidth", {30, 54, 54, 62, 80}, ...
+                "ColumnWidth", {30, 60, 60, 68, '1x'}, ...
                 "ColumnEditable", false(1,5), ...
                 "CellSelectionCallback", @(s,e) app.onPairTableSelected(s, e));
-            app.PairTable.Layout.Row = 3; app.PairTable.Layout.Column = 1;
+            app.PairTable.Layout.Row = 4; app.PairTable.Layout.Column = 1;
             app.setTooltip(app.PairTable, "Neighbor pairs visible under the current filter. # = display index; Row A/B = source CSV row numbers; Dist = Euclidean distance in pixels; Status = current resolution. Click a row to select that pair.");
 
             navGrid = uigridlayout(g, [1 2]);
-            navGrid.Layout.Row = 4; navGrid.Layout.Column = 1;
+            navGrid.Layout.Row = 5; navGrid.Layout.Column = 1;
             navGrid.ColumnWidth = {'1x', '1x'};
             navGrid.Padding = [0 0 0 0];
 
@@ -315,6 +405,7 @@ classdef CellNeighborResolverApp < handle
                 "ButtonPushedFcn", @(s,e) app.navigatePairs(+1));
             app.NextPairButton.Layout.Row = 1; app.NextPairButton.Layout.Column = 2;
             app.setTooltip(app.NextPairButton, "Select the next pair in the filtered list. Shortcuts: l or right arrow.");
+
         end
 
         function buildCenterPanel(app)
@@ -339,7 +430,7 @@ classdef CellNeighborResolverApp < handle
                 "RoundFractionalValues", "on", "Enable", "off", ...
                 "ValueChangedFcn", @(s,e) app.onTiffPageChanged());
             app.TiffPageSpinner.Layout.Row = 1; app.TiffPageSpinner.Layout.Column = 2;
-            app.setTooltip(app.TiffPageSpinner, "TIFF page (channel) to display in the tissue plot. Enabled only when a companion image is found. Range: 1 to number of pages in the TIFF.");
+            app.setTooltip(app.TiffPageSpinner, "TIFF page (channel) shown in the tissue plot. Pinned to the page the loaded CSV's detections came from (disabled), so detections are never overlaid on the wrong channel. Editable only for a combined CSV that spans multiple pages.");
 
             spacer = uilabel(topRow, "Text", "");
             spacer.Layout.Row = 1; spacer.Layout.Column = 3;
@@ -360,19 +451,23 @@ classdef CellNeighborResolverApp < handle
             app.TissueAxes.Toolbar.Visible = "off";
             app.TissueAxes.Box = "on";
             disableDefaultInteractivity(app.TissueAxes);
-            app.setTooltip(app.TissueAxes, "Full-image view of all detections. Gray = not in any pair. Orange = in an unresolved pair. Green = resolved/kept. Blue = merged. Cyan circle = pair point A. Yellow square = pair point B. Click a point to select its pair. Right-click for merge and freehand-ROI options.");
+            app.setTooltip(app.TissueAxes, "Full-image view of all detections. Magenta circle = not in any pair. Orange square = in an unresolved pair. Green square = resolved/kept. Blue square = merged. Active reviewed pair: Green filled circle = point A, Blue filled square = point B. Click a point to select its pair. Scroll wheel zooms at the cursor; middle-drag (or Shift-drag) pans; press f or use the right-click menu to reset the view. Right-click for merge and freehand-ROI options.");
         end
 
         function buildRightPanel(app)
             app.RightPanel = uipanel(app.MainGrid, "Title", "Resolution Actions");
             app.RightPanel.Layout.Row = 1; app.RightPanel.Layout.Column = 3;
 
-            g = uigridlayout(app.RightPanel, [10 1]);
-            g.RowHeight = {48, 48, 48, 48, 48, 48, 48, 48, 8, '1x'};
-            g.ColumnWidth = {'1x'};
+            % 2-column grid: primary resolution actions span both columns,
+            % secondary actions pair up side-by-side to save vertical space.
+            g = uigridlayout(app.RightPanel, [8 2]);
+            g.RowHeight = {54, 54, 54, 44, 44, 90, 16, '1x'};
+            g.ColumnWidth = {'1x', '1x'};
             g.Padding = [6 6 6 6];
-            g.RowSpacing = 4;
+            g.RowSpacing = 5;
+            g.ColumnSpacing = 5;
 
+            % Row 1: Keep A | Keep B (side by side, equal prominence)
             app.KeepAButton = uibutton(g, "push", ...
                 "Text", "Keep A  [a]", ...
                 "BackgroundColor", [0.25 0.75 0.35], ...
@@ -388,53 +483,77 @@ classdef CellNeighborResolverApp < handle
                 "FontColor", [1 1 1], ...
                 "FontWeight", "bold", ...
                 "ButtonPushedFcn", @(s,e) app.doKeepB());
-            app.KeepBButton.Layout.Row = 2; app.KeepBButton.Layout.Column = 1;
+            app.KeepBButton.Layout.Row = 1; app.KeepBButton.Layout.Column = 2;
             app.setTooltip(app.KeepBButton, "Keep detection B, delete A. Shortcut: b");
 
+            % Row 2: Keep Both (full width)
             app.KeepBothButton = uibutton(g, "push", ...
                 "Text", "Keep Both  [k / Space]", ...
                 "BackgroundColor", [0.5 0.5 0.5], ...
                 "FontColor", [1 1 1], ...
                 "FontWeight", "bold", ...
                 "ButtonPushedFcn", @(s,e) app.doKeepBoth());
-            app.KeepBothButton.Layout.Row = 3; app.KeepBothButton.Layout.Column = 1;
+            app.KeepBothButton.Layout.Row = 2; app.KeepBothButton.Layout.Column = [1 2];
             app.setTooltip(app.KeepBothButton, "Keep both detections, mark pair resolved. Shortcut: k or Space");
 
+            % Row 3: Merge | Skip
             app.MergeButton = uibutton(g, "push", ...
-                "Text", "Merge — click to place  [m]", ...
+                "Text", "Merge  [m]", ...
                 "ButtonPushedFcn", @(s,e) app.armMerge());
-            app.MergeButton.Layout.Row = 4; app.MergeButton.Layout.Column = 1;
+            app.MergeButton.Layout.Row = 3; app.MergeButton.Layout.Column = 1;
             app.setTooltip(app.MergeButton, "Delete both; click tissue plot to place merged cell at new location. Shortcut: m");
 
             app.SkipButton = uibutton(g, "push", ...
                 "Text", "Skip  [s]", ...
                 "ButtonPushedFcn", @(s,e) app.doSkip());
-            app.SkipButton.Layout.Row = 5; app.SkipButton.Layout.Column = 1;
+            app.SkipButton.Layout.Row = 3; app.SkipButton.Layout.Column = 2;
             app.setTooltip(app.SkipButton, "Defer this pair for later. Shortcut: s");
 
+            % Row 4: Delete Point | Relocate Point
             app.DeletePointButton = uibutton(g, "push", ...
-                "Text", "Delete Point — click  [d]", ...
+                "Text", "Delete  [d]", ...
                 "ButtonPushedFcn", @(s,e) app.armDeletePoint());
-            app.DeletePointButton.Layout.Row = 6; app.DeletePointButton.Layout.Column = 1;
+            app.DeletePointButton.Layout.Row = 4; app.DeletePointButton.Layout.Column = 1;
             app.setTooltip(app.DeletePointButton, "Arm point-deletion mode, then click any detection on the tissue plot to delete it. Affects all pairs containing that point. Shortcut: d. Press Esc to cancel.");
 
             app.RelocatePointButton = uibutton(g, "push", ...
-                "Text", "Relocate Point — click  [r]", ...
+                "Text", "Relocate  [r]", ...
                 "ButtonPushedFcn", @(s,e) app.armRelocatePoint());
-            app.RelocatePointButton.Layout.Row = 7; app.RelocatePointButton.Layout.Column = 1;
+            app.RelocatePointButton.Layout.Row = 4; app.RelocatePointButton.Layout.Column = 2;
             app.setTooltip(app.RelocatePointButton, "Arm relocation mode: first click selects a detection (highlighted in yellow), second click moves it to the new position. Undoable. Shortcut: r. Press Esc to cancel.");
+
+            % Row 5: Add Point | Undo
+            app.AddPointButton = uibutton(g, "push", ...
+                "Text", "Add Point  [n]", ...
+                "ButtonPushedFcn", @(s,e) app.armAddPoint());
+            app.AddPointButton.Layout.Row = 5; app.AddPointButton.Layout.Column = 1;
+            app.setTooltip(app.AddPointButton, "Arm add-point mode, then click anywhere on the tissue plot to insert a new detection. The point inherits column values from the nearest existing row. Undoable. Shortcut: n. Press Esc to cancel.");
 
             app.UndoButton = uibutton(g, "push", ...
                 "Text", "Undo  [Ctrl+Z]", ...
                 "ButtonPushedFcn", @(s,e) app.undoLast());
-            app.UndoButton.Layout.Row = 8; app.UndoButton.Layout.Column = 1;
+            app.UndoButton.Layout.Row = 5; app.UndoButton.Layout.Column = 2;
             app.setTooltip(app.UndoButton, "Undo the last resolution action. Shortcut: Ctrl+Z");
 
-            % spacer row 9 is empty
+            % Row 6: pair detail label (fixed height, spans both columns)
             app.PairDetailLabel = uilabel(g, "Text", "No pair selected", ...
                 "WordWrap", "on", "VerticalAlignment", "top");
-            app.PairDetailLabel.Layout.Row = 10; app.PairDetailLabel.Layout.Column = 1;
+            app.PairDetailLabel.Layout.Row = 6; app.PairDetailLabel.Layout.Column = [1 2];
             app.setTooltip(app.PairDetailLabel, "Pair identifier, pixel distance, X/Y coordinates of both detections, and current resolution status.");
+
+            % Row 7-8: Overview thumbnail (moved here from left panel)
+            app.OverviewLabel = uilabel(g, "Text", "Overview (click to navigate)", ...
+                "FontSize", 11, "FontColor", [0.4 0.4 0.4]);
+            app.OverviewLabel.Layout.Row = 7; app.OverviewLabel.Layout.Column = [1 2];
+
+            app.OverviewAxes = uiaxes(g);
+            app.OverviewAxes.Layout.Row = 8; app.OverviewAxes.Layout.Column = [1 2];
+            app.OverviewAxes.XTick = [];
+            app.OverviewAxes.YTick = [];
+            app.OverviewAxes.Toolbar.Visible = "off";
+            app.OverviewAxes.Box = "on";
+            disableDefaultInteractivity(app.OverviewAxes);
+            app.setTooltip(app.OverviewAxes, "Whole-page overview. The red rectangle shows the region visible in the center tissue plot and tracks zoom/pan. Click anywhere to recenter the tissue plot on that spot.");
         end
 
         function setTooltip(~, component, txt)
@@ -447,11 +566,12 @@ classdef CellNeighborResolverApp < handle
         % SETTINGS
         % --------------------------------------------------------------
 
-        function defaults = defaultSettings(~)
+        function defaults = defaultSettings(app)
             defaults.SettingsVersion     = 1;
             defaults.SettingsSavedAt     = 0;
             defaults.LastParentDirectory = "";
-            defaults.FileRegex           = '(?i)_locs\.csv$';
+            defaults.FileRegex           = app.DEFAULT_REGEX_LOCS;
+            defaults.UseResizedCsv       = false;
             defaults.NeighborDistance    = 10;
             defaults.TiffPageIndex       = 1;
             defaults.AutoAdvance         = true;
@@ -517,6 +637,9 @@ classdef CellNeighborResolverApp < handle
             if ~isempty(app.RegexEdit) && isvalid(app.RegexEdit)
                 app.Settings.FileRegex = string(app.RegexEdit.Value);
             end
+            if ~isempty(app.ResizedCsvCheckBox) && isvalid(app.ResizedCsvCheckBox)
+                app.Settings.UseResizedCsv = app.ResizedCsvCheckBox.Value;
+            end
             if ~isempty(app.DistanceSpinner) && isvalid(app.DistanceSpinner)
                 app.Settings.NeighborDistance = app.DistanceSpinner.Value;
             end
@@ -553,6 +676,7 @@ classdef CellNeighborResolverApp < handle
                 app.ParentDirEdit.Value = char(app.Settings.LastParentDirectory);
             end
             app.RegexEdit.Value = char(app.Settings.FileRegex);
+            app.ResizedCsvCheckBox.Value = app.Settings.UseResizedCsv;
             app.DistanceSpinner.Value = app.Settings.NeighborDistance;
             app.AutoAdvanceCheckBox.Value = app.Settings.AutoAdvance;
             app.AutoSaveCheckBox.Value = app.Settings.AutoSave;
@@ -598,6 +722,18 @@ classdef CellNeighborResolverApp < handle
             app.Settings.LastParentDirectory = app.ParentDirectory;
         end
 
+        function onResizedCsvToggled(app)
+            % Switch the scan filter between standard and resized CSVs, then
+            % re-scan. The Filter pattern stays editable for power users.
+            if app.ResizedCsvCheckBox.Value
+                app.RegexEdit.Value = char(app.DEFAULT_REGEX_LOCS_RESIZED);
+            else
+                app.RegexEdit.Value = char(app.DEFAULT_REGEX_LOCS);
+            end
+            app.saveSettings();
+            app.doScan();
+        end
+
         function doScan(app)
             parentDir = string(strtrim(app.ParentDirEdit.Value));
             if strlength(parentDir) == 0 || ~isfolder(parentDir)
@@ -608,7 +744,12 @@ classdef CellNeighborResolverApp < handle
             app.Settings.LastParentDirectory = parentDir;
 
             pattern = char(strtrim(app.RegexEdit.Value));
-            allFiles = app.recDir(char(parentDir));
+            try
+                allFiles = app.recDir(char(parentDir));
+            catch scanErr
+                app.updateStatus("Scan failed while listing files: " + string(scanErr.message));
+                return
+            end
 
             matched = {};
             for k = 1:numel(allFiles)
@@ -626,46 +767,224 @@ classdef CellNeighborResolverApp < handle
             n = numel(matched);
 
             if n == 0
-                app.FileListBox.Items = {};
+                app.FileReviewState     = false(0, 1);
+                app.FileObsCount        = zeros(0, 1);
+                app.FileNeighborCount   = zeros(0, 1);
+                app.FileUnreviewedCount = zeros(0, 1);
+                app.FileInclude         = true(0, 1);
+                app.ActiveFileRow       = NaN;
+                app.FileTable.Data = {};
                 app.FileCountLabel.Text = 'No files found';
                 app.FileCountLabel.FontColor = [0.8 0.2 0.2];
+                app.updateDatasetProgress();
                 app.updateStatus("No CSV files matched the filter pattern.");
                 return
             end
 
-            relPaths = cell(n, 1);
-            for k = 1:n
-                relPaths{k} = char(app.makeRelativePath(matched{k}, char(parentDir)));
-            end
-            app.FileListBox.Items = relPaths;
+            % Classify each file: review state, obs count, unreviewed count.
+            app.analyzeFileReviewStates();
+            app.ActiveFileRow = NaN;
+            app.refreshFileTable();
             app.FileCountLabel.Text = sprintf('%d file(s) found', n);
             app.FileCountLabel.FontColor = [0.1 0.5 0.1];
-            app.updateStatus(sprintf('Scan complete: %d file(s) found.', n));
+            app.updateDatasetProgress();
+            app.updateStatus(sprintf('Scan complete: %d file(s) found, %d already reviewed.', ...
+                n, sum(app.FileReviewState)));
 
-            % Restore last active file
+            % Restore last active file. Guard the load so a problem opening the
+            % previously-active file can never abort the scan (the file list is
+            % already populated above and must stay usable).
             if strlength(app.Settings.LastActiveCsvPath) > 0
                 for k = 1:n
                     if strcmp(matched{k}, char(app.Settings.LastActiveCsvPath))
-                        app.FileListBox.Value = relPaths{k};
-                        app.loadCsvFile(string(matched{k}));
+                        app.selectFileTableRow(k);
+                        try
+                            app.loadCsvFile(string(matched{k}));
+                        catch loadErr
+                            app.updateStatus("Could not restore last file: " + ...
+                                string(loadErr.message));
+                        end
                         return
                     end
                 end
             end
         end
 
-        function onFileListSelectionChanged(app, src, ~)
-            val = src.Value;
-            if isempty(val)
+        function onFileTableCellSelected(app, ~, event)
+            if isempty(event.Indices), return; end
+            row = event.Indices(1, 1);
+            if row < 1 || row > numel(app.AllAbsFiles), return; end
+            if ~isnan(app.ActiveFileRow) && row == app.ActiveFileRow, return; end
+            app.selectFileTableRow(row);
+            app.loadCsvFile(string(app.AllAbsFiles{row}));
+        end
+
+        function onFileTableCellEdited(app, ~, event)
+            if isempty(event.Indices), return; end
+            row = event.Indices(1);
+            col = event.Indices(2);
+            if col == 5 && row >= 1 && row <= numel(app.FileInclude)
+                app.FileInclude(row) = logical(event.NewData);
+            end
+        end
+
+        % --------------------------------------------------------------
+        % DATASET REVIEW PROGRESS
+        % --------------------------------------------------------------
+
+        function analyzeFileReviewStates(app)
+            n = numel(app.AllAbsFiles);
+            app.FileReviewState     = false(n, 1);
+            app.FileObsCount        = zeros(n, 1);
+            app.FileNeighborCount   = zeros(n, 1);
+            app.FileUnreviewedCount = zeros(n, 1);
+            app.FileInclude         = true(n, 1);
+            for k = 1:n
+                [app.FileReviewState(k), app.FileObsCount(k), app.FileUnreviewedCount(k), app.FileNeighborCount(k)] = ...
+                    app.analyzeOneFile(app.AllAbsFiles{k});
+            end
+        end
+
+        function [hasReview, nObs, nUnreviewed, nNeighbors] = analyzeOneFile(~, csvPath)
+            % Read CSV header + rows cheaply to determine review state and counts.
+            % nNeighbors  = distinct non-empty NeighborPairID values (all pairs).
+            % nUnreviewed = distinct NeighborPairIDs where NeighborResolved is not
+            %               true (skipped / unresolved pairs).
+            hasReview = false; nObs = 0; nUnreviewed = 0; nNeighbors = 0;
+            fid = fopen(char(csvPath), 'r');
+            if fid < 0, return; end
+            closer = onCleanup(@() fclose(fid));
+            headerLine = fgetl(fid);
+            if ~ischar(headerLine), return; end
+            hasReview = contains(headerLine, 'NeighborResolved');
+            headers = regexp(headerLine, ',', 'split');
+            reviewedColIdx = find(strcmpi(strtrim(headers), 'NeighborResolved'), 1);
+            pairIdColIdx   = find(strcmpi(strtrim(headers), 'NeighborPairID'),   1);
+            pairIdsAll   = {};
+            pairIdsUnrev = {};
+            while true
+                line = fgetl(fid);
+                if ~ischar(line), break; end
+                if isempty(strtrim(line)), continue; end
+                nObs = nObs + 1;
+                if isempty(pairIdColIdx), continue; end
+                fields = regexp(line, ',', 'split');
+                if pairIdColIdx > numel(fields), continue; end
+                pid = strtrim(fields{pairIdColIdx});
+                if isempty(pid), continue; end
+                pairIdsAll{end+1} = pid; %#ok<AGROW>
+                isResolved = ~isempty(reviewedColIdx) && ...
+                             reviewedColIdx <= numel(fields) && ...
+                             (strcmpi(strtrim(fields{reviewedColIdx}), 'true') || ...
+                              strcmp(strtrim(fields{reviewedColIdx}), '1'));
+                if ~isResolved
+                    pairIdsUnrev{end+1} = pid; %#ok<AGROW>
+                end
+            end
+            nNeighbors  = numel(unique(pairIdsAll));
+            nUnreviewed = numel(unique(pairIdsUnrev));
+        end
+
+        function refreshFileTable(app)
+            if isempty(app.AllAbsFiles)
+                if ~isempty(app.FileTable) && isvalid(app.FileTable)
+                    app.FileTable.Data = {};
+                end
                 return
             end
-            relPath = string(val);
+            n = numel(app.AllAbsFiles);
+            data = cell(n, 5);
+            for k = 1:n
+                [~, fname, fext] = fileparts(app.AllAbsFiles{k});
+                data{k, 1} = [fname fext];
+                data{k, 2} = app.FileObsCount(k);
+                data{k, 3} = app.FileNeighborCount(k);
+                data{k, 4} = app.FileUnreviewedCount(k);
+                data{k, 5} = app.FileInclude(k);
+            end
+            app.FileTable.Data = data;
+            if ~isnan(app.ActiveFileRow) && app.ActiveFileRow >= 1 && app.ActiveFileRow <= n
+                app.FileTable.Selection = [app.ActiveFileRow, 1];
+            end
+        end
+
+        function selectFileTableRow(app, idx)
+            app.ActiveFileRow = idx;
+            if ~isempty(app.FileTable) && isvalid(app.FileTable) && ...
+                    idx >= 1 && idx <= numel(app.AllAbsFiles)
+                app.FileTable.Selection = [idx, 1];
+            end
+        end
+
+        function updateDatasetProgress(app)
+            n = numel(app.AllAbsFiles);
+            nReviewed = sum(app.FileReviewState);
+            if n == 0
+                app.DatasetProgressLabel.Text = 'Datasets reviewed: 0 / 0';
+                app.DatasetProgressFraction = 0;
+            else
+                app.DatasetProgressFraction = nReviewed / n;
+                app.DatasetProgressLabel.Text = sprintf( ...
+                    'Datasets reviewed: %d / %d  (%.0f%%)', nReviewed, n, ...
+                    100 * app.DatasetProgressFraction);
+            end
+            app.layoutDatasetProgressFill();
+        end
+
+        function onDatasetProgressTrackResized(app, src)
+            % Cache the track's rendered pixel size and update the fill.
+            % getpixelposition is only reliable when called here (from SizeChangedFcn).
+            pp = getpixelposition(src, false);
+            app.TrackPixelW = pp(3);
+            app.TrackPixelH = pp(4);
+            app.layoutDatasetProgressFill();
+        end
+
+        function layoutDatasetProgressFill(app)
+            % Size the green fill panel to the reviewed fraction of the track,
+            % in pixels. Uses dimensions cached by onDatasetProgressTrackResized.
+            if isempty(app.DatasetProgressFill) || ~isvalid(app.DatasetProgressFill)
+                return
+            end
+            w = app.TrackPixelW;
+            h = app.TrackPixelH;
+            if w <= 0 || h <= 0
+                return  % layout not yet rendered; SizeChangedFcn will call us again
+            end
+            frac = max(0, min(1, app.DatasetProgressFraction));
+            fillW = round(w * frac);
+            if fillW <= 0
+                app.DatasetProgressFill.Visible = 'off';
+            else
+                app.DatasetProgressFill.Position = [1 1 fillW h];
+                app.DatasetProgressFill.Visible = 'on';
+            end
+        end
+
+        function idx = activeFileIndex(app)
+            idx = 0;
             for k = 1:numel(app.AllAbsFiles)
-                if strcmp(app.makeRelativePath(app.AllAbsFiles{k}, char(app.ParentDirectory)), char(relPath))
-                    app.loadCsvFile(string(app.AllAbsFiles{k}));
+                if strcmp(app.AllAbsFiles{k}, char(app.ActiveCsvPath))
+                    idx = k;
                     return
                 end
             end
+        end
+
+        function markActiveFileReviewed(app)
+            % Once the active file has been saved it carries resolver
+            % annotations; refresh the table row and progress bar.
+            idx = app.activeFileIndex();
+            if idx == 0, return; end
+            if numel(app.FileReviewState) >= idx
+                app.FileReviewState(idx) = true;
+            end
+            if idx <= numel(app.AllAbsFiles)
+                [~, app.FileObsCount(idx), app.FileUnreviewedCount(idx), app.FileNeighborCount(idx)] = ...
+                    app.analyzeOneFile(app.AllAbsFiles{idx});
+            end
+            app.refreshFileTable();
+            app.updateDatasetProgress();
         end
 
         % --------------------------------------------------------------
@@ -682,6 +1001,8 @@ classdef CellNeighborResolverApp < handle
             app.ActiveImagePages = struct();
             app.ActiveLocTable = table();
             app.ActiveDisplayPage = 1;
+            app.ActiveCsvPage = NaN;
+            app.CsvSpansMultiplePages = false;
             app.NeighborPairs = zeros(0, 3);
             app.PairStatus = strings(0, 1);
             app.FilteredPairIndices = [];
@@ -695,6 +1016,7 @@ classdef CellNeighborResolverApp < handle
             cla(app.TissueAxes);
             app.TissueImageHandle = [];
             app.TissueAllPointsHandle = [];
+            app.TissueNeighborPointsHandle = [];
             app.TissuePointAHandle = [];
             app.TissuePointBHandle = [];
 
@@ -730,13 +1052,43 @@ classdef CellNeighborResolverApp < handle
 
             % Add runtime columns
             n = height(tbl);
-            tbl.NR_Deleted     = false(n, 1);
-            tbl.NR_MergedRow   = false(n, 1);
-            tbl.NR_OriginalRow = (1:n)';
-            tbl.NR_OrigX       = double(tbl.X);   % snapshot of X at load time
-            tbl.NR_OrigY       = double(tbl.Y);   % snapshot of Y at load time
+            tbl.CURATED_Deleted     = false(n, 1);
+            tbl.CURATED_MergedRow   = false(n, 1);
+            tbl.CURATED_OriginalRow = (1:n)';
+            tbl.CURATED_OrigX       = double(tbl.X);   % snapshot of X at load time
+            tbl.CURATED_OrigY       = double(tbl.Y);   % snapshot of Y at load time
+
+            % Restore curation state from a previously-saved file. The saver
+            % keeps every original row (raw X/Y preserved) but blanks the
+            % effective coordinate (CURATED_X/CURATED_Y) of any row that was
+            % deleted or merged away. Treat a blanked CURATED_X as a deletion
+            % so resolved partners do not resurface as live detections.
+            if ismember('CURATED_X', tbl.Properties.VariableNames)
+                cx = tbl.CURATED_X;
+                if ~isnumeric(cx), cx = str2double(string(cx)); end
+                if numel(cx) == n
+                    tbl.CURATED_Deleted = isnan(cx);
+                end
+            end
 
             app.ActiveLocTable = tbl;
+
+            % Determine which TIFF page(s) this CSV addresses. Per-page CSVs
+            % (the CellDiscovery convention) reference exactly one page and the
+            % view is locked to it, so detections are never drawn over another
+            % channel. A combined CSV that references several pages keeps page
+            % navigation enabled.
+            encPages = app.encodedPagesInTable();
+            if isempty(encPages)
+                app.ActiveCsvPage = app.pageFromCsvName(csvPath);
+                app.CsvSpansMultiplePages = false;
+            elseif isscalar(encPages)
+                app.ActiveCsvPage = encPages;
+                app.CsvSpansMultiplePages = false;
+            else
+                app.ActiveCsvPage = min(encPages);
+                app.CsvSpansMultiplePages = true;
+            end
 
             % Find companion image
             app.ActiveImagePath = app.inferImagePath(csvPath);
@@ -744,21 +1096,51 @@ classdef CellNeighborResolverApp < handle
                 try
                     app.ActiveTiffInfo = imfinfo(char(app.ActiveImagePath));
                     np = numel(app.ActiveTiffInfo);
+
+                    % Pick the page to show. A per-page CSV is pinned to the page
+                    % its detections came from; only a combined CSV (spanning
+                    % multiple pages) leaves the spinner editable.
+                    if np <= 1 || isnan(app.ActiveCsvPage)
+                        pg = 1;
+                    else
+                        pg = app.ActiveCsvPage;
+                    end
+                    if pg > np
+                        app.updateStatus(sprintf( ...
+                            'CSV references page %d but image has %d page(s); showing page %d.', ...
+                            pg, np, np));
+                        pg = np;
+                    end
+                    pg = max(pg, 1);
+
+                    % Set Value first so changing Limits never excludes it.
+                    app.TiffPageSpinner.Value = 1;
                     app.TiffPageSpinner.Limits = [1 np];
-                    app.TiffPageSpinner.Enable = "on";
-                    pg = min(max(app.Settings.TiffPageIndex, 1), np);
                     app.TiffPageSpinner.Value = pg;
+                    if app.CsvSpansMultiplePages && np > 1
+                        app.TiffPageSpinner.Enable = "on";
+                    else
+                        app.TiffPageSpinner.Enable = "off";   % locked to the CSV's page
+                    end
                     app.ActiveDisplayPage = pg;
                 catch
                     app.ActiveTiffInfo = [];
                     app.ActiveImagePath = "";
+                    app.TiffPageSpinner.Value = 1;
                     app.TiffPageSpinner.Limits = [1 1];
                     app.TiffPageSpinner.Enable = "off";
+                    app.ActiveDisplayPage = 1;
                 end
             else
                 app.ActiveImagePath = "";
+                app.TiffPageSpinner.Value = 1;
                 app.TiffPageSpinner.Limits = [1 1];
                 app.TiffPageSpinner.Enable = "off";
+                if isnan(app.ActiveCsvPage)
+                    app.ActiveDisplayPage = 1;
+                else
+                    app.ActiveDisplayPage = app.ActiveCsvPage;
+                end
             end
 
             app.Settings.LastActiveCsvPath = csvPath;
@@ -769,6 +1151,7 @@ classdef CellNeighborResolverApp < handle
             app.updatePairCountLabel();
             app.updatePairDetailLabel();
             app.renderTissuePlot();
+            app.updateNextPageButtonLabel();
 
             if strlength(app.ActiveImagePath) > 0
                 [~, imgName, imgExt] = fileparts(char(app.ActiveImagePath));
@@ -776,8 +1159,37 @@ classdef CellNeighborResolverApp < handle
             else
                 imgNote = ' | No companion image found (scatter only)';
             end
-            app.updateStatus(sprintf('Loaded %d detections from %s%s', n, ...
-                char(app.makeRelativePath(char(csvPath), char(app.ParentDirectory))), imgNote));
+
+            % Auto-find neighbors at the current distance threshold so a
+            % reopened file immediately shows its (restored) pair statuses
+            % without a manual "Find Neighbors" click. This must never break
+            % the load (or the startup scan that restores the last file): on
+            % any failure the file still loads with an empty pair list and the
+            % user can click Find Neighbors to surface the underlying error.
+            try
+                app.findNeighborsForActiveFile();
+                app.SelectedPairIndex = NaN;
+                firstIdx = app.findNextUnresolvedPair(0);
+                if ~isnan(firstIdx)
+                    app.selectPair(firstIdx);
+                else
+                    app.updatePairDetailLabel();
+                end
+                autoFindNote = sprintf(' | %d pair(s)', size(app.NeighborPairs, 1));
+            catch findErr
+                app.NeighborPairs = zeros(0, 3);
+                app.PairStatus = strings(0, 1);
+                app.FilteredPairIndices = [];
+                app.SelectedPairIndex = NaN;
+                app.updatePairTable();
+                app.updatePairCountLabel();
+                app.updatePairDetailLabel();
+                autoFindNote = sprintf(' | auto-find skipped (%s)', findErr.message);
+            end
+
+            app.updateStatus(sprintf('Loaded %d detections from %s%s%s', n, ...
+                char(app.makeRelativePath(char(csvPath), char(app.ParentDirectory))), ...
+                imgNote, autoFindNote));
         end
 
         function imagePath = inferImagePath(~, csvPath)
@@ -840,6 +1252,29 @@ classdef CellNeighborResolverApp < handle
         % NEIGHBOR PAIR FINDING
         % --------------------------------------------------------------
 
+        function findNeighborsForActiveFile(app)
+            % Build neighbor pairs for the active file at the current distance
+            % threshold and refresh the pair table / tissue plot. Does NOT
+            % change the selected pair or emit a status message — callers own
+            % selection and messaging. This is the single chokepoint shared by
+            % the Find Neighbors button, auto-find on load, and dataset
+            % navigation, so behaviour (incl. saved-status restoration) stays
+            % consistent.
+            distance = app.DistanceSpinner.Value;
+            liveMask = app.currentPageMask();
+            liveRows = find(liveMask);
+            if numel(liveRows) >= 2
+                liveTable = app.ActiveLocTable(liveRows, :);
+                app.buildNeighborPairs(liveTable, distance, liveRows);
+            else
+                app.NeighborPairs = zeros(0, 3);
+                app.PairStatus = strings(0, 1);
+            end
+            app.applyPairFilter();
+            app.renderTissuePlot();
+            app.updatePairCountLabel();
+        end
+
         function onFindNeighborsButtonPushed(app)
             if isempty(app.ActiveLocTable) || height(app.ActiveLocTable) == 0
                 uialert(app.UIFigure, 'Load a CSV file first.', 'No data');
@@ -849,30 +1284,7 @@ classdef CellNeighborResolverApp < handle
             app.updateStatus("Finding neighbor pairs...");
             drawnow
 
-            distance = app.DistanceSpinner.Value;
-            liveMask = ~app.ActiveLocTable.NR_Deleted;
-            liveRows = find(liveMask);
-
-            if numel(liveRows) < 2
-                app.NeighborPairs = zeros(0, 3);
-                app.PairStatus = strings(0, 1);
-                app.FilteredPairIndices = [];
-                app.SelectedPairIndex = NaN;
-                app.PairTableData = {};
-                app.updatePairTable();
-                app.updatePairProgressLabel();
-                app.updatePairCountLabel();
-                app.renderTissuePlot();
-                app.updateStatus("Fewer than 2 live detections — no pairs to find.");
-                return
-            end
-
-            liveTable = app.ActiveLocTable(liveRows, :);
-            app.buildNeighborPairs(liveTable, distance, liveRows);
-
-            app.applyPairFilter();
-            app.renderTissuePlot();
-            app.updatePairCountLabel();
+            app.findNeighborsForActiveFile();
 
             % Select first unresolved pair
             app.SelectedPairIndex = NaN;
@@ -884,7 +1296,8 @@ classdef CellNeighborResolverApp < handle
             end
 
             n = size(app.NeighborPairs, 1);
-            app.updateStatus(sprintf('Found %d neighbor pair(s) within %g px.', n, distance));
+            app.updateStatus(sprintf('Found %d neighbor pair(s) within %g px.', ...
+                n, app.DistanceSpinner.Value));
         end
 
         function buildNeighborPairs(app, liveTable, distance, liveRows)
@@ -911,6 +1324,42 @@ classdef CellNeighborResolverApp < handle
                 app.NeighborPairs = vertcat(pairs{:});
             end
             app.PairStatus = repmat(app.STATUS_UNRESOLVED, size(app.NeighborPairs, 1), 1);
+            app.restoreSavedPairStatuses();
+        end
+
+        function restoreSavedPairStatuses(app)
+            % After (re)building neighbor pairs, restore the resolution status
+            % of any pair that was resolved in a previous session and saved to
+            % the CSV. A re-found pair is matched when both of its rows carry
+            % the same non-empty NeighborPairID; its status is taken from the
+            % saved NeighborResolvedStatus column. This makes auto-saved
+            % resolutions persist across app restarts instead of all reverting
+            % to "Unresolved".
+            if isempty(app.ActiveLocTable) || size(app.NeighborPairs, 1) == 0
+                return
+            end
+            names = app.ActiveLocTable.Properties.VariableNames;
+            if ~all(ismember({'NeighborResolvedStatus', 'NeighborPairID'}, names))
+                return
+            end
+            statusCol = string(app.ActiveLocTable.NeighborResolvedStatus);
+            pairIdCol = string(app.ActiveLocTable.NeighborPairID);
+            nRows = height(app.ActiveLocTable);
+            for p = 1:size(app.NeighborPairs, 1)
+                rA = app.NeighborPairs(p, 1);
+                rB = app.NeighborPairs(p, 2);
+                if rA < 1 || rA > nRows || rB < 1 || rB > nRows
+                    continue
+                end
+                idA = pairIdCol(rA);
+                idB = pairIdCol(rB);
+                if strlength(idA) > 0 && idA == idB
+                    st = statusCol(rA);
+                    if strlength(st) > 0
+                        app.PairStatus(p) = st;
+                    end
+                end
+            end
         end
 
         function applyPairFilter(app)
@@ -1053,10 +1502,12 @@ classdef CellNeighborResolverApp < handle
 
             app.TissueAxes.XLim = [cx - pad, cx + pad];
             app.TissueAxes.YLim = [cy - pad, cy + pad];
+            app.updateOverviewRect();
         end
 
         function navigatePairs(app, direction)
             if isempty(app.FilteredPairIndices)
+                app.crossToAdjacentDataset(direction);
                 return
             end
             if isnan(app.SelectedPairIndex)
@@ -1067,10 +1518,57 @@ classdef CellNeighborResolverApp < handle
                     newPos = 1;
                 else
                     newPos = curPos + direction;
-                    newPos = max(1, min(newPos, numel(app.FilteredPairIndices)));
+                    if newPos < 1
+                        app.crossToAdjacentDataset(-1);
+                        return
+                    elseif newPos > numel(app.FilteredPairIndices)
+                        app.crossToAdjacentDataset(+1);
+                        return
+                    end
                 end
             end
             app.selectPair(app.FilteredPairIndices(newPos));
+        end
+
+        function crossToAdjacentDataset(app, direction)
+            currentIdx = app.activeFileIndex();
+            if currentIdx == 0
+                return
+            end
+            targetIdx = currentIdx + direction;
+            if targetIdx < 1
+                app.updateStatus("Already at the first observation of the first dataset.");
+                return
+            end
+            if targetIdx > numel(app.AllAbsFiles)
+                app.updateStatus("Already at the last observation of the last dataset.");
+                return
+            end
+            app.loadDatasetAndNavigate(targetIdx, direction == -1);
+        end
+
+        function loadDatasetAndNavigate(app, fileIndex, goToLast)
+            nextPath = string(app.AllAbsFiles{fileIndex});
+            app.selectFileTableRow(fileIndex);
+            app.loadCsvFile(nextPath);   % auto-finds neighbors
+
+            nPairs = numel(app.FilteredPairIndices);
+            relPath = char(app.makeRelativePath(char(nextPath), char(app.ParentDirectory)));
+
+            if nPairs == 0
+                app.updateStatus(sprintf('Loaded %s — no pairs found.', relPath));
+                return
+            end
+
+            if goToLast
+                pairIdx = app.FilteredPairIndices(end);
+            else
+                pairIdx = app.FilteredPairIndices(1);
+            end
+
+            app.updateStatus(sprintf('Crossed to %s — %d pair(s) found.', relPath, ...
+                size(app.NeighborPairs, 1)));
+            app.selectPair(pairIdx);
         end
 
         function pairIdx = findNextUnresolvedPair(app, afterPosition)
@@ -1103,10 +1601,10 @@ classdef CellNeighborResolverApp < handle
             if ~isnan(nextIdx)
                 app.selectPair(nextIdx);
             else
-                % All pairs in this file are resolved — move to next file
-                app.updateStatus("All pairs resolved. Loading next file...");
+                % All pairs resolved on this page/file — advance
+                app.updateStatus("All pairs resolved. Advancing...");
                 drawnow
-                app.loadNextFileAndFindNeighbors();
+                app.advanceToNextPage();
             end
         end
 
@@ -1129,24 +1627,8 @@ classdef CellNeighborResolverApp < handle
             for nextIdx = currentIdx + 1 : numel(app.AllAbsFiles)
                 nextPath = string(app.AllAbsFiles{nextIdx});
 
-                app.FileListBox.Value = app.FileListBox.Items{nextIdx};
-                app.loadCsvFile(nextPath);
-
-                % Find neighbors using current distance setting
-                distance = app.DistanceSpinner.Value;
-                liveMask = ~app.ActiveLocTable.NR_Deleted;
-                liveRows = find(liveMask);
-                if numel(liveRows) >= 2
-                    liveTable = app.ActiveLocTable(liveRows, :);
-                    app.buildNeighborPairs(liveTable, distance, liveRows);
-                else
-                    app.NeighborPairs = zeros(0, 3);
-                    app.PairStatus = strings(0, 1);
-                end
-
-                app.applyPairFilter();
-                app.renderTissuePlot();
-                app.updatePairCountLabel();
+                app.selectFileTableRow(nextIdx);
+                app.loadCsvFile(nextPath);   % auto-finds neighbors
 
                 % Check if this file has any unresolved pairs
                 firstUnresolved = app.findNextUnresolvedPair(0);
@@ -1171,6 +1653,7 @@ classdef CellNeighborResolverApp < handle
             cla(app.TissueAxes);
             app.TissueImageHandle = [];
             app.TissueAllPointsHandle = [];
+            app.TissueNeighborPointsHandle = [];
             app.TissuePointAHandle = [];
             app.TissuePointBHandle = [];
 
@@ -1194,7 +1677,14 @@ classdef CellNeighborResolverApp < handle
                 hImg.ButtonDownFcn = @(s,e) app.onTissueClicked(s, e);
                 axis(app.TissueAxes, 'image');
                 [~, imgName, imgExt] = fileparts(char(app.ActiveImagePath));
-                title(app.TissueAxes, [imgName imgExt], 'Interpreter', 'none', 'FontSize', 8);
+                np = numel(app.ActiveTiffInfo);
+                if np > 1
+                    titleTxt = sprintf('%s%s  [page %d/%d]', imgName, imgExt, ...
+                        app.ActiveDisplayPage, np);
+                else
+                    titleTxt = [imgName imgExt];
+                end
+                title(app.TissueAxes, titleTxt, 'Interpreter', 'none', 'FontSize', 8);
             end
 
             app.TissueAxes.HitTest = 'on';
@@ -1206,7 +1696,120 @@ classdef CellNeighborResolverApp < handle
             app.updateTissueHighlights();
             hold(app.TissueAxes, 'off');
 
+            % Snapshot the full-image extent so zoom/pan can clamp against it
+            app.TissueHomeXLim = app.TissueAxes.XLim;
+            app.TissueHomeYLim = app.TissueAxes.YLim;
+
             app.installTissueContextMenu();
+            app.renderOverview();
+        end
+
+        % --------------------------------------------------------------
+        % OVERVIEW THUMBNAIL (whole-page navigator)
+        % --------------------------------------------------------------
+
+        function renderOverview(app)
+            ax = app.OverviewAxes;
+            if isempty(ax) || ~isvalid(ax)
+                return
+            end
+            cla(ax);
+            app.OverviewImageHandle = [];
+            app.OverviewRectHandle  = [];
+
+            img = app.getImagePage(app.ActiveDisplayPage);
+
+            if isempty(img)
+                % No companion image — show a faint scatter of the live points
+                % so the navigator still has spatial context.
+                liveMask = app.currentPageMask();
+                liveIdx = find(liveMask);
+                if ~isempty(liveIdx)
+                    x = double(app.ActiveLocTable.X(liveIdx));
+                    y = double(app.ActiveLocTable.Y(liveIdx));
+                    scatter(ax, x, y, 4, [0.2 0.6 1.0], 'filled', ...
+                        'HitTest', 'off', 'PickableParts', 'none');
+                    axis(ax, 'image');
+                    set(ax, 'YDir', 'reverse');
+                    if ~isempty(app.TissueHomeXLim) && ~isempty(app.TissueHomeYLim)
+                        ax.XLim = app.TissueHomeXLim;
+                        ax.YLim = app.TissueHomeYLim;
+                    end
+                end
+            else
+                h = imshow(img, [], 'Parent', ax);
+                app.OverviewImageHandle = h;
+                h.HitTest = 'on';
+                h.PickableParts = 'all';
+                h.ButtonDownFcn = @(s,e) app.onOverviewClicked();
+                axis(ax, 'image');
+            end
+
+            ax.XTick = [];
+            ax.YTick = [];
+            ax.HitTest = 'on';
+            ax.PickableParts = 'all';
+            ax.ButtonDownFcn = @(s,e) app.onOverviewClicked();
+
+            app.updateOverviewRect();
+        end
+
+        function updateOverviewRect(app)
+            % Draw/move the red rectangle marking the tissue-plot view extent.
+            if isempty(app.OverviewAxes) || ~isvalid(app.OverviewAxes) || ...
+                    isempty(app.TissueAxes) || ~isvalid(app.TissueAxes)
+                return
+            end
+            xl = app.TissueAxes.XLim;
+            yl = app.TissueAxes.YLim;
+            if numel(xl) ~= 2 || numel(yl) ~= 2 || any(~isfinite([xl yl]))
+                return
+            end
+            pos = [xl(1), yl(1), max(diff(xl), eps), max(diff(yl), eps)];
+            if isempty(app.OverviewRectHandle) || ~isvalid(app.OverviewRectHandle)
+                app.OverviewRectHandle = rectangle(app.OverviewAxes, ...
+                    'Position', pos, ...
+                    'EdgeColor', [1 0.15 0.15], ...
+                    'LineWidth', 1.5, ...
+                    'HitTest', 'off', ...
+                    'PickableParts', 'none');
+            else
+                app.OverviewRectHandle.Position = pos;
+            end
+        end
+
+        function onOverviewClicked(app)
+            ax = app.OverviewAxes;
+            if isempty(ax) || ~isvalid(ax)
+                return
+            end
+            cp = ax.CurrentPoint;
+            cx = cp(1, 1);
+            cy = cp(1, 2);
+            if ~isfinite(cx) || ~isfinite(cy)
+                return
+            end
+            app.centerTissueViewOn(cx, cy);
+        end
+
+        function centerTissueViewOn(app, cx, cy)
+            % Recenter the tissue plot on (cx, cy) keeping the current zoom span,
+            % clamped to the full-image extent, then refresh the overview rect.
+            ax = app.TissueAxes;
+            if isempty(ax) || ~isvalid(ax)
+                return
+            end
+            wx = diff(ax.XLim);
+            wy = diff(ax.YLim);
+            if ~(wx > 0) || ~(wy > 0)
+                return
+            end
+            newXl = [cx - wx/2, cx + wx/2];
+            newYl = [cy - wy/2, cy + wy/2];
+            [newXl, newYl] = app.clampToHome(newXl, newYl);
+            ax.XLim = newXl;
+            ax.YLim = newYl;
+            app.updateOverviewRect();
         end
 
         function drawTissueAllPoints(app)
@@ -1215,25 +1818,55 @@ classdef CellNeighborResolverApp < handle
             end
 
             % Only show live (non-deleted) rows
-            liveMask = ~app.ActiveLocTable.NR_Deleted;
+            liveMask = app.currentPageMask();
             liveIdx = find(liveMask);
             if isempty(liveIdx)
                 return
             end
 
-            x = double(app.ActiveLocTable.X(liveIdx));
-            y = double(app.ActiveLocTable.Y(liveIdx));
-            colors = app.pointColorsForRows(liveIdx);
+            % Partition into neighbor rows (in any pair) and non-neighbor rows
+            nPairs = size(app.NeighborPairs, 1);
+            inPairRows = false(height(app.ActiveLocTable), 1);
+            for p = 1:nPairs
+                inPairRows(app.NeighborPairs(p, 1)) = true;
+                inPairRows(app.NeighborPairs(p, 2)) = true;
+            end
+            neighborMask   = inPairRows(liveIdx);
+            neighborIdx    = liveIdx(neighborMask);
+            nonNeighborIdx = liveIdx(~neighborMask);
 
-            h = scatter(app.TissueAxes, x, y, 18, colors, 'filled', ...
-                'MarkerFaceAlpha', 0.8, ...
-                'MarkerEdgeColor', 'flat', ...
-                'HitTest', 'off', ...
-                'PickableParts', 'none');
-            h.Annotation.LegendInformation.IconDisplayStyle = 'off';
-            app.TissueAllPointsHandle = h;
+            vis = true;
             if ~isempty(app.ShowPointsCheckBox) && isvalid(app.ShowPointsCheckBox)
-                h.Visible = app.ShowPointsCheckBox.Value;
+                vis = app.ShowPointsCheckBox.Value;
+            end
+
+            % Non-neighbor points: small filled circles, magenta
+            if ~isempty(nonNeighborIdx)
+                xn = double(app.ActiveLocTable.X(nonNeighborIdx));
+                yn = double(app.ActiveLocTable.Y(nonNeighborIdx));
+                h = scatter(app.TissueAxes, xn, yn, 18, [1.0 0.25 0.75], 'filled', ...
+                    'MarkerFaceAlpha', 0.8, ...
+                    'MarkerEdgeColor', 'flat', ...
+                    'HitTest', 'off', ...
+                    'PickableParts', 'none');
+                h.Annotation.LegendInformation.IconDisplayStyle = 'off';
+                h.Visible = vis;
+                app.TissueAllPointsHandle = h;
+            end
+
+            % Neighbor points: filled orange squares, colored by resolution status
+            if ~isempty(neighborIdx)
+                xp = double(app.ActiveLocTable.X(neighborIdx));
+                yp = double(app.ActiveLocTable.Y(neighborIdx));
+                colors = app.pointColorsForRows(neighborIdx);
+                h2 = scatter(app.TissueAxes, xp, yp, 22, colors, 's', 'filled', ...
+                    'MarkerFaceAlpha', 0.85, ...
+                    'MarkerEdgeColor', 'flat', ...
+                    'HitTest', 'off', ...
+                    'PickableParts', 'none');
+                h2.Annotation.LegendInformation.IconDisplayStyle = 'off';
+                h2.Visible = vis;
+                app.TissueNeighborPointsHandle = h2;
             end
         end
 
@@ -1241,32 +1874,21 @@ classdef CellNeighborResolverApp < handle
             if isempty(app.ActiveLocTable) || height(app.ActiveLocTable) == 0
                 return
             end
-            % If the scatter handle doesn't exist or is invalid, rebuild fully
-            if isempty(app.TissueAllPointsHandle) || ~isvalid(app.TissueAllPointsHandle)
-                hold(app.TissueAxes, 'on');
-                app.drawTissueAllPoints();
-                hold(app.TissueAxes, 'off');
-                return
-            end
 
-            liveMask = ~app.ActiveLocTable.NR_Deleted;
-            liveIdx = find(liveMask);
-            if isempty(liveIdx)
+            % Delete both handles and rebuild — neighbor membership may have
+            % changed, requiring different marker shapes for some rows.
+            if ~isempty(app.TissueAllPointsHandle) && isvalid(app.TissueAllPointsHandle)
                 delete(app.TissueAllPointsHandle);
-                app.TissueAllPointsHandle = [];
-                return
             end
-
-            x = double(app.ActiveLocTable.X(liveIdx));
-            y = double(app.ActiveLocTable.Y(liveIdx));
-            colors = app.pointColorsForRows(liveIdx);
-
-            app.TissueAllPointsHandle.XData = x;
-            app.TissueAllPointsHandle.YData = y;
-            app.TissueAllPointsHandle.CData = colors;
-            if ~isempty(app.ShowPointsCheckBox) && isvalid(app.ShowPointsCheckBox)
-                app.TissueAllPointsHandle.Visible = app.ShowPointsCheckBox.Value;
+            app.TissueAllPointsHandle = [];
+            if ~isempty(app.TissueNeighborPointsHandle) && isvalid(app.TissueNeighborPointsHandle)
+                delete(app.TissueNeighborPointsHandle);
             end
+            app.TissueNeighborPointsHandle = [];
+
+            hold(app.TissueAxes, 'on');
+            app.drawTissueAllPoints();
+            hold(app.TissueAxes, 'off');
         end
 
         function colors = pointColorsForRows(app, rowIndices)
@@ -1283,7 +1905,7 @@ classdef CellNeighborResolverApp < handle
 
             for k = 1:n
                 r = rowIndices(k);
-                if app.ActiveLocTable.NR_MergedRow(r)
+                if app.ActiveLocTable.CURATED_MergedRow(r)
                     colors(k, :) = [0.4 0.7 1.0];     % light blue: merged
                 elseif nPairs > 0 && r <= numel(inPairRows) && inPairRows(r)
                     % Find the pair status for this row
@@ -1294,7 +1916,7 @@ classdef CellNeighborResolverApp < handle
                         colors(k, :) = [1.0 0.65 0.0]; % orange: in unresolved pair
                     end
                 else
-                    colors(k, :) = [0.55 0.55 0.55]; % gray: not in any pair
+                    colors(k, :) = [1.0 0.25 0.75]; % magenta: not in any pair
                 end
             end
         end
@@ -1323,25 +1945,29 @@ classdef CellNeighborResolverApp < handle
 
             xA = double(app.ActiveLocTable.X(rowA));
             yA = double(app.ActiveLocTable.Y(rowA));
-            app.TissuePointAHandle = scatter(app.TissueAxes, xA, yA, 150, ...
-                'o', 'filled', ...
-                'MarkerFaceColor', [0.25 0.75 0.35], ...
-                'MarkerEdgeColor', [0.1 0.4 0.15], ...
-                'LineWidth', 1.5, ...
-                'HitTest', 'off', ...
-                'PickableParts', 'none', ...
-                'DisplayName', sprintf('A (row %d)', rowA));
+            if ~app.ActiveLocTable.CURATED_Deleted(rowA)
+                app.TissuePointAHandle = scatter(app.TissueAxes, xA, yA, 150, ...
+                    'o', 'filled', ...
+                    'MarkerFaceColor', [0.25 0.75 0.35], ...
+                    'MarkerEdgeColor', [0.1 0.4 0.15], ...
+                    'LineWidth', 1.5, ...
+                    'HitTest', 'off', ...
+                    'PickableParts', 'none', ...
+                    'DisplayName', sprintf('A (row %d)', rowA));
+            end
 
             xB = double(app.ActiveLocTable.X(rowB));
             yB = double(app.ActiveLocTable.Y(rowB));
-            app.TissuePointBHandle = scatter(app.TissueAxes, xB, yB, 150, ...
-                's', 'filled', ...
-                'MarkerFaceColor', [0.2 0.55 0.85], ...
-                'MarkerEdgeColor', [0.1 0.25 0.5], ...
-                'LineWidth', 1.5, ...
-                'HitTest', 'off', ...
-                'PickableParts', 'none', ...
-                'DisplayName', sprintf('B (row %d)', rowB));
+            if ~app.ActiveLocTable.CURATED_Deleted(rowB)
+                app.TissuePointBHandle = scatter(app.TissueAxes, xB, yB, 150, ...
+                    's', 'filled', ...
+                    'MarkerFaceColor', [0.2 0.55 0.85], ...
+                    'MarkerEdgeColor', [0.1 0.25 0.5], ...
+                    'LineWidth', 1.5, ...
+                    'HitTest', 'off', ...
+                    'PickableParts', 'none', ...
+                    'DisplayName', sprintf('B (row %d)', rowB));
+            end
 
             if ~holdState
                 hold(app.TissueAxes, 'off');
@@ -1360,6 +1986,13 @@ classdef CellNeighborResolverApp < handle
         end
 
         function onTissueClicked(app, ~, ~)
+            % Middle-button (or Shift+click) starts a pan drag. Handle it first
+            % so it never triggers point selection or an armed action.
+            if strcmp(app.figureSelectionType(), 'extend')
+                app.beginPan();
+                return
+            end
+
             if isempty(app.ActiveLocTable) || height(app.ActiveLocTable) == 0
                 return
             end
@@ -1383,8 +2016,13 @@ classdef CellNeighborResolverApp < handle
                 return
             end
 
+            if app.AddPointArmed
+                app.executeAddPoint(xClick, yClick);
+                return
+            end
+
             % Find nearest live detection
-            liveMask = ~app.ActiveLocTable.NR_Deleted;
+            liveMask = app.currentPageMask();
             x = double(app.ActiveLocTable.X);
             y = double(app.ActiveLocTable.Y);
             x(~liveMask) = Inf;
@@ -1419,6 +2057,167 @@ classdef CellNeighborResolverApp < handle
             end
         end
 
+        % --------------------------------------------------------------
+        % IMAGE NAVIGATION (zoom / pan)
+        % --------------------------------------------------------------
+
+        function onScrollWheel(app, ~, event)
+            % Zoom the tissue plot in/out, keeping the point under the cursor
+            % fixed. Only acts when the pointer is over the tissue axes.
+            if ~app.pointerOverTissueAxes()
+                return
+            end
+            ax = app.TissueAxes;
+            if isempty(ax) || ~isvalid(ax)
+                return
+            end
+
+            cp = ax.CurrentPoint;
+            cx = cp(1, 1);
+            cy = cp(1, 2);
+            if ~isfinite(cx) || ~isfinite(cy)
+                return
+            end
+
+            % Scroll up (negative count) zooms in; scroll down zooms out.
+            if event.VerticalScrollCount < 0
+                factor = 1 / 1.25;
+            elseif event.VerticalScrollCount > 0
+                factor = 1.25;
+            else
+                return
+            end
+
+            xl = ax.XLim;
+            yl = ax.YLim;
+            newXl = cx + (xl - cx) * factor;
+            newYl = cy + (yl - cy) * factor;
+
+            minSpan = 8;   % px — don't zoom in past a handful of pixels
+            if factor > 1
+                % Zooming out: snap back to the full image once we reach it
+                if isempty(app.TissueHomeXLim) || diff(newXl) >= diff(app.TissueHomeXLim)
+                    app.resetTissueView();
+                    return
+                end
+            elseif diff(newXl) < minSpan
+                return
+            end
+
+            [newXl, newYl] = app.clampToHome(newXl, newYl);
+            if newXl(2) > newXl(1) && newYl(2) > newYl(1)
+                ax.XLim = newXl;
+                ax.YLim = newYl;
+                app.updateOverviewRect();
+            end
+        end
+
+        function beginPan(app)
+            % Start a middle-button (or Shift+click) drag pan. The data point
+            % grabbed at button-down stays under the cursor as it moves.
+            ax = app.TissueAxes;
+            if isempty(ax) || ~isvalid(ax)
+                return
+            end
+            app.PanActive    = true;
+            cp = ax.CurrentPoint;
+            app.PanStartData = cp(1, 1:2);
+            app.UIFigure.WindowButtonMotionFcn = @(s,e) app.doPanMotion();
+            app.UIFigure.WindowButtonUpFcn     = @(s,e) app.endPan();
+            try
+                app.UIFigure.Pointer = 'hand';
+            catch
+            end
+        end
+
+        function doPanMotion(app)
+            if ~app.PanActive || isempty(app.TissueAxes) || ~isvalid(app.TissueAxes)
+                return
+            end
+            ax = app.TissueAxes;
+            cp = ax.CurrentPoint;
+            delta = cp(1, 1:2) - app.PanStartData;   % PanStartData stays fixed
+            if any(~isfinite(delta))
+                return
+            end
+            xl = ax.XLim - delta(1);
+            yl = ax.YLim - delta(2);
+            [xl, yl] = app.clampToHome(xl, yl);
+            ax.XLim = xl;
+            ax.YLim = yl;
+            app.updateOverviewRect();
+        end
+
+        function endPan(app)
+            app.PanActive = false;
+            if ~isempty(app.UIFigure) && isvalid(app.UIFigure)
+                app.UIFigure.WindowButtonMotionFcn = '';
+                app.UIFigure.WindowButtonUpFcn     = '';
+                try
+                    app.UIFigure.Pointer = 'arrow';
+                catch
+                end
+            end
+        end
+
+        function resetTissueView(app)
+            % Restore the full-image ("home") view.
+            if isempty(app.TissueAxes) || ~isvalid(app.TissueAxes)
+                return
+            end
+            if ~isempty(app.TissueHomeXLim) && ~isempty(app.TissueHomeYLim)
+                app.TissueAxes.XLim = app.TissueHomeXLim;
+                app.TissueAxes.YLim = app.TissueHomeYLim;
+                app.updateOverviewRect();
+                app.updateStatus("View reset to full image.");
+            end
+        end
+
+        function [xl, yl] = clampToHome(app, xl, yl)
+            % Keep limits inside the full-image extent (shift, don't shrink).
+            if ~isempty(app.TissueHomeXLim) && numel(app.TissueHomeXLim) == 2
+                xl = app.clampOneAxis(xl, app.TissueHomeXLim);
+            end
+            if ~isempty(app.TissueHomeYLim) && numel(app.TissueHomeYLim) == 2
+                yl = app.clampOneAxis(yl, app.TissueHomeYLim);
+            end
+        end
+
+        function lim = clampOneAxis(~, lim, home)
+            span = diff(lim);
+            if span >= diff(home)
+                lim = home;                       % view at least as wide as home → snap
+            elseif lim(1) < home(1)
+                lim = home(1) + [0, span];        % slid past the low edge
+            elseif lim(2) > home(2)
+                lim = home(2) - [span, 0];        % slid past the high edge
+            end
+        end
+
+        function tf = pointerOverTissueAxes(app)
+            tf = false;
+            if isempty(app.TissueAxes) || ~isvalid(app.TissueAxes) || ...
+                    isempty(app.UIFigure) || ~isvalid(app.UIFigure)
+                return
+            end
+            try
+                p  = app.UIFigure.CurrentPoint;             % [x y] px from fig lower-left
+                ap = getpixelposition(app.TissueAxes, true); % [x y w h] px in figure
+            catch
+                return
+            end
+            tf = p(1) >= ap(1) && p(1) <= ap(1) + ap(3) && ...
+                 p(2) >= ap(2) && p(2) <= ap(2) + ap(4);
+        end
+
+        function selType = figureSelectionType(app)
+            selType = 'normal';
+            try
+                selType = app.UIFigure.SelectionType;
+            catch
+            end
+        end
+
         function installTissueContextMenu(app)
             if isempty(app.TissueFigure()) || ~isvalid(app.TissueAxes)
                 return
@@ -1437,6 +2236,10 @@ classdef CellNeighborResolverApp < handle
 
             uimenu(cm, 'Text', 'Skip all pairs in freehand ROI', ...
                 'MenuSelectedFcn', @(s,e) app.skipPairsInFreehandROI());
+
+            uimenu(cm, 'Text', 'Reset view (fit image)  [f]', ...
+                'Separator', 'on', ...
+                'MenuSelectedFcn', @(s,e) app.resetTissueView());
 
             app.TissueContextMenu = cm;
             if isprop(app.TissueAxes, 'ContextMenu')
@@ -1506,10 +2309,117 @@ classdef CellNeighborResolverApp < handle
             end
         end
 
+        function mask = currentPageMask(app)
+            % Returns a logical mask over ActiveLocTable rows that are:
+            %   (a) not deleted, AND
+            %   (b) belong to the page currently displayed.
+            % The page each row belongs to is encoded in its imgName as the
+            % trailing digits of the per-page suffix (e.g. "<stem>_PNN1" -> page
+            % 1, "<stem>_page2" -> page 2). Rows whose imgName encodes no page
+            % are treated as page 1. This keeps one channel's detections from
+            % ever being drawn over another channel's image.
+            if isempty(app.ActiveLocTable) || height(app.ActiveLocTable) == 0
+                mask = logical([]);
+                return
+            end
+            mask = ~app.ActiveLocTable.CURATED_Deleted;
+
+            names = string(app.ActiveLocTable.Properties.VariableNames);
+            if ~ismember("imgName", names)
+                return
+            end
+            ids = cellstr(string(app.ActiveLocTable.imgName));
+            rowPages = nan(numel(ids), 1);
+            for k = 1:numel(ids)
+                rowPages(k) = app.pageFromIdentity(ids{k});
+            end
+            if all(isnan(rowPages))
+                return   % no page encoded anywhere — single-page CSV, show all
+            end
+            rowPages(isnan(rowPages)) = 1;   % unencoded rows belong to page 1
+            mask = mask & (rowPages == app.ActiveDisplayPage);
+        end
+
+        function pg = pageFromIdentity(~, identity)
+            % Page index encoded in a per-page identity string of the form
+            % "<stem>_<suffix><page>", where <suffix> is alphabetic (e.g.
+            % "page", "PNN", "PV") and <page> is the TIFF page index. Returns
+            % NaN when no such page suffix is present (e.g. single-page CSVs,
+            % whose imgName is the bare image filename incl. extension).
+            pg = NaN;
+            tok = regexp(char(identity), '_[A-Za-z]+(\d+)$', 'tokens', 'once');
+            if ~isempty(tok)
+                pg = str2double(tok{1});
+            end
+        end
+
+        function pg = pageFromCsvName(app, csvPath)
+            % Page index encoded in a *_locs.csv filename following the
+            % CellDiscovery convention "<stem>_<suffix><page>_locs[_resized].csv".
+            [~, name, ~] = fileparts(char(csvPath));
+            core = regexprep(name, '_locs(_resized)?$', '', 'ignorecase');
+            pg = app.pageFromIdentity(core);
+        end
+
+        function pages = encodedPagesInTable(app)
+            % Distinct TIFF pages referenced by the loaded table's imgName
+            % column (empty when the column is absent or encodes no pages).
+            pages = [];
+            if isempty(app.ActiveLocTable) || height(app.ActiveLocTable) == 0
+                return
+            end
+            names = string(app.ActiveLocTable.Properties.VariableNames);
+            if ~ismember("imgName", names)
+                return
+            end
+            ids = cellstr(string(app.ActiveLocTable.imgName));
+            p = nan(numel(ids), 1);
+            for k = 1:numel(ids)
+                p(k) = app.pageFromIdentity(ids{k});
+            end
+            pages = unique(p(~isnan(p)));
+        end
+
         function onTiffPageChanged(app)
             app.ActiveDisplayPage = app.TiffPageSpinner.Value;
             app.Settings.TiffPageIndex = app.ActiveDisplayPage;
-            app.renderTissuePlot();
+            % Re-run neighbor search for the new page's rows, then re-render
+            app.onFindNeighborsButtonPushed();
+            app.updateNextPageButtonLabel();
+        end
+
+        function updateNextPageButtonLabel(app)
+            if isempty(app.NextPageButton) || ~isvalid(app.NextPageButton)
+                return
+            end
+            hasMorePages = app.CsvSpansMultiplePages && ...
+                ~isempty(app.ActiveTiffInfo) && ...
+                numel(app.ActiveTiffInfo) > 1 && ...
+                app.ActiveDisplayPage < numel(app.ActiveTiffInfo);
+            if hasMorePages
+                app.NextPageButton.Text = sprintf('Next Page (%d→%d)  [Tab]', ...
+                    app.ActiveDisplayPage, app.ActiveDisplayPage + 1);
+            else
+                app.NextPageButton.Text = 'Next File  [Tab]';
+            end
+        end
+
+        function advanceToNextPage(app)
+            % Advance to the next TIFF page only for a combined CSV that spans
+            % multiple pages. Per-page CSVs are pinned to their own page, so
+            % advance straight to the next file instead (avoids overlaying one
+            % channel's detections on another channel's image).
+            if app.CsvSpansMultiplePages && ~isempty(app.ActiveTiffInfo) && ...
+                    numel(app.ActiveTiffInfo) > 1
+                nextPage = app.ActiveDisplayPage + 1;
+                if nextPage <= numel(app.ActiveTiffInfo)
+                    app.TiffPageSpinner.Value = nextPage;
+                    app.onTiffPageChanged();
+                    return
+                end
+            end
+            % No more pages (or page is locked to this CSV) — advance to next file
+            app.loadNextFileAndFindNeighbors();
         end
 
         % --------------------------------------------------------------
@@ -1531,20 +2441,20 @@ classdef CellNeighborResolverApp < handle
             [rowA, rowB, ok] = app.activePairRows();
             if ~ok, return; end
             app.pushUndo(rowA, rowB, NaN);
-            app.ActiveLocTable.NR_Deleted(rowB) = true;
+            app.ActiveLocTable.CURATED_Deleted(rowB) = true;
             app.PairStatus(app.SelectedPairIndex) = app.STATUS_KEEP_A;
             app.Dirty = true;
-            app.afterAction();
+            app.afterAction(true);
         end
 
         function doKeepB(app)
             [rowA, rowB, ok] = app.activePairRows();
             if ~ok, return; end
             app.pushUndo(rowA, rowB, NaN);
-            app.ActiveLocTable.NR_Deleted(rowA) = true;
+            app.ActiveLocTable.CURATED_Deleted(rowA) = true;
             app.PairStatus(app.SelectedPairIndex) = app.STATUS_KEEP_B;
             app.Dirty = true;
-            app.afterAction();
+            app.afterAction(true);
         end
 
         function doKeepBoth(app)
@@ -1553,7 +2463,7 @@ classdef CellNeighborResolverApp < handle
             app.pushUndo(rowA, rowB, NaN);
             app.PairStatus(app.SelectedPairIndex) = app.STATUS_KEEP_BOTH;
             app.Dirty = true;
-            app.afterAction();
+            app.afterAction(true);
         end
 
         function doSkip(app)
@@ -1562,7 +2472,7 @@ classdef CellNeighborResolverApp < handle
             app.pushUndo(rowA, rowB, NaN);
             app.PairStatus(app.SelectedPairIndex) = app.STATUS_SKIPPED;
             app.Dirty = true;
-            app.afterAction();
+            app.afterAction(false);
         end
 
         function onShowPointsChanged(app)
@@ -1572,6 +2482,9 @@ classdef CellNeighborResolverApp < handle
             end
             if ~isempty(app.TissueAllPointsHandle) && isvalid(app.TissueAllPointsHandle)
                 app.TissueAllPointsHandle.Visible = vis;
+            end
+            if ~isempty(app.TissueNeighborPointsHandle) && isvalid(app.TissueNeighborPointsHandle)
+                app.TissueNeighborPointsHandle.Visible = vis;
             end
             if ~isempty(app.TissuePointAHandle) && isvalid(app.TissuePointAHandle)
                 app.TissuePointAHandle.Visible = vis;
@@ -1584,6 +2497,7 @@ classdef CellNeighborResolverApp < handle
         function armDeletePoint(app)
             app.cancelMerge();
             app.cancelRelocatePoint();
+            app.cancelAddPoint();
             app.DeletePointArmed = true;
             app.DeletePointButton.BackgroundColor = [0.85 0.2 0.2];
             app.DeletePointButton.FontColor = [1 1 1];
@@ -1603,7 +2517,7 @@ classdef CellNeighborResolverApp < handle
         function executeDeletePoint(app, xClick, yClick)
             app.cancelDeletePoint();
 
-            liveMask = ~app.ActiveLocTable.NR_Deleted;
+            liveMask = app.currentPageMask();
             x = double(app.ActiveLocTable.X);
             y = double(app.ActiveLocTable.Y);
             x(~liveMask) = Inf;
@@ -1636,7 +2550,7 @@ classdef CellNeighborResolverApp < handle
             app.pushUndo(rowIdx, NaN, NaN);
 
             % Mark deleted
-            app.ActiveLocTable.NR_Deleted(rowIdx) = true;
+            app.ActiveLocTable.CURATED_Deleted(rowIdx) = true;
             app.Dirty = true;
 
             % Mark all pairs containing this point as Keep A or Keep B
@@ -1654,9 +2568,69 @@ classdef CellNeighborResolverApp < handle
             app.updateStatus(sprintf('Deleted point row %d at (%.1f, %.1f).', rowIdx, x(rowIdx), y(rowIdx)));
         end
 
+        function armAddPoint(app)
+            app.cancelMerge();
+            app.cancelDeletePoint();
+            app.cancelRelocatePoint();
+            app.AddPointArmed = true;
+            app.AddPointButton.BackgroundColor = [0.2 0.6 0.3];
+            app.AddPointButton.FontColor = [1 1 1];
+            app.AddPointButton.Text = 'Click to place new point  [Esc cancels]';
+            app.updateStatus("ADD POINT ARMED — click anywhere on the tissue plot to insert a new detection. Press Esc to cancel.");
+        end
+
+        function cancelAddPoint(app)
+            app.AddPointArmed = false;
+            if ~isempty(app.AddPointButton) && isvalid(app.AddPointButton)
+                app.AddPointButton.BackgroundColor = [0.96 0.96 0.96];
+                app.AddPointButton.FontColor = [0 0 0];
+                app.AddPointButton.Text = 'Add Point — click  [n]';
+            end
+        end
+
+        function executeAddPoint(app, xClick, yClick)
+            app.cancelAddPoint();
+
+            if isempty(app.ActiveLocTable) || height(app.ActiveLocTable) == 0
+                app.updateStatus("No CSV loaded — cannot add a point.");
+                return
+            end
+
+            % Build new row: copy nearest live row as a template for non-X/Y columns
+            liveMask = app.currentPageMask();
+            liveIdx  = find(liveMask);
+            if ~isempty(liveIdx)
+                x = double(app.ActiveLocTable.X(liveIdx));
+                y = double(app.ActiveLocTable.Y(liveIdx));
+                [~, nearest] = min((x - xClick).^2 + (y - yClick).^2);
+                templateRow = liveIdx(nearest);
+            else
+                templateRow = 1;
+            end
+
+            newRow = app.ActiveLocTable(templateRow, :);
+            newRow.X              = xClick;
+            newRow.Y              = yClick;
+            newRow.CURATED_Deleted     = false;
+            newRow.CURATED_MergedRow   = false;
+            newRow.CURATED_OriginalRow = NaN;     % marks as manually added
+            newRow.CURATED_OrigX       = xClick;
+            newRow.CURATED_OrigY       = yClick;
+
+            newRowIdx = height(app.ActiveLocTable) + 1;
+            app.pushUndoAddPoint(newRowIdx);
+
+            app.ActiveLocTable = [app.ActiveLocTable; newRow];
+            app.Dirty = true;
+
+            app.updateTissueAllPoints();
+            app.updateStatus(sprintf('Added new point (row %d) at (%.1f, %.1f).', newRowIdx, xClick, yClick));
+        end
+
         function armRelocatePoint(app)
             app.cancelMerge();
             app.cancelDeletePoint();
+            app.cancelAddPoint();
             app.RelocatePointArmed  = true;
             app.RelocateSelectedRow = NaN;
             app.RelocatePointButton.BackgroundColor = [0.85 0.6 0.0];
@@ -1681,7 +2655,7 @@ classdef CellNeighborResolverApp < handle
         end
 
         function executeRelocateClick(app, xClick, yClick)
-            liveMask = ~app.ActiveLocTable.NR_Deleted;
+            liveMask = app.currentPageMask();
             x = double(app.ActiveLocTable.X);
             y = double(app.ActiveLocTable.Y);
 
@@ -1748,6 +2722,8 @@ classdef CellNeighborResolverApp < handle
                 return
             end
             app.cancelDeletePoint();
+            app.cancelRelocatePoint();
+            app.cancelAddPoint();
             app.MergeArmed = true;
             app.MergeButton.BackgroundColor = [1 0.65 0];
             app.MergeButton.FontColor = [0 0 0];
@@ -1789,13 +2765,13 @@ classdef CellNeighborResolverApp < handle
                 end
             end
 
-            newRow.NR_Deleted    = false;
-            newRow.NR_MergedRow  = true;
-            newRow.NR_OriginalRow = NaN;
+            newRow.CURATED_Deleted    = false;
+            newRow.CURATED_MergedRow  = true;
+            newRow.CURATED_OriginalRow = NaN;
 
             app.ActiveLocTable = [app.ActiveLocTable; newRow];
-            app.ActiveLocTable.NR_Deleted(rowA) = true;
-            app.ActiveLocTable.NR_Deleted(rowB) = true;
+            app.ActiveLocTable.CURATED_Deleted(rowA) = true;
+            app.ActiveLocTable.CURATED_Deleted(rowB) = true;
 
             app.PairStatus(app.SelectedPairIndex) = app.STATUS_MERGED;
             app.Dirty = true;
@@ -1804,7 +2780,8 @@ classdef CellNeighborResolverApp < handle
             app.updateStatus(sprintf('Merged pair %d-%d at (%.1f, %.1f).', rowA, rowB, xNew, yNew));
         end
 
-        function afterAction(app)
+        function afterAction(app, doAdvance)
+            if nargin < 2, doAdvance = false; end
             app.updateTissueAllPoints();
             app.updateTissueHighlights();
             app.updatePairTable();
@@ -1815,7 +2792,7 @@ classdef CellNeighborResolverApp < handle
                 app.saveResolved();
             end
 
-            if app.AutoAdvanceCheckBox.Value
+            if doAdvance && app.AutoAdvanceCheckBox.Value
                 app.advanceToNextUnresolved();
             end
         end
@@ -1827,14 +2804,28 @@ classdef CellNeighborResolverApp < handle
         function pushUndo(app, rowA, rowB, mergedRowIdx)
             state.Kind         = 'action';
             state.PairIndex    = app.SelectedPairIndex;
-            state.PairStatus   = app.PairStatus(app.SelectedPairIndex);
+            if ~isnan(app.SelectedPairIndex) && app.SelectedPairIndex >= 1 && ...
+                    app.SelectedPairIndex <= numel(app.PairStatus)
+                state.PairStatus = app.PairStatus(app.SelectedPairIndex);
+            else
+                state.PairStatus = [];
+            end
             state.RowA         = rowA;
             state.RowB         = rowB;
-            state.DeletedA     = app.ActiveLocTable.NR_Deleted(rowA);
-            state.DeletedB     = isnan(rowB) || app.ActiveLocTable.NR_Deleted(rowB);
+            state.DeletedA     = app.ActiveLocTable.CURATED_Deleted(rowA);
+            state.DeletedB     = isnan(rowB) || app.ActiveLocTable.CURATED_Deleted(rowB);
             state.MergedRowIdx = mergedRowIdx;
             state.TableHeight  = height(app.ActiveLocTable);
 
+            app.UndoStack{end+1} = state;
+            if numel(app.UndoStack) > app.MaxUndoDepth
+                app.UndoStack(1) = [];
+            end
+        end
+
+        function pushUndoAddPoint(app, newRowIdx)
+            state.Kind      = 'addpoint';
+            state.RowIdx    = newRowIdx;
             app.UndoStack{end+1} = state;
             if numel(app.UndoStack) > app.MaxUndoDepth
                 app.UndoStack(1) = [];
@@ -1862,6 +2853,18 @@ classdef CellNeighborResolverApp < handle
             state = app.UndoStack{end};
             app.UndoStack(end) = [];
 
+            if strcmp(state.Kind, 'addpoint')
+                % Remove the appended row
+                if state.RowIdx <= height(app.ActiveLocTable)
+                    app.ActiveLocTable(state.RowIdx:end, :) = [];
+                end
+                app.Dirty = true;
+                app.updateTissueAllPoints();
+                app.updateTissueHighlights();
+                app.updateStatus("Undo: removed added point.");
+                return
+            end
+
             if strcmp(state.Kind, 'relocate')
                 % Restore X/Y coordinates
                 if state.RowIdx >= 1 && state.RowIdx <= height(app.ActiveLocTable)
@@ -1884,10 +2887,10 @@ classdef CellNeighborResolverApp < handle
 
             % Restore deleted flags
             if state.RowA >= 1 && state.RowA <= height(app.ActiveLocTable)
-                app.ActiveLocTable.NR_Deleted(state.RowA) = state.DeletedA;
+                app.ActiveLocTable.CURATED_Deleted(state.RowA) = state.DeletedA;
             end
             if ~isnan(state.RowB) && state.RowB >= 1 && state.RowB <= height(app.ActiveLocTable)
-                app.ActiveLocTable.NR_Deleted(state.RowB) = state.DeletedB;
+                app.ActiveLocTable.CURATED_Deleted(state.RowB) = state.DeletedB;
             end
 
             % Remove merged row if it was added
@@ -1923,30 +2926,30 @@ classdef CellNeighborResolverApp < handle
             resolvedPath = app.ActiveCsvPath;
 
             % ---- Build output table ----
-            % Strategy: keep ALL original rows (rows where NR_MergedRow == false).
+            % Strategy: keep ALL original rows (rows where CURATED_MergedRow == false).
             % Append one row per Merged pair for the new merged point.
-            % Output columns NR_X, NR_Y carry the "effective" coordinates:
-            %   - original unmodified row  → NR_X = current X (may differ if relocated)
-            %   - deleted row              → NR_X = NaN, NR_Y = NaN
-            %   - merged-origin row        → NR_X = NaN, NR_Y = NaN
-            %   - merged-result row        → NR_X = merged X, NR_Y = merged Y
+            % Output columns CURATED_X, CURATED_Y carry the "effective" coordinates:
+            %   - original unmodified row  → CURATED_X = current X (may differ if relocated)
+            %   - deleted row              → CURATED_X = NaN, CURATED_Y = NaN
+            %   - merged-origin row        → CURATED_X = NaN, CURATED_Y = NaN
+            %   - merged-result row        → CURATED_X = merged X, CURATED_Y = merged Y
 
-            origMask = ~app.ActiveLocTable.NR_MergedRow;
+            origMask = ~app.ActiveLocTable.CURATED_MergedRow;
             outTbl = app.ActiveLocTable(origMask, :);
 
             nOrig = height(outTbl);
 
-            % Strip all runtime columns — we will build NR_X/NR_Y fresh
-            runtimeCols = {'NR_Deleted','NR_MergedRow','NR_OriginalRow','NR_OrigX','NR_OrigY'};
+            % Strip all runtime columns — we will build CURATED_X/CURATED_Y fresh
+            runtimeCols = {'CURATED_Deleted','CURATED_MergedRow','CURATED_OriginalRow','CURATED_OrigX','CURATED_OrigY'};
             for k = 1:numel(runtimeCols)
                 if ismember(runtimeCols{k}, outTbl.Properties.VariableNames)
                     outTbl.(runtimeCols{k}) = [];
                 end
             end
 
-            % NR_X / NR_Y: start as current X/Y, then blank deleted rows
-            outTbl.NR_X = double(outTbl.X);
-            outTbl.NR_Y = double(outTbl.Y);
+            % CURATED_X / CURATED_Y: start as current X/Y, then blank deleted rows
+            outTbl.CURATED_X = double(outTbl.X);
+            outTbl.CURATED_Y = double(outTbl.Y);
 
             % Annotation columns
             outTbl.NeighborResolved       = false(nOrig, 1);
@@ -1954,7 +2957,7 @@ classdef CellNeighborResolverApp < handle
             outTbl.NeighborPairID         = strings(nOrig, 1);
 
             % Map from original row number → output table row index
-            origRowNums = app.ActiveLocTable.NR_OriginalRow(origMask);
+            origRowNums = app.ActiveLocTable.CURATED_OriginalRow(origMask);
 
             for p = 1:size(app.NeighborPairs, 1)
                 st = app.PairStatus(p);
@@ -1965,40 +2968,47 @@ classdef CellNeighborResolverApp < handle
                 idxA = find(origRowNums == rA, 1);
                 idxB = find(origRowNums == rB, 1);
 
+                % Always write pair ID and status so the file can report total
+                % and unreviewed pair counts without re-running detection.
+                for idx = [idxA, idxB]
+                    if ~isempty(idx)
+                        outTbl.NeighborPairID(idx)         = pairLabel;
+                        outTbl.NeighborResolvedStatus(idx) = st;
+                    end
+                end
+
                 if st == app.STATUS_UNRESOLVED || st == app.STATUS_SKIPPED
                     continue
                 end
 
-                % Annotate both original rows
+                % Mark resolved rows
                 for idx = [idxA, idxB]
                     if ~isempty(idx)
-                        outTbl.NeighborResolved(idx)       = true;
-                        outTbl.NeighborResolvedStatus(idx) = st;
-                        outTbl.NeighborPairID(idx)         = pairLabel;
+                        outTbl.NeighborResolved(idx) = true;
                     end
                 end
 
                 if st == app.STATUS_KEEP_A
                     % B is deleted
                     if ~isempty(idxB)
-                        outTbl.NR_X(idxB) = NaN;
-                        outTbl.NR_Y(idxB) = NaN;
+                        outTbl.CURATED_X(idxB) = NaN;
+                        outTbl.CURATED_Y(idxB) = NaN;
                     end
                 elseif st == app.STATUS_KEEP_B
                     % A is deleted
                     if ~isempty(idxA)
-                        outTbl.NR_X(idxA) = NaN;
-                        outTbl.NR_Y(idxA) = NaN;
+                        outTbl.CURATED_X(idxA) = NaN;
+                        outTbl.CURATED_Y(idxA) = NaN;
                     end
                 elseif st == app.STATUS_MERGED
                     % Both originals are nulled; find the appended merged row
-                    if ~isempty(idxA), outTbl.NR_X(idxA) = NaN; outTbl.NR_Y(idxA) = NaN; end
-                    if ~isempty(idxB), outTbl.NR_X(idxB) = NaN; outTbl.NR_Y(idxB) = NaN; end
+                    if ~isempty(idxA), outTbl.CURATED_X(idxA) = NaN; outTbl.CURATED_Y(idxA) = NaN; end
+                    if ~isempty(idxB), outTbl.CURATED_X(idxB) = NaN; outTbl.CURATED_Y(idxB) = NaN; end
 
-                    % Find the merged-result row in ActiveLocTable (NR_MergedRow == true)
+                    % Find the merged-result row in ActiveLocTable (CURATED_MergedRow == true)
                     % that was appended for this pair. We use order of appending:
                     % match by proximity — merged rows untagged so far
-                    mergedRows = find(app.ActiveLocTable.NR_MergedRow);
+                    mergedRows = find(app.ActiveLocTable.CURATED_MergedRow);
                     % Pick the first merged row whose X/Y is not already in outTbl
                     for mri = mergedRows(:)'
                         mX = double(app.ActiveLocTable.X(mri));
@@ -2010,7 +3020,7 @@ classdef CellNeighborResolverApp < handle
                             newRow = outTbl(1, :);
                         end
                         newRow.X = mX; newRow.Y = mY;
-                        newRow.NR_X = mX; newRow.NR_Y = mY;
+                        newRow.CURATED_X = mX; newRow.CURATED_Y = mY;
                         newRow.NeighborResolved       = true;
                         newRow.NeighborResolvedStatus = st;
                         newRow.NeighborPairID         = pairLabel;
@@ -2020,13 +3030,13 @@ classdef CellNeighborResolverApp < handle
                 end
             end
 
-            % Null NR_X/NR_Y for any deleted row not already nulled (e.g. standalone deletes)
+            % Null CURATED_X/CURATED_Y for any deleted row not already nulled (e.g. standalone deletes)
             for r = 1:nOrig
                 origR = origRowNums(r);
                 if ~isnan(origR) && origR >= 1 && origR <= height(app.ActiveLocTable)
-                    if app.ActiveLocTable.NR_Deleted(origR) && ~isnan(outTbl.NR_X(r))
-                        outTbl.NR_X(r) = NaN;
-                        outTbl.NR_Y(r) = NaN;
+                    if app.ActiveLocTable.CURATED_Deleted(origR) && ~isnan(outTbl.CURATED_X(r))
+                        outTbl.CURATED_X(r) = NaN;
+                        outTbl.CURATED_Y(r) = NaN;
                     end
                 end
             end
@@ -2050,6 +3060,7 @@ classdef CellNeighborResolverApp < handle
             movefile(tmpPath, char(resolvedPath), 'f');
 
             app.Dirty = false;
+            app.markActiveFileReviewed();
             app.updateStatus(sprintf('Saved %d rows → %s', nOut, ...
                 char(app.makeRelativePath(char(app.ActiveCsvPath), char(app.ParentDirectory)))));
         end
@@ -2090,6 +3101,9 @@ classdef CellNeighborResolverApp < handle
                 elseif app.RelocatePointArmed
                     app.cancelRelocatePoint();
                     app.updateStatus("Relocate cancelled.");
+                elseif app.AddPointArmed
+                    app.cancelAddPoint();
+                    app.updateStatus("Add point cancelled.");
                 end
                 return
             end
@@ -2123,11 +3137,17 @@ classdef CellNeighborResolverApp < handle
                     app.armDeletePoint();
                 case "r"
                     app.armRelocatePoint();
+                case "n"
+                    app.armAddPoint();
                 case "p"
                     app.ShowPointsCheckBox.Value = ~app.ShowPointsCheckBox.Value;
                     app.onShowPointsChanged();
+                case "f"
+                    app.resetTissueView();
                 case "s"
                     app.doSkip();
+                case "tab"
+                    app.advanceToNextPage();
                 case {"j", "leftarrow"}
                     app.navigatePairs(-1);
                 case {"l", "rightarrow"}
@@ -2182,19 +3202,20 @@ classdef CellNeighborResolverApp < handle
     methods (Static, Access = private)
 
         function allFiles = recDir(rootDir)
+            % Recursively list every file under rootDir. Uses MATLAB's built-in
+            % '**' recursive glob, which (unlike a hand-rolled recursion) is
+            % robust to unreadable subfolders and reparse points / cloud-sync
+            % junctions — a manual walk throws or stalls on those, aborting the
+            % whole scan, whereas the glob simply skips them.
             allFiles = {};
-            items = dir(rootDir);
-            for k = 1:numel(items)
-                if strcmp(items(k).name, '.') || strcmp(items(k).name, '..')
-                    continue
-                end
-                fullPath = fullfile(items(k).folder, items(k).name);
-                if items(k).isdir
-                    sub = CellNeighborResolverApp.recDir(fullPath);
-                    allFiles = [allFiles, sub]; %#ok<AGROW>
-                else
-                    allFiles{end+1} = fullPath; %#ok<AGROW>
-                end
+            listing = dir(fullfile(char(rootDir), '**', '*'));
+            if isempty(listing)
+                return
+            end
+            listing = listing(~[listing.isdir]);
+            allFiles = cell(1, numel(listing));
+            for k = 1:numel(listing)
+                allFiles{k} = fullfile(listing(k).folder, listing(k).name);
             end
         end
 

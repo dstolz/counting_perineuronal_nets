@@ -106,6 +106,7 @@ classdef CellDiscovery < handle
         jobQueue      = {}      % cell array of job structs (see buildJobs)
         allAbsFiles   = {}      % absolute paths from last search (listbox shows relative)
         tmpDir        = ''      % scratch dir for preprocessed page images
+        preprocCache  = []      % per-file cache of preprocessed pages (see ensurePreprocCache)
     end
 
     %% ---- Public interface ------------------------------------------------
@@ -665,7 +666,11 @@ classdef CellDiscovery < handle
         end
 
         function onSearch(obj, ~, ~)
+            set(obj.hFig, 'Pointer', 'watch');
+            drawnow;
             obj.doSearch();
+            set(obj.hFig, 'Pointer', 'arrow');
+            drawnow;
         end
 
 
@@ -717,12 +722,15 @@ classdef CellDiscovery < handle
 
 
             obj.hProgressLabel.Text = 'Checking Python environment ...';
+            set(obj.hFig, 'Pointer', 'watch');
             drawnow;
             fprintf('[CHECK] Verifying Python environment ...\n');
 
             testCode = "import hydra, torch; print('OK')";
             if ~isempty(condaEnv)
                 if isempty(condaExe)
+                    set(obj.hFig, 'Pointer', 'arrow');
+                    drawnow;
                     errordlg(['Conda env name is set but the conda executable path is empty.' newline ...
                         'Browse for conda.exe / conda.bat in the Python Environment panel.'], ...
                         'conda not configured');
@@ -734,6 +742,8 @@ classdef CellDiscovery < handle
                 testCmd = sprintf('"%s" -c "%s"', pyExe, testCode);
             end
             [envStatus, envOut] = system(testCmd);
+            set(obj.hFig, 'Pointer', 'arrow');
+            drawnow;
             envOut = strtrim(envOut);
             if envStatus == 0
                 fprintf('[TEST] PASS: %s\n', envOut);
@@ -772,6 +782,7 @@ classdef CellDiscovery < handle
                 end
                 obj.hProgressLabel.Text = 'Environment check failed — see error dialog.';
                 errordlg(hint, 'Python Environment Error');
+                envStatus = 1;
                 return;
             end
         end
@@ -1037,14 +1048,20 @@ classdef CellDiscovery < handle
 
 
         function onStart(obj, ~, ~)
+            set(obj.hFig, 'Pointer', 'watch');
+            drawnow;
             pyExe    = strtrim(obj.hPyEdit.Value);
 
             if isempty(pyExe)
+                set(obj.hFig, 'Pointer', 'arrow');
+                drawnow;
                 errordlg('Please specify a Python executable.', 'Missing Input');
                 return;
             end
 
             if isempty(obj.detModels)
+                set(obj.hFig, 'Pointer', 'arrow');
+                drawnow;
                 errordlg( ...
                     'No detection model found in the repository root (no subdirectory with best.pth).', ...
                     'No Model');
@@ -1053,13 +1070,26 @@ classdef CellDiscovery < handle
 
             allFiles = obj.allAbsFiles;   % absolute paths set by doSearch
             if isempty(allFiles)
+                set(obj.hFig, 'Pointer', 'arrow');
+                drawnow;
                 errordlg('No files to process. Use Search to locate image files first.', 'No Files');
                 return;
             end
 
+            % Disable UI immediately before any blocking operations
+            obj.setUIEnable(false);
+            obj.hStopBtn.Enable = false;
+            drawnow;
+
             % --- Pre-flight: verify that hydra and torch are importable ---
             envStatus = obj.onTestEnv;
-            if envStatus ~= 0, return; end
+            if envStatus ~= 0
+                obj.setUIEnable(true);
+                obj.hStopBtn.Enable = false;
+                set(obj.hFig, 'Pointer', 'arrow');
+                drawnow;
+                return;
+            end
 
             % -----------------------------------------------------------
 
@@ -1080,6 +1110,8 @@ classdef CellDiscovery < handle
                 obj.hStartBtn.Enable = true;
                 obj.hStopBtn.Enable  = false;
                 obj.hProgressLabel.Text = 'Ready.';
+                set(obj.hFig, 'Pointer', 'arrow');
+                drawnow;
                 return;
             end
 
@@ -1094,12 +1126,14 @@ classdef CellDiscovery < handle
             obj.stopRequested = false;
             obj.jProcess      = [];
             obj.jReader       = [];
+            obj.preprocCache  = [];   % per-file preprocessing cache (lazy-filled)
 
             obj.setUIEnable(false);
             obj.hStopBtn.Enable = true;
 
             total = numel(jobs);
             obj.hProgressLabel.Text = sprintf('Starting — %d job(s) queued ...', total);
+            set(obj.hFig, 'Pointer', 'watch');
             drawnow;
 
             fprintf('\n=== PNN Batch GUI: starting %d job(s) over %d file(s) ===\n', ...
@@ -1140,6 +1174,7 @@ classdef CellDiscovery < handle
                 if isempty(fdir), fdir = pwd; end
                 nPages = CellDiscovery.countPages(f);
 
+                firstPageForFile = true;   % first accepted page row for this source file
                 for r = 1:size(mapData, 1)
                     pg   = CellDiscovery.parseNum(mapData{r,1}, 0);
                     detM = mapData{r,3};
@@ -1160,8 +1195,11 @@ classdef CellDiscovery < handle
                     bg = CellDiscovery.parseNum(mapData{r,6}, 0);
                     rz = CellDiscovery.parseNum(mapData{r,7}, 1);
                     if rz <= 0, rz = 1; end
-                    jobs{end+1} = CellDiscovery.makeJob( ...
-                        f, fdir, stem, ext, mapData{r,2}, pg, nPages, true, detM, rescM, correctLSM, bg, rz, obj.P.lsmOptions); %#ok<AGROW>
+                    job = CellDiscovery.makeJob( ...
+                        f, fdir, stem, ext, mapData{r,2}, pg, nPages, true, detM, rescM, correctLSM, bg, rz, obj.P.lsmOptions);
+                    job.firstPage = firstPageForFile;
+                    jobs{end+1} = job; %#ok<AGROW>
+                    firstPageForFile = false;
                 end
             end
         end
@@ -1269,10 +1307,13 @@ classdef CellDiscovery < handle
             obj.hProgressLabel.Text = sprintf('Processing %d / %d:  %s', obj.fileIdx, total, job.label);
             drawnow;
 
-            % --- Read + preprocess the requested page into a scratch image ---
+            % --- Preprocess the whole file once (joint LSM), grab this page ---
+            % Preprocessing is centralised: the entire channel stack is corrected
+            % together (so LSM registration uses every channel) and cached, then
+            % reused for every page's detection and for the output TIF.
             try
-                img = CellDiscovery.readPage(job.imgFile, job.page, job.nPages);
-                img = CellDiscovery.applyPreprocess(img, job.correctLSM, job.lsmOptions, job.bgRadius, job.resize);
+                obj.ensurePreprocCache(job.imgFile, job.nPages);
+                img = obj.preprocCache.pages{job.page};
             catch ME
                 fprintf(2,'[ERROR] (%d/%d) could not read/preprocess %s: %s\n', ...
                     obj.fileIdx, total, job.label, ME.message);
@@ -1406,12 +1447,13 @@ classdef CellDiscovery < handle
             end
 
             % --- Optionally save the preprocessed image as TIF ---
-            if obj.hSaveLsmTif.Value
-                tifFile = fullfile(imgDir, [job.base '_preprocessed.tif']);
+            % Written once per source file (on the first job for that file).
+            % All pages of the source file are preprocessed using the page-map
+            % settings for each page (falling back to no-op for unmapped pages)
+            % so the output TIF has the same number of pages as the input TIF.
+            if obj.hSaveLsmTif.Value && job.firstPage
                 try
-                    preprocImg = imread(job.tmpImg);
-                    CellDiscovery.writeScratchTiff(preprocImg, tifFile);
-                    fprintf('[TIF ] Saved: %s\n', tifFile);
+                    obj.writeFullPreprocTif(job);
                 catch ME
                     fprintf('[WARN] TIF save failed for %s: %s\n', job.label, ME.message);
                 end
@@ -1551,6 +1593,59 @@ classdef CellDiscovery < handle
         end
 
 
+        function ensurePreprocCache(obj, imgFile, nPages)
+            % Preprocess every page of imgFile exactly once and cache the result
+            % on obj.preprocCache, keyed by file path. Both the per-page
+            % detection scratch images and the optional output TIF draw from this
+            % single cache, so the model and the saved TIF always see identical
+            % pixels, and the expensive joint-channel LSM correction runs once.
+            if ~isempty(obj.preprocCache) && isfield(obj.preprocCache, 'imgFile') ...
+                    && strcmp(obj.preprocCache.imgFile, imgFile)
+                return;   % cache already valid for this file
+            end
+            mapData        = obj.hPageTable.Data;
+            [pages, rzArr] = CellDiscovery.preprocessAllPages(imgFile, nPages, mapData, obj.P.lsmOptions);
+            obj.preprocCache = struct('imgFile', imgFile, 'pages', {pages}, 'rzArr', rzArr);
+        end
+
+        function writeFullPreprocTif(obj, job)
+            % Write a multi-page preprocessed TIF whose page count matches the
+            % source file, using the already-computed per-file cache so the saved
+            % image is byte-identical to what the detection model received.
+            obj.ensurePreprocCache(job.imgFile, job.nPages);
+            pages  = obj.preprocCache.pages;
+            rzArr  = obj.preprocCache.rzArr;
+            nPages = numel(pages);
+
+            fprintf('[TIF ] Writing %d-page preprocessed TIF: %s\n', nPages, job.outTif);
+
+            % All pages are written in a SINGLE Tiff session: open once, write
+            % page 1, then writeDirectory() + write for each subsequent page,
+            % then close. Re-opening the file per page (Tiff(...,'a')) is what
+            % previously injected a corrupt empty IFD that truncated the stack
+            % when read by ImageJ.
+            t = Tiff(job.outTif, 'w');
+            try
+                for pg = 1:nPages
+                    % Carry the source page's spatial calibration forward,
+                    % scaling pixels-per-unit by the resize factor so the
+                    % preprocessed image reports the correct physical pixel size.
+                    res = CellDiscovery.readPageResInfo(job.imgFile, pg);
+
+                    if pg > 1
+                        t.writeDirectory();   % start a new IFD in the same file
+                    end
+                    CellDiscovery.writeTiffPage(t, pages{pg}, res, rzArr(pg));
+                end
+                t.close();
+            catch ME
+                try t.close(); catch, end
+                rethrow(ME);
+            end
+            fprintf('[TIF ] Saved: %s\n', job.outTif);
+        end
+
+
         %% Batch cleanup: stop timer, kill process, re-enable UI
 
 
@@ -1578,6 +1673,7 @@ classdef CellDiscovery < handle
                 delete(obj.timerObj);
             end
             obj.timerObj = [];
+            obj.preprocCache = [];   % release cached preprocessed pages
 
             if obj.stopRequested
                 msg = sprintf('Stopped by user  (%d / %d job(s) processed).', ...
@@ -1590,6 +1686,8 @@ classdef CellDiscovery < handle
             obj.setUIEnable(true);
             obj.hStopBtn.Enable  = false;
             obj.hStartBtn.Enable = true;
+            set(obj.hFig, 'Pointer', 'arrow');
+            drawnow;
 
         end
 
@@ -1696,14 +1794,16 @@ classdef CellDiscovery < handle
             job.bgRadius     = bg;        % 0 = no background subtraction
             job.resize       = rz;        % 1 = no resizing
             job.outCsvOrig   = fullfile(fdir, [base '_locs.csv']);
+            job.outTif       = fullfile(fdir, [stem '_preprocessed.tif']);   % shared across pages
             if rz ~= 1
                 job.outCsvResized = fullfile(fdir, [base '_locs_resized.csv']);
             else
                 job.outCsvResized = '';
             end
-            job.tmpImg = '';   % scratch page image (set at launch)
-            job.tmpCsv = '';   % predict.py raw output (set at launch)
-            job.label  = label;
+            job.tmpImg    = '';   % scratch page image (set at launch)
+            job.tmpCsv    = '';   % predict.py raw output (set at launch)
+            job.label     = label;
+            job.firstPage = false;   % set by buildJobs: true for the first page of each source file
         end
 
         function v = parseNum(x, dflt)
@@ -2029,21 +2129,94 @@ classdef CellDiscovery < handle
             end
         end
 
-        function writeScratchTiff(img, path)
-            % Write a scratch TIFF that accepts any numeric pixel class.
-            % imwrite() rejects single-precision (float32) data for TIFF — the
-            % Tiff low-level class is used instead so float32, uint8, uint16,
-            % int16, and uint32 source images are all handled correctly.
+        function [pages, rzArr] = preprocessAllPages(imgFile, nPages, mapData, lsmOptions)
+            % Preprocess every page of a source file and return the finished
+            % per-page images plus their resize factors.
+            %
+            % LSM bidirectional correction is driven by ALL channels jointly
+            % (correctBidirectionalLSMArtifact, UseAllChannels). Correcting each
+            % page (single channel) in isolation makes the displacement field
+            % unreliable wherever that one channel is dim, producing edge
+            % artifacts (e.g. a dim green channel). So when any page requests LSM
+            % correction, all same-size single-channel pages are stacked and
+            % corrected together in one call — matching a full-stack manual run.
+            % Background subtraction and resize are then applied per page (they
+            % are channel-independent). Pages not listed in the map pass through
+            % unmodified so the page count always matches the source file.
+
+            % Build a lookup: page number -> row index in mapData.
+            pageToRow = containers.Map('KeyType', 'int32', 'ValueType', 'int32');
+            for r = 1:size(mapData, 1)
+                pg = int32(CellDiscovery.parseNum(mapData{r,1}, 0));
+                if pg >= 1
+                    pageToRow(pg) = int32(r);
+                end
+            end
+
+            % Read all pages and resolve each page's preprocessing settings.
+            rawPages = cell(1, nPages);
+            wantLSM  = false(1, nPages);
+            bgArr    = zeros(1, nPages);
+            rzArr    = ones(1, nPages);
+            for pg = 1:nPages
+                rawPages{pg} = CellDiscovery.readPage(imgFile, pg, nPages);
+                if isKey(pageToRow, int32(pg))
+                    r           = pageToRow(int32(pg));
+                    wantLSM(pg) = CellDiscovery.parseLogical(mapData{r,5}, false);
+                    bgArr(pg)   = CellDiscovery.parseNum(mapData{r,6}, 0);
+                    rz          = CellDiscovery.parseNum(mapData{r,7}, 1);
+                    if rz <= 0, rz = 1; end
+                    rzArr(pg)   = rz;
+                end
+            end
+
+            % Joint-channel LSM correction (once for all LSM-requested pages).
+            % Only pages that have wantLSM=true are corrected; others stay raw.
+            % Stack only the LSM-requested pages so non-LSM pages are not
+            % affected, then redistribute the corrected slices back by index.
+            lsmIdx = find(wantLSM);   % indices of pages that want LSM
+            corrPages = rawPages;     % start as copy; overwrite LSM pages below
+            if ~isempty(lsmIdx)
+                if exist('correctBidirectionalLSMArtifact', 'file') ~= 2
+                    error('correctBidirectionalLSMArtifact.m must be on the MATLAB path to use Correct LSM.');
+                end
+                lsmRaws   = rawPages(lsmIdx);
+                sameSize  = all(cellfun(@(im) isequal(size(im), size(lsmRaws{1})), lsmRaws));
+                allSingle = all(cellfun(@(im) size(im, 3) == 1, lsmRaws));
+                if numel(lsmIdx) > 1 && sameSize && allSingle
+                    stack  = cat(3, lsmRaws{:});   % H x W x numel(lsmIdx) stack
+                    Jstack = CellDiscovery.callCorrectBidirectionalLSMArtifact(stack, lsmOptions);
+                    for k = 1:numel(lsmIdx)
+                        corrPages{lsmIdx(k)} = Jstack(:,:,k);
+                    end
+                else
+                    for k = 1:numel(lsmIdx)
+                        corrPages{lsmIdx(k)} = CellDiscovery.callCorrectBidirectionalLSMArtifact(lsmRaws{k}, lsmOptions);
+                    end
+                end
+            end
+
+            % Per-page background subtraction + resize (LSM already applied above).
+            pages = cell(1, nPages);
+            for pg = 1:nPages
+                pages{pg} = CellDiscovery.applyPreprocess(corrPages{pg}, false, lsmOptions, bgArr(pg), rzArr(pg));
+            end
+        end
+
+        function writeScratchTiff(img, path, createNew)
+            % Write a single-page scratch TIFF.  The Tiff low-level class is used
+            % instead of imwrite() so float32, uint8, uint16, int16, and uint32
+            % source images are all handled correctly.  createNew is unused here
+            % (scratch files are always single-page overwrites) but accepted so
+            % callers with three arguments don't error.
             if isa(img, 'double')
                 img = single(img);   % Tiff supports float32; float64 is exotic
             end
             t = Tiff(path, 'w');
             nCh = size(img, 3);
-            if nCh == 3
-                phot = Tiff.Photometric.RGB;
-            else
-                phot = Tiff.Photometric.MinIsBlack;
-            end
+
+            phot = Tiff.Photometric.MinIsBlack; % assume this is always the case
+            
             switch class(img)
                 case 'single'
                     bps = 32;  sf = Tiff.SampleFormat.IEEEFP;
@@ -2067,6 +2240,134 @@ classdef CellDiscovery < handle
             t.setTag('Compression',         Tiff.Compression.None);
             t.write(img);
             t.close();
+        end
+
+        function res = readPageResInfo(file, page)
+            % Read a source page's spatial calibration so it can be propagated
+            % to the preprocessed output. Returns a struct with:
+            %   hasRes  - true if XResolution/YResolution were present
+            %   xres    - X resolution (pixels per ResolutionUnit), double
+            %   yres    - Y resolution, double
+            %   unit    - numeric ResolutionUnit Tiff code (1/2/3), [] if absent
+            %   desc    - ImageDescription char (carries ImageJ unit=micron etc.)
+            % All fields default to empty/false when the source has no tags.
+            res = struct('hasRes', false, 'xres', [], 'yres', [], 'unit', [], 'desc', '');
+            t = [];
+            % Suppress libtiff warnings about unrecognised private tags (e.g.
+            % ImageJ's IJMetadata tags 50838/50839) — they are harmless.
+            warnState = warning('off', 'all');
+            try
+                t = Tiff(file, 'r');
+                warning(warnState);
+                if page > 1
+                    t.setDirectory(page);   % Tiff directories are 1-based
+                end
+                try
+                    res.xres   = double(t.getTag('XResolution'));
+                    res.yres   = double(t.getTag('YResolution'));
+                    res.hasRes = true;
+                catch
+                end
+                try res.unit = t.getTag('ResolutionUnit'); catch, end
+                try res.desc = t.getTag('ImageDescription'); catch, end
+            catch
+                warning(warnState);
+            end
+            if ~isempty(t)
+                try t.close(); catch, end
+            end
+        end
+
+        function writeTiffPage(t, img, res, rz)
+            % Write one page (current IFD) into an already-open Tiff handle t.
+            % res is from readPageResInfo; rz is the resize factor applied to
+            % this page (pixels-per-unit scales by rz so the physical pixel
+            % size of the resized image is reported correctly).
+            if isa(img, 'double')
+                img = single(img);
+            end
+            nCh = size(img, 3);
+            if nCh == 3
+                phot = Tiff.Photometric.RGB;
+            else
+                phot = Tiff.Photometric.MinIsBlack;
+            end
+            switch class(img)
+                case 'single'
+                    bps = 32;  sf = Tiff.SampleFormat.IEEEFP;
+                case 'uint16'
+                    bps = 16;  sf = Tiff.SampleFormat.UInt;
+                case 'int16'
+                    bps = 16;  sf = Tiff.SampleFormat.Int;
+                case 'uint32'
+                    bps = 32;  sf = Tiff.SampleFormat.UInt;
+                otherwise
+                    img = uint8(img);
+                    bps = 8;   sf = Tiff.SampleFormat.UInt;
+            end
+            t.setTag('ImageLength',         size(img, 1));
+            t.setTag('ImageWidth',          size(img, 2));
+            t.setTag('Photometric',         phot);   % must precede SamplesPerPixel
+            t.setTag('BitsPerSample',       bps);    % must precede SamplesPerPixel
+            t.setTag('SamplesPerPixel',     nCh);
+            t.setTag('SampleFormat',        sf);
+            t.setTag('PlanarConfiguration', Tiff.PlanarConfiguration.Chunky);
+            t.setTag('Compression',         Tiff.Compression.None);
+
+            % Spatial calibration carried from the source page (scaled by resize)
+            if nargin >= 3 && isstruct(res)
+                if nargin < 4 || isempty(rz) || rz <= 0, rz = 1; end
+                if res.hasRes
+                    t.setTag('XResolution', res.xres * rz);
+                    t.setTag('YResolution', res.yres * rz);
+                    if ~isempty(res.unit)
+                        t.setTag('ResolutionUnit', res.unit);
+                    end
+                end
+                cleanDesc = CellDiscovery.sanitizeImageDescription(res.desc);
+                if ~isempty(cleanDesc)
+                    t.setTag('ImageDescription', cleanDesc);
+                end
+            end
+
+            t.write(img);
+        end
+
+        function desc = sanitizeImageDescription(desc)
+            % Strip ImageJ multi-image *stack-layout* fields from an
+            % ImageDescription before it is written onto a re-encoded TIFF.
+            %
+            % ImageJ writes a stack header on the first page, e.g.:
+            %   ImageJ=1.53k\nimages=2\nchannels=2\nslices=1\nhyperstack=true\n
+            %   unit=micron\nspacing=1.0
+            % The "images=N" field tells ImageJ/Fiji that the N pages are stored
+            % CONTIGUOUSLY right after the first IFD, so it derives page 2+ as
+            % offset0 + k*sliceBytes and ignores the per-page IFDs. MATLAB's Tiff
+            % writer stores each page in its OWN IFD (non-contiguous), so carrying
+            % that header makes ImageJ read page 2+ from a byte offset that is off
+            % by the size of the intervening IFD — the page appears shifted to the
+            % right. (MATLAB's own imread honours the IFDs and is unaffected,
+            % which is why the corruption only shows in ImageJ.)
+            %
+            % We drop the stack-layout fields while keeping calibration lines
+            % (unit, spacing, ...) so physical units survive. Non-ImageJ
+            % descriptions are returned unchanged.
+            if isempty(desc), desc = ''; return; end
+            if isstring(desc), desc = char(desc); end
+            if ~ischar(desc) || ~contains(desc, 'ImageJ='), return; end
+            lines = regexp(desc, '\r?\n', 'split');
+            drop  = {'images', 'channels', 'slices', 'frames', 'hyperstack', 'mode', 'loop'};
+            keep  = true(1, numel(lines));
+            for k = 1:numel(lines)
+                ln = strtrim(lower(lines{k}));
+                for d = 1:numel(drop)
+                    if startsWith(ln, [drop{d} '='])
+                        keep(k) = false;
+                        break;
+                    end
+                end
+            end
+            desc = strjoin(lines(keep), newline);
         end
 
         function parts = quotedArgs(cmdParts)

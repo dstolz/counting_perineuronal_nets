@@ -4,6 +4,16 @@ classdef CellLocalizationQCApp < handle
 %   reviewing localized cell detections from multipage TIFF images and
 %   associated *_locs.csv files. Review labels are saved to separate *_QC.csv
 %   files and are merged back by QCSourceRow when a source is reloaded.
+%
+%   Settings > Project options:
+%     "Use resized CSVs"  scans for resized-coordinate localizations
+%       (*_locs_resized.csv) paired with the preprocessed/resized image
+%       (*_preprocessed.tif) instead of the standard *_locs.csv + *_proj.tif.
+%     "Location source"   chooses Original (detected X/Y) or Modified
+%       (the Cell Neighbor Resolver's CURATED_X/CURATED_Y, hiding cells the
+%       resolver deleted/merged away). Uncurated sources fall back to the
+%       original X/Y with a warning. QC labels stay keyed to the original CSV
+%       row, so they remain consistent across Original/Modified modes.
 
     properties (Constant, Access = private)
         SettingsGroup = 'CellLocalizationQCApp'
@@ -1347,7 +1357,11 @@ classdef CellLocalizationQCApp < handle
                 event
             end
 
+            set(app.UIFigure, 'Pointer', 'watch');
+            drawnow;
             app.scanParentDirectory(true);
+            set(app.UIFigure, 'Pointer', 'arrow');
+            drawnow;
         end
 
         function openActiveDatasetFolder(app)
@@ -1378,11 +1392,15 @@ classdef CellLocalizationQCApp < handle
             if isequal(selected, 0)
                 return
             end
+            set(app.UIFigure, 'Pointer', 'watch');
+            drawnow;
             app.ParentDirectory = string(selected);
             app.ParentDirEdit.Value = char(app.ParentDirectory);
             app.Settings.LastParentDirectory = app.ParentDirectory;
             app.saveSettings();
             app.scanParentDirectory(true);
+            set(app.UIFigure, 'Pointer', 'arrow');
+            drawnow;
         end
 
         function onParentDirEdited(app, src, event)
@@ -1403,10 +1421,14 @@ classdef CellLocalizationQCApp < handle
                 loadLast (1,1) logical = true
             end
 
+            set(app.UIFigure, 'Pointer', 'watch');
+            drawnow;
             app.readSettingsFromUI();
             parentDir = string(strtrim(app.ParentDirEdit.Value));
             if strlength(parentDir) == 0 || ~isfolder(parentDir)
                 app.updateStatus("Parent directory does not exist.");
+                set(app.UIFigure, 'Pointer', 'arrow');
+                drawnow;
                 uialert(app.UIFigure, 'Parent directory does not exist.', 'Invalid parent directory');
                 return
             end
@@ -1428,24 +1450,26 @@ classdef CellLocalizationQCApp < handle
             app.ActiveImagePages = struct();
             app.ActiveTiffInfo = [];
 
-            imagePattern = char(app.Settings.ImagePattern);
+            imagePattern = app.effectiveImagePattern();
+            localizationPattern = app.effectiveLocalizationPattern();
             imageFiles = dir(fullfile(char(parentDir), '**', imagePattern));
 
             for k = 1:numel(imageFiles)
                 imagePath = string(fullfile(imageFiles(k).folder, imageFiles(k).name));
                 [~, imageBase, ~] = fileparts(imageFiles(k).name);
+                matchBase = app.csvMatchBase(imageBase);
                 datasetID = app.makeRelativePath(imagePath, parentDir);
 
                 [tiffInfo, imageStatus] = app.inspectTiff(imagePath);
                 pageCount = numel(tiffInfo);
                 sources = app.emptySourceStruct();
 
-                csvFiles = dir(fullfile(imageFiles(k).folder, char(app.Settings.LocalizationPattern)));
-                csvFiles = csvFiles(startsWith(string({csvFiles.name}), string(imageBase)));
+                csvFiles = dir(fullfile(imageFiles(k).folder, localizationPattern));
+                csvFiles = csvFiles(startsWith(string({csvFiles.name}), matchBase));
 
                 for j = 1:numel(csvFiles)
                     csvPath = string(fullfile(csvFiles(j).folder, csvFiles(j).name));
-                    [channelName, pageIndex] = app.parseLocalizationFilename(csvFiles(j).name, imageBase);
+                    [channelName, pageIndex] = app.parseLocalizationFilename(csvFiles(j).name, matchBase);
                     if isnan(pageIndex)
                         pageIndex = app.pageForChannel(channelName);
                     end
@@ -1517,7 +1541,9 @@ classdef CellLocalizationQCApp < handle
             app.refreshSourceDropDown();
 
             if height(app.DatasetList) == 0
-                app.updateStatus("No image files matched " + string(app.Settings.ImagePattern) + ".");
+                app.updateStatus("No image files matched " + string(app.effectiveImagePattern()) + ".");
+                set(app.UIFigure, 'Pointer', 'arrow');
+                drawnow;
                 return
             end
 
@@ -1530,6 +1556,8 @@ classdef CellLocalizationQCApp < handle
             end
             app.loadDataset(indexToLoad);
             app.updateStatus(sprintf('Scan complete: %d dataset(s).', height(app.DatasetList)));
+            set(app.UIFigure, 'Pointer', 'arrow');
+            drawnow;
         end
 
         function [tiffInfo, status] = inspectTiff(app, imagePath)
@@ -1572,17 +1600,26 @@ classdef CellLocalizationQCApp < handle
                 return
             end
 
-            numRows = height(tbl);
             names = string(tbl.Properties.VariableNames);
             hasRequiredColumns = all(ismember(["X", "Y"], names));
             if ~hasRequiredColumns
+                numRows = height(tbl);
                 status = "Missing required X/Y columns";
                 return
             end
 
+            % Apply the active location source so the dataset list reports the
+            % surviving (non-deleted) count in Modified mode and surfaces the
+            % "not curated" warning when Modified is requested without resolver data.
+            [tbl, ~, warnMsg] = app.applyLocationSource(tbl);
+            numRows = height(tbl);
+            if strlength(warnMsg) > 0
+                status = app.appendStatus(status, warnMsg);
+            end
+
             [~, xyStatus] = app.ensureNumericXY(tbl);
             if strlength(xyStatus) > 0
-                status = xyStatus;
+                status = app.appendStatus(status, xyStatus);
             end
         end
 
@@ -1594,7 +1631,10 @@ classdef CellLocalizationQCApp < handle
             end
 
             [~, csvBase, ~] = fileparts(csvName);
-            pattern = ['^' regexptranslate('escape', char(imageBase)) '_(?<suffix>.+)_locs$'];
+            % Accept both standard "<base>_<suffix>_locs" and resized
+            % "<base>_<suffix>_locs_resized" filenames so channel/page parsing
+            % works identically in either mode.
+            pattern = ['^' regexptranslate('escape', char(imageBase)) '_(?<suffix>.+)_locs(_resized)?$'];
             match = regexp(char(csvBase), pattern, 'names', 'once');
             channelName = "Source";
             pageIndex = NaN;
@@ -1611,6 +1651,93 @@ classdef CellLocalizationQCApp < handle
 
             channelName = string(token.channel);
             pageIndex = str2double(token.page);
+        end
+
+        function pattern = effectiveImagePattern(app)
+            % Image glob used by the scan: the preprocessed/resized image when
+            % Resized mode is on (its coordinate space matches *_locs_resized.csv),
+            % otherwise the standard projection image.
+            if app.Settings.UseResizedCsv
+                pattern = char(string(app.Settings.PreprocessedImagePattern));
+            else
+                pattern = char(string(app.Settings.ImagePattern));
+            end
+        end
+
+        function pattern = effectiveLocalizationPattern(app)
+            % Localization CSV glob used by the scan: resized-coordinate files
+            % when Resized mode is on, otherwise the standard files.
+            if app.Settings.UseResizedCsv
+                pattern = char(string(app.Settings.ResizedLocalizationPattern));
+            else
+                pattern = char(string(app.Settings.LocalizationPattern));
+            end
+        end
+
+        function base = csvMatchBase(app, imageBase)
+            % Stem used to associate CSV files with a scanned image. CellDiscovery
+            % names the resized image "<stem>_preprocessed.tif" but the resized
+            % CSVs "<stem>_..._locs_resized.csv", so in Resized mode we strip the
+            % preprocessed-image suffix to recover the shared stem. Standard mode
+            % keeps the image base verbatim (unchanged legacy behavior).
+            base = string(imageBase);
+            if ~app.Settings.UseResizedCsv
+                return
+            end
+            suffix = app.patternStemSuffix(app.Settings.PreprocessedImagePattern);
+            if strlength(suffix) > 0 && endsWith(base, suffix)
+                base = extractBefore(base, strlength(base) - strlength(suffix) + 1);
+            end
+        end
+
+        function suffix = patternStemSuffix(~, pattern)
+            % Literal text after the wildcard in an image glob, e.g.
+            % "*_preprocessed.tif" -> "_preprocessed". Returns "" if no wildcard.
+            [~, name, ~] = fileparts(char(string(pattern)));
+            star = find(name == '*', 1, 'last');
+            if isempty(star)
+                suffix = "";
+            else
+                suffix = string(name(star + 1:end));
+            end
+        end
+
+        function [tbl, origRows, warnMsg] = applyLocationSource(app, tbl)
+            % Resolve which coordinates a loaded CSV should present:
+            %   Original  -> the X/Y columns as detected.
+            %   Modified  -> the Cell Neighbor Resolver's CURATED_X/CURATED_Y,
+            %                with resolver-deleted/merged-away rows (NaN) hidden.
+            % origRows maps each surviving row back to its 1-based row in the CSV
+            % so QC labels keyed by QCSourceRow stay consistent across modes.
+            n = height(tbl);
+            origRows = (1:n)';
+            warnMsg = "";
+            if string(app.Settings.LocationSource) ~= "Modified"
+                return
+            end
+
+            names = string(tbl.Properties.VariableNames);
+            if ~all(ismember(["CURATED_X", "CURATED_Y"], names))
+                warnMsg = "Modified locations requested, but this source has no CURATED_X/CURATED_Y columns (not curated by the Cell Neighbor Resolver). Showing original X/Y.";
+                return
+            end
+
+            cx = app.columnAsDouble(tbl.CURATED_X);
+            cy = app.columnAsDouble(tbl.CURATED_Y);
+            keep = isfinite(cx) & isfinite(cy);
+            tbl.X = cx;
+            tbl.Y = cy;
+            tbl = tbl(keep, :);
+            origRows = origRows(keep);
+        end
+
+        function v = columnAsDouble(~, col)
+            if isnumeric(col) || islogical(col)
+                v = double(col);
+            else
+                v = str2double(string(col));
+            end
+            v = v(:);
         end
 
         function pageIndex = pageForChannel(app, channelName)
@@ -1741,12 +1868,18 @@ classdef CellLocalizationQCApp < handle
                 sourceIndex (1,1) double {mustBeInteger, mustBePositive}
             end
 
+            set(app.UIFigure, 'Pointer', 'watch');
+            drawnow;
             if app.ActiveDatasetIndex < 1 || app.ActiveDatasetIndex > numel(app.SourceListByDataset)
+                set(app.UIFigure, 'Pointer', 'arrow');
+                drawnow;
                 return
             end
 
             sources = app.SourceListByDataset{app.ActiveDatasetIndex};
             if sourceIndex > numel(sources)
+                set(app.UIFigure, 'Pointer', 'arrow');
+                drawnow;
                 return
             end
 
@@ -1780,6 +1913,8 @@ classdef CellLocalizationQCApp < handle
                 if strlength(status) > 0
                     app.clearTiles(status);
                     app.updateSelectedCellDetail();
+                    set(app.UIFigure, 'Pointer', 'arrow');
+                    drawnow;
                     return
                 end
             end
@@ -1789,6 +1924,8 @@ classdef CellLocalizationQCApp < handle
                 app.clearTiles(msg);
                 app.updateStatus(msg);
                 app.updateSelectedCellDetail();
+                set(app.UIFigure, 'Pointer', 'arrow');
+                drawnow;
                 return
             end
 
@@ -1799,19 +1936,28 @@ classdef CellLocalizationQCApp < handle
                 app.clearTiles(msg);
                 app.updateStatus(msg);
                 app.updateSelectedCellDetail();
+                set(app.UIFigure, 'Pointer', 'arrow');
+                drawnow;
                 return
             end
+
+            [locTbl, locOrigRows, locWarn] = app.applyLocationSource(locTbl);
 
             [locTbl, xyStatus] = app.ensureNumericXY(locTbl);
             if strlength(xyStatus) > 0
                 app.clearTiles(xyStatus);
                 app.updateStatus(xyStatus);
                 app.updateSelectedCellDetail();
+                set(app.UIFigure, 'Pointer', 'arrow');
+                drawnow;
                 return
             end
 
             app.ActiveLocalizationTable = locTbl;
-            app.ActiveReviewTable = app.loadOrCreateReviewTable(locTbl, source);
+            app.ActiveReviewTable = app.loadOrCreateReviewTable(locTbl, source, locOrigRows);
+            if strlength(locWarn) > 0
+                app.updateStatus(locWarn);
+            end
             app.refreshActiveSourceProgress();
             app.updateDatasetTable();
             app.refreshSortAndFilterControls();
@@ -1827,6 +1973,8 @@ classdef CellLocalizationQCApp < handle
                 end
             end
             app.updateProgress();
+            set(app.UIFigure, 'Pointer', 'arrow');
+            drawnow;
         end
 
         function [tbl, status] = ensureNumericXY(app, tbl)
@@ -1860,16 +2008,26 @@ classdef CellLocalizationQCApp < handle
             end
         end
 
-        function reviewTbl = loadOrCreateReviewTable(app, locTbl, source)
+        function reviewTbl = loadOrCreateReviewTable(app, locTbl, source, origRows)
             arguments
                 app
                 locTbl table
                 source struct
+                origRows double = []
             end
 
             reviewTbl = locTbl;
             reviewTbl = app.removeExistingQCColumns(reviewTbl);
             n = height(reviewTbl);
+
+            % QCSourceRow keys QC merging back to the CSV. In Modified mode rows
+            % the resolver removed are hidden, so origRows carries each surviving
+            % row's original 1-based CSV position, keeping QC labels stable across
+            % Original/Modified modes. Default to identity when not supplied.
+            if isempty(origRows) || numel(origRows) ~= n
+                origRows = (1:n)';
+            end
+            origRows = origRows(:);
 
             reviewTbl.QCLabel = strings(n, 1);
             reviewTbl.QCCode = NaN(n, 1);
@@ -1882,10 +2040,10 @@ classdef CellLocalizationQCApp < handle
             reviewTbl.QCDatasetID = repmat(string(source.DatasetID), n, 1);
             reviewTbl.QCChannel = repmat(string(source.ChannelName), n, 1);
             reviewTbl.QCSourceCsv = repmat(string(source.CsvPath), n, 1);
-            reviewTbl.QCSourceRow = (1:n)';
+            reviewTbl.QCSourceRow = origRows;
             reviewTbl.QCImagePath = repmat(string(source.ImagePath), n, 1);
             reviewTbl.QCVersion = repmat(string(app.QCVersion), n, 1);
-            reviewTbl.QCUniqueID = app.makeUniqueIDs(source, n);
+            reviewTbl.QCUniqueID = app.makeUniqueIDs(source, origRows);
             reviewTbl.QCOutOfBounds = false(n, 1);
             reviewTbl.QCIncludesImageBorder = false(n, 1);
             reviewTbl.QCWarning = strings(n, 1);
@@ -1906,17 +2064,21 @@ classdef CellLocalizationQCApp < handle
             tbl(:, names(removeMask)) = [];
         end
 
-        function ids = makeUniqueIDs(app, source, n)
+        function ids = makeUniqueIDs(app, source, rowKeys)
             arguments
                 app
                 source struct
-                n (1,1) double
+                rowKeys double
             end
 
+            % rowKeys are the original CSV row numbers (identity in standard mode),
+            % so a detection keeps the same QCUniqueID whether viewed via Original
+            % or Modified locations.
+            rowKeys = rowKeys(:);
             sourceRel = app.makeRelativePath(source.CsvPath, app.ParentDirectory);
-            ids = strings(n, 1);
-            for k = 1:n
-                ids(k) = string(source.DatasetID) + "|" + string(source.ChannelName) + "|" + sourceRel + "|" + string(k);
+            ids = strings(numel(rowKeys), 1);
+            for k = 1:numel(rowKeys)
+                ids(k) = string(source.DatasetID) + "|" + string(source.ChannelName) + "|" + sourceRel + "|" + string(rowKeys(k));
             end
         end
 
@@ -4259,9 +4421,13 @@ classdef CellLocalizationQCApp < handle
             if isempty(app.ActiveReviewTable) || isempty(app.ActiveSource) || ~isfield(app.ActiveSource, 'CsvPath')
                 return
             end
+            set(app.UIFigure, 'Pointer', 'watch');
+            drawnow;
             qcPath = app.qcPathForCsv(app.ActiveSource.CsvPath);
             folder = string(fileparts(char(qcPath)));
             if ~isfolder(folder)
+                set(app.UIFigure, 'Pointer', 'arrow');
+                drawnow;
                 uialert(app.UIFigure, 'QC output folder does not exist.', 'Save failed');
                 return
             end
@@ -4280,6 +4446,8 @@ classdef CellLocalizationQCApp < handle
                 if isfile(tempPath)
                     delete(tempPath);
                 end
+                set(app.UIFigure, 'Pointer', 'arrow');
+                drawnow;
                 uialert(app.UIFigure, ME.message, 'QC save failed');
                 app.updateStatus("Save failed: " + string(ME.message));
                 return
@@ -4292,6 +4460,8 @@ classdef CellLocalizationQCApp < handle
             app.updateDatasetTable();
             app.updateProgress();
             app.updateStatus("Saved QC file: " + string(qcPath));
+            set(app.UIFigure, 'Pointer', 'arrow');
+            drawnow;
         end
 
         function saveIfDirtyForTransition(app)
@@ -4369,14 +4539,22 @@ classdef CellLocalizationQCApp < handle
             tabs = uitabgroup(mainGrid);
 
             projectTab = uitab(tabs, "Title", "Project");
-            projectGrid = uigridlayout(projectTab, [5 2]);
-            projectGrid.RowHeight = {28, 28, 28, '1x', 24};
-            projectGrid.ColumnWidth = {150, '1x'};
+            projectGrid = uigridlayout(projectTab, [9 2]);
+            projectGrid.RowHeight = {28, 28, 28, 28, 28, 28, 28, '1x', 24};
+            projectGrid.ColumnWidth = {180, '1x'};
             projectGrid.Padding = [8 8 8 8];
             uilabel(projectGrid, "Text", "Image pattern", "HorizontalAlignment", "right");
             controls.ImagePatternEdit = uieditfield(projectGrid, "text", "Value", char(string(app.Settings.ImagePattern)));
             uilabel(projectGrid, "Text", "Localization pattern", "HorizontalAlignment", "right");
             controls.LocalizationPatternEdit = uieditfield(projectGrid, "text", "Value", char(string(app.Settings.LocalizationPattern)));
+            uilabel(projectGrid, "Text", "Use resized CSVs", "HorizontalAlignment", "right");
+            controls.UseResizedCheckBox = uicheckbox(projectGrid, "Text", "", "Value", logical(app.Settings.UseResizedCsv));
+            uilabel(projectGrid, "Text", "Preprocessed image pattern", "HorizontalAlignment", "right");
+            controls.PreprocessedImagePatternEdit = uieditfield(projectGrid, "text", "Value", char(string(app.Settings.PreprocessedImagePattern)));
+            uilabel(projectGrid, "Text", "Resized localization pattern", "HorizontalAlignment", "right");
+            controls.ResizedLocalizationPatternEdit = uieditfield(projectGrid, "text", "Value", char(string(app.Settings.ResizedLocalizationPattern)));
+            uilabel(projectGrid, "Text", "Location source", "HorizontalAlignment", "right");
+            controls.LocationSourceDropDown = uidropdown(projectGrid, "Items", ["Original", "Modified"], "Value", char(app.validLocationSource()));
             uilabel(projectGrid, "Text", "Reviewer name", "HorizontalAlignment", "right");
             controls.ReviewerEdit = uieditfield(projectGrid, "text", "Value", char(string(app.Settings.ReviewerName)));
             uilabel(projectGrid, "Text", "Channel to TIFF page", "HorizontalAlignment", "right", "VerticalAlignment", "top");
@@ -4430,6 +4608,10 @@ classdef CellLocalizationQCApp < handle
 
             app.setTooltip(controls.ImagePatternEdit, "Image filename pattern for recursive scan. Default: *_proj.tif.");
             app.setTooltip(controls.LocalizationPatternEdit, "Localization CSV pattern for recursive scan. Default: *_locs.csv.");
+            app.setTooltip(controls.UseResizedCheckBox, "Scan for resized-coordinate CSVs (*_locs_resized.csv) paired with the preprocessed/resized image instead of the standard CSV + projection image. Default: off.");
+            app.setTooltip(controls.PreprocessedImagePatternEdit, "Image pattern used when Resized is on; its coordinate space must match the resized CSVs. Default: *_preprocessed.tif.");
+            app.setTooltip(controls.ResizedLocalizationPatternEdit, "Localization CSV pattern used when Resized is on. Default: *_locs_resized.csv.");
+            app.setTooltip(controls.LocationSourceDropDown, "Original = detected X/Y. Modified = Cell Neighbor Resolver's CURATED_X/CURATED_Y, hiding resolver-deleted cells. Falls back to original X/Y (with a warning) for uncurated sources. Default: Original.");
             app.setTooltip(controls.ReviewerEdit, "Reviewer name stored in QCReviewer when cells are classified.");
             app.setTooltip(controls.ChannelTable, "Editable channel-to-TIFF-page mapping, for example ECM=1 and PV=2.");
             app.setTooltip(controls.CategoryTable, "Editable QC categories, numeric codes, and key shortcuts.");
@@ -4478,13 +4660,24 @@ classdef CellLocalizationQCApp < handle
 
             imagePattern = string(strtrim(controls.ImagePatternEdit.Value));
             localizationPattern = string(strtrim(controls.LocalizationPatternEdit.Value));
-            if strlength(imagePattern) == 0 || strlength(localizationPattern) == 0
-                uialert(dlg, 'Image and localization patterns must be nonempty.', 'Invalid patterns');
+            preprocessedImagePattern = string(strtrim(controls.PreprocessedImagePatternEdit.Value));
+            resizedLocalizationPattern = string(strtrim(controls.ResizedLocalizationPatternEdit.Value));
+            if strlength(imagePattern) == 0 || strlength(localizationPattern) == 0 || ...
+                    strlength(preprocessedImagePattern) == 0 || strlength(resizedLocalizationPattern) == 0
+                uialert(dlg, 'Image and localization patterns (standard and resized) must be nonempty.', 'Invalid patterns');
                 return
             end
 
+            % Capture the scan-affecting settings so we can re-scan only when one
+            % of them actually changes.
+            oldScanSig = app.scanSignature();
+
             app.Settings.ImagePattern = imagePattern;
             app.Settings.LocalizationPattern = localizationPattern;
+            app.Settings.PreprocessedImagePattern = preprocessedImagePattern;
+            app.Settings.ResizedLocalizationPattern = resizedLocalizationPattern;
+            app.Settings.UseResizedCsv = logical(controls.UseResizedCheckBox.Value);
+            app.Settings.LocationSource = string(controls.LocationSourceDropDown.Value);
             app.Settings.ReviewerName = string(strtrim(controls.ReviewerEdit.Value));
             app.Settings.ChannelMap = channelMap;
             app.Settings.Categories = categories;
@@ -4513,15 +4706,41 @@ classdef CellLocalizationQCApp < handle
             app.applySettingsToUI();
             app.rebuildCategoryButtons();
 
-            if ~isempty(app.ActiveReviewTable)
+            % Resized toggle, file patterns, and location source change which files
+            % are discovered and how they load, so re-scan when any of them change.
+            rescanNeeded = ~isequal(oldScanSig, app.scanSignature());
+            delete(dlg);
+            if rescanNeeded && strlength(app.ParentDirectory) > 0 && isfolder(app.ParentDirectory)
+                app.scanParentDirectory(true);
+                app.updateStatus("Settings updated; rescanned datasets.");
+            elseif ~isempty(app.ActiveReviewTable)
                 app.updateActiveBorderFlags();
                 app.refreshSortAndFilterControls();
                 app.buildDisplayOrder();
                 app.applyFilter(false);
                 app.showCurrentBlock();
+                app.updateStatus("Settings updated.");
+            else
+                app.updateStatus("Settings updated.");
             end
-            delete(dlg);
-            app.updateStatus("Settings updated.");
+        end
+
+        function sig = scanSignature(app)
+            % The subset of settings that, when changed, requires a re-scan/reload.
+            sig = struct( ...
+                'ImagePattern', string(app.Settings.ImagePattern), ...
+                'LocalizationPattern', string(app.Settings.LocalizationPattern), ...
+                'PreprocessedImagePattern', string(app.Settings.PreprocessedImagePattern), ...
+                'ResizedLocalizationPattern', string(app.Settings.ResizedLocalizationPattern), ...
+                'UseResizedCsv', logical(app.Settings.UseResizedCsv), ...
+                'LocationSource', app.validLocationSource());
+        end
+
+        function value = validLocationSource(app)
+            value = "Original";
+            if isfield(app.Settings, 'LocationSource') && string(app.Settings.LocationSource) == "Modified"
+                value = "Modified";
+            end
         end
 
         function [channelMap, status] = tableDataToChannelMap(app, data)
@@ -5212,6 +5431,10 @@ classdef CellLocalizationQCApp < handle
             defaults.LastParentDirectory = "";
             defaults.ImagePattern = "*_proj.tif";
             defaults.LocalizationPattern = "*_locs.csv";
+            defaults.UseResizedCsv = false;
+            defaults.PreprocessedImagePattern = "*_preprocessed.tif";
+            defaults.ResizedLocalizationPattern = "*_locs_resized.csv";
+            defaults.LocationSource = "Original";
             defaults.ChannelMap = struct('Channel', {'ECM', 'PV'}, 'PageIndex', {1, 2});
             defaults.DefaultActiveChannel = "ECM";
             defaults.Categories = struct( ...

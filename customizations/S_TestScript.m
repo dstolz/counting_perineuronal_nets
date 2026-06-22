@@ -12,12 +12,12 @@ histRoot = "D:/HISTOLOGY (Z1)/";
 
 %% test
 
-ffn = "D:/HISTOLOGY (Z1)/SUBJ-ID-1155/SUBJ-ID-1155IHC_ECM26A260519S2_1E_L_WFA-PV_Z3_260603_1_mid.tif";
+ffn = "D:/HISTOLOGY (Z1)/SUBJ-ID-1127/SUBJ-ID-1127IHC_ECM26A260519S2_1A_L_WFA-PV_Z3_260511_1_mid.tif";
 
 I = tiffreadVolume(ffn);
 
 tic
-J = correctBidirectionalLSMArtifact(I,NumIterations=5,PyramidDownsample=[4 2 1],ApplyGuidedFilter=true,GuidedNeighborhoodSize=[2 2]);
+J = correctBidirectionalLSMArtifact(I,NumIterations=5,PyramidDownsample=[8 4 2 1],ApplyGuidedFilter=false);
 toc
 
 figure
@@ -34,18 +34,22 @@ colormap gray
 
 linkaxes(ax)
 
-axis(a)
 
 %% Run Cell Discovery on Tifs
 
 CellDiscovery;
 
+
+
+
 %% Fix neighbors
+
 CellNeighborResolverApp;
 
 
+
+
 %% Classify observations
-clear CellLocalizationQCApp
 
 CellLocalizationQCApp;
 
