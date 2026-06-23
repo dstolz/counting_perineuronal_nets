@@ -178,7 +178,7 @@ classdef CellNeighborResolverApp < handle
 
         function app = CellNeighborResolverApp()
             app.loadSettings();
-            app.RepoRoot = app.detectRepoRoot();
+            app.RepoRoot = string(CellToolkit.detectRepoRoot('rescore.py'));
             app.discoverScoringModels();
             app.buildUI();
             app.applySettingsToUI();
@@ -225,7 +225,7 @@ classdef CellNeighborResolverApp < handle
             app.StatusLabel = uilabel(app.RootGrid, "Text", "Ready", "FontWeight", "bold");
             app.StatusLabel.Layout.Row = 3;
             app.StatusLabel.Layout.Column = 1;
-            app.setTooltip(app.StatusLabel, "Current app status: scan results, load progress, action confirmations, and error messages.");
+            CellToolkit.setTooltip(app.StatusLabel, "Current app status: scan results, load progress, action confirmations, and error messages.");
         end
 
         function buildToolbar(app)
@@ -244,39 +244,39 @@ classdef CellNeighborResolverApp < handle
             app.ParentDirEdit = uieditfield(app.TopToolbarGrid, "text", ...
                 "ValueChangedFcn", @(s,e) app.onParentDirEdited(s, e));
             app.ParentDirEdit.Layout.Row = 1; app.ParentDirEdit.Layout.Column = 2;
-            app.setTooltip(app.ParentDirEdit, "Parent folder to search recursively for localization CSV files. Defaults to last used folder.");
+            CellToolkit.setTooltip(app.ParentDirEdit, "Parent folder to search recursively for localization CSV files. Defaults to last used folder.");
 
             app.BrowseButton = uibutton(app.TopToolbarGrid, "push", "Text", "Browse", ...
                 "ButtonPushedFcn", @(s,e) app.chooseParentDirectory());
             app.BrowseButton.Layout.Row = 1; app.BrowseButton.Layout.Column = 3;
-            app.setTooltip(app.BrowseButton, "Open a folder picker to choose the parent directory, then scan automatically.");
+            CellToolkit.setTooltip(app.BrowseButton, "Open a folder picker to choose the parent directory, then scan automatically.");
 
             lbl2 = uilabel(app.TopToolbarGrid, "Text", "Filter", "HorizontalAlignment", "right");
             lbl2.Layout.Row = 1; lbl2.Layout.Column = 4;
 
             app.RegexEdit = uieditfield(app.TopToolbarGrid, "text", "Value", char(app.Settings.FileRegex));
             app.RegexEdit.Layout.Row = 1; app.RegexEdit.Layout.Column = 5;
-            app.setTooltip(app.RegexEdit, "Case-insensitive regular expression applied to file basenames during scan. Default: (?i)_locs\.csv$");
+            CellToolkit.setTooltip(app.RegexEdit, "Case-insensitive regular expression applied to file basenames during scan. Default: (?i)_locs\.csv$");
 
             app.ScanButton = uibutton(app.TopToolbarGrid, "push", "Text", "Scan", ...
                 "ButtonPushedFcn", @(s,e) app.doScan());
             app.ScanButton.Layout.Row = 1; app.ScanButton.Layout.Column = 6;
-            app.setTooltip(app.ScanButton, "Recursively scan the parent directory for CSV files matching the filter pattern and populate the file list.");
+            CellToolkit.setTooltip(app.ScanButton, "Recursively scan the parent directory for CSV files matching the filter pattern and populate the file list.");
 
             app.ResizedCsvCheckBox = uicheckbox(app.TopToolbarGrid, "Text", "Resized", ...
                 "Value", app.Settings.UseResizedCsv, ...
                 "ValueChangedFcn", @(s,e) app.onResizedCsvToggled());
             app.ResizedCsvCheckBox.Layout.Row = 1; app.ResizedCsvCheckBox.Layout.Column = 7;
-            app.setTooltip(app.ResizedCsvCheckBox, "Scan for resized-coordinate localization files (*_locs_resized.csv) instead of the standard *_locs.csv. Toggling overwrites the Filter pattern and re-scans.");
+            CellToolkit.setTooltip(app.ResizedCsvCheckBox, "Scan for resized-coordinate localization files (*_locs_resized.csv) instead of the standard *_locs.csv. Toggling overwrites the Filter pattern and re-scans.");
 
             app.FileCountLabel = uilabel(app.TopToolbarGrid, "Text", "No files scanned");
             app.FileCountLabel.Layout.Row = 1; app.FileCountLabel.Layout.Column = [8 10];
-            app.setTooltip(app.FileCountLabel, "Number of CSV files found by the most recent scan.");
+            CellToolkit.setTooltip(app.FileCountLabel, "Number of CSV files found by the most recent scan.");
 
             app.RescoreButton = uibutton(app.TopToolbarGrid, "push", "Text", "Rescore…", ...
                 "ButtonPushedFcn", @(s,e) app.onRescoreButtonPushed());
             app.RescoreButton.Layout.Row = 1; app.RescoreButton.Layout.Column = 11;
-            app.setTooltip(app.RescoreButton, "Run a Stage-2 scoring model (in the countpnn conda env) on the curated detections of the included dataset(s), writing/updating the 'rescore' column in each CSV.");
+            CellToolkit.setTooltip(app.RescoreButton, "Run a Stage-2 scoring model (in the countpnn conda env) on the curated detections of the included dataset(s), writing/updating the 'rescore' column in each CSV.");
 
             % Row 2: neighbor settings
             lbl3 = uilabel(app.TopToolbarGrid, "Text", "Dist (px)", "HorizontalAlignment", "right");
@@ -286,38 +286,38 @@ classdef CellNeighborResolverApp < handle
                 "Limits", [1 500], "Value", app.Settings.NeighborDistance, ...
                 "RoundFractionalValues", "on");
             app.DistanceSpinner.Layout.Row = 2; app.DistanceSpinner.Layout.Column = 3;
-            app.setTooltip(app.DistanceSpinner, "Maximum Euclidean distance in pixels between two detections for them to be considered neighbors. Default: 10.");
+            CellToolkit.setTooltip(app.DistanceSpinner, "Maximum Euclidean distance in pixels between two detections for them to be considered neighbors. Default: 10.");
 
             app.FindNeighborsButton = uibutton(app.TopToolbarGrid, "push", ...
                 "Text", "Find Neighbors", ...
                 "ButtonPushedFcn", @(s,e) app.onFindNeighborsButtonPushed());
             app.FindNeighborsButton.Layout.Row = 2; app.FindNeighborsButton.Layout.Column = 4;
-            app.setTooltip(app.FindNeighborsButton, "Run neighbor search on the loaded CSV using the distance threshold and populate the pair list.");
+            CellToolkit.setTooltip(app.FindNeighborsButton, "Run neighbor search on the loaded CSV using the distance threshold and populate the pair list.");
 
             app.PairCountLabel = uilabel(app.TopToolbarGrid, "Text", "No pairs found");
             app.PairCountLabel.Layout.Row = 2; app.PairCountLabel.Layout.Column = [5 7];
-            app.setTooltip(app.PairCountLabel, "Total number of unique neighbor pairs found in the current CSV.");
+            CellToolkit.setTooltip(app.PairCountLabel, "Total number of unique neighbor pairs found in the current CSV.");
 
             app.AutoAdvanceCheckBox = uicheckbox(app.TopToolbarGrid, "Text", "Auto-advance", ...
                 "Value", app.Settings.AutoAdvance);
             app.AutoAdvanceCheckBox.Layout.Row = 2; app.AutoAdvanceCheckBox.Layout.Column = 8;
-            app.setTooltip(app.AutoAdvanceCheckBox, "Automatically move to the next unresolved pair after each resolution action. Default: on.");
+            CellToolkit.setTooltip(app.AutoAdvanceCheckBox, "Automatically move to the next unresolved pair after each resolution action. Default: on.");
 
             app.AutoSaveCheckBox = uicheckbox(app.TopToolbarGrid, "Text", "Auto-save", ...
                 "Value", app.Settings.AutoSave);
             app.AutoSaveCheckBox.Layout.Row = 2; app.AutoSaveCheckBox.Layout.Column = 9;
-            app.setTooltip(app.AutoSaveCheckBox, "Automatically save the CSV back to the original file after each resolution action. Default: on.");
+            CellToolkit.setTooltip(app.AutoSaveCheckBox, "Automatically save the CSV back to the original file after each resolution action. Default: on.");
 
             app.SaveButton = uibutton(app.TopToolbarGrid, "push", "Text", "Save [Ctrl+S]", ...
                 "ButtonPushedFcn", @(s,e) app.saveResolved());
             app.SaveButton.Layout.Row = 2; app.SaveButton.Layout.Column = 10;
-            app.setTooltip(app.SaveButton, "Save changes back to the original CSV file, overwriting it in place. Shortcut: Ctrl+S.");
+            CellToolkit.setTooltip(app.SaveButton, "Save changes back to the original CSV file, overwriting it in place. Shortcut: Ctrl+S.");
 
             app.NextPageButton = uibutton(app.TopToolbarGrid, "push", ...
                 "Text", "Next Page/File  [Tab]", ...
                 "ButtonPushedFcn", @(s,e) app.advanceToNextPage());
             app.NextPageButton.Layout.Row = 2; app.NextPageButton.Layout.Column = 11;
-            app.setTooltip(app.NextPageButton, "Advance to the next TIFF page (if the current TIFF has more pages) or to the next file in the list. Shortcut: Tab.");
+            CellToolkit.setTooltip(app.NextPageButton, "Advance to the next TIFF page (if the current TIFF has more pages) or to the next file in the list. Shortcut: Tab.");
         end
 
         function buildMainPanels(app)
@@ -352,7 +352,7 @@ classdef CellNeighborResolverApp < handle
                 "CellSelectionCallback", @(s,e) app.onFileTableCellSelected(s, e), ...
                 "CellEditCallback",      @(s,e) app.onFileTableCellEdited(s, e));
             app.FileTable.Layout.Row = 1; app.FileTable.Layout.Column = 1;
-            app.setTooltip(app.FileTable, "CSV files found by the last scan. Click a row to load that file. 'Include' checkbox marks datasets for downstream processing (default: checked).");
+            CellToolkit.setTooltip(app.FileTable, "CSV files found by the last scan. Click a row to load that file. 'Include' checkbox marks datasets for downstream processing (default: checked).");
 
             % Overall progress across every scanned dataset: a label over a
             % two-segment bar (green = reviewed, grey = remaining).
@@ -366,7 +366,7 @@ classdef CellNeighborResolverApp < handle
             app.DatasetProgressLabel = uilabel(progGrid, "Text", "Datasets reviewed: 0 / 0", ...
                 "FontSize", 11);
             app.DatasetProgressLabel.Layout.Row = 1; app.DatasetProgressLabel.Layout.Column = 1;
-            app.setTooltip(app.DatasetProgressLabel, "How many scanned CSV files have been curated through this app (their saved file carries NeighborResolved annotations) out of all files found by the last scan.");
+            CellToolkit.setTooltip(app.DatasetProgressLabel, "How many scanned CSV files have been curated through this app (their saved file carries NeighborResolved annotations) out of all files found by the last scan.");
 
             % The grey track holds a green fill panel sized manually in pixels.
             % (uigridlayout column weights do NOT size a sub-bar reliably.)
@@ -394,12 +394,12 @@ classdef CellNeighborResolverApp < handle
                 "Value", char(app.Settings.FilterMode), ...
                 "ValueChangedFcn", @(s,e) app.onFilterChanged());
             app.FilterDropDown.Layout.Row = 1; app.FilterDropDown.Layout.Column = 1;
-            app.setTooltip(app.FilterDropDown, "Filter which pairs are shown in the pair table. Does not change resolution status. Default: Show all.");
+            CellToolkit.setTooltip(app.FilterDropDown, "Filter which pairs are shown in the pair table. Does not change resolution status. Default: Show all.");
 
             app.PairProgressLabel = uilabel(filterRow, "Text", "0 resolved / 0 total", ...
                 "HorizontalAlignment", "right");
             app.PairProgressLabel.Layout.Row = 1; app.PairProgressLabel.Layout.Column = 2;
-            app.setTooltip(app.PairProgressLabel, "Number of pairs that have been given any resolution status out of the total pairs found.");
+            CellToolkit.setTooltip(app.PairProgressLabel, "Number of pairs that have been given any resolution status out of the total pairs found.");
 
             app.PairTable = uitable(g, ...
                 "Data", {}, ...
@@ -408,7 +408,7 @@ classdef CellNeighborResolverApp < handle
                 "ColumnEditable", false(1,5), ...
                 "CellSelectionCallback", @(s,e) app.onPairTableSelected(s, e));
             app.PairTable.Layout.Row = 4; app.PairTable.Layout.Column = 1;
-            app.setTooltip(app.PairTable, "Neighbor pairs visible under the current filter. # = display index; Row A/B = source CSV row numbers; Dist = Euclidean distance in pixels; Status = current resolution. Click a row to select that pair.");
+            CellToolkit.setTooltip(app.PairTable, "Neighbor pairs visible under the current filter. # = display index; Row A/B = source CSV row numbers; Dist = Euclidean distance in pixels; Status = current resolution. Click a row to select that pair.");
 
             navGrid = uigridlayout(g, [1 2]);
             navGrid.Layout.Row = 5; navGrid.Layout.Column = 1;
@@ -418,12 +418,12 @@ classdef CellNeighborResolverApp < handle
             app.PreviousPairButton = uibutton(navGrid, "push", "Text", "< Prev [j/←]", ...
                 "ButtonPushedFcn", @(s,e) app.navigatePairs(-1));
             app.PreviousPairButton.Layout.Row = 1; app.PreviousPairButton.Layout.Column = 1;
-            app.setTooltip(app.PreviousPairButton, "Select the previous pair in the filtered list. Shortcuts: j or left arrow.");
+            CellToolkit.setTooltip(app.PreviousPairButton, "Select the previous pair in the filtered list. Shortcuts: j or left arrow.");
 
             app.NextPairButton = uibutton(navGrid, "push", "Text", "Next [l/→] >", ...
                 "ButtonPushedFcn", @(s,e) app.navigatePairs(+1));
             app.NextPairButton.Layout.Row = 1; app.NextPairButton.Layout.Column = 2;
-            app.setTooltip(app.NextPairButton, "Select the next pair in the filtered list. Shortcuts: l or right arrow.");
+            CellToolkit.setTooltip(app.NextPairButton, "Select the next pair in the filtered list. Shortcuts: l or right arrow.");
 
         end
 
@@ -449,19 +449,19 @@ classdef CellNeighborResolverApp < handle
                 "RoundFractionalValues", "on", "Enable", "off", ...
                 "ValueChangedFcn", @(s,e) app.onTiffPageChanged());
             app.TiffPageSpinner.Layout.Row = 1; app.TiffPageSpinner.Layout.Column = 2;
-            app.setTooltip(app.TiffPageSpinner, "TIFF page (channel) shown in the tissue plot. Pinned to the page the loaded CSV's detections came from (disabled), so detections are never overlaid on the wrong channel. Editable only for a combined CSV that spans multiple pages.");
+            CellToolkit.setTooltip(app.TiffPageSpinner, "TIFF page (channel) shown in the tissue plot. Pinned to the page the loaded CSV's detections came from (disabled), so detections are never overlaid on the wrong channel. Editable only for a combined CSV that spans multiple pages.");
 
             spacer = uilabel(topRow, "Text", "");
             spacer.Layout.Row = 1; spacer.Layout.Column = 3;
 
             app.PairDetailLabel = uilabel(topRow, "Text", "No pair selected");
             app.PairDetailLabel.Layout.Row = 1; app.PairDetailLabel.Layout.Column = 4;
-            app.setTooltip(app.PairDetailLabel, "Row numbers, pixel coordinates, distance, and current resolution status of the selected pair.");
+            CellToolkit.setTooltip(app.PairDetailLabel, "Row numbers, pixel coordinates, distance, and current resolution status of the selected pair.");
 
             app.ShowPointsCheckBox = uicheckbox(topRow, "Text", "Show points", "Value", true, ...
                 "ValueChangedFcn", @(s,e) app.onShowPointsChanged());
             app.ShowPointsCheckBox.Layout.Row = 1; app.ShowPointsCheckBox.Layout.Column = 5;
-            app.setTooltip(app.ShowPointsCheckBox, "Toggle visibility of all detection markers on the tissue plot. Shortcut: p");
+            CellToolkit.setTooltip(app.ShowPointsCheckBox, "Toggle visibility of all detection markers on the tissue plot. Shortcut: p");
 
             app.TissueAxes = uiaxes(g);
             app.TissueAxes.Layout.Row = 2; app.TissueAxes.Layout.Column = 1;
@@ -470,7 +470,7 @@ classdef CellNeighborResolverApp < handle
             app.TissueAxes.Toolbar.Visible = "off";
             app.TissueAxes.Box = "on";
             disableDefaultInteractivity(app.TissueAxes);
-            app.setTooltip(app.TissueAxes, "Full-image view of all detections. Magenta circle = not in any pair. Orange square = in an unresolved pair. Green square = resolved/kept. Blue square = merged. Active reviewed pair: Green filled circle = point A, Blue filled square = point B. Click a point to select its pair. Scroll wheel zooms at the cursor; middle-drag (or Shift-drag) pans; press f or use the right-click menu to reset the view. Right-click for merge and freehand-ROI options.");
+            CellToolkit.setTooltip(app.TissueAxes, "Full-image view of all detections. Magenta circle = not in any pair. Orange square = in an unresolved pair. Green square = resolved/kept. Blue square = merged. Active reviewed pair: Green filled circle = point A, Blue filled square = point B. Click a point to select its pair. Scroll wheel zooms at the cursor; middle-drag (or Shift-drag) pans; press f or use the right-click menu to reset the view. Right-click for merge and freehand-ROI options.");
         end
 
         function buildRightPanel(app)
@@ -494,7 +494,7 @@ classdef CellNeighborResolverApp < handle
                 "FontWeight", "bold", ...
                 "ButtonPushedFcn", @(s,e) app.doKeepA());
             app.KeepAButton.Layout.Row = 1; app.KeepAButton.Layout.Column = 1;
-            app.setTooltip(app.KeepAButton, "Keep detection A, delete B. Shortcut: a");
+            CellToolkit.setTooltip(app.KeepAButton, "Keep detection A, delete B. Shortcut: a");
 
             app.KeepBButton = uibutton(g, "push", ...
                 "Text", "Keep B  [b]", ...
@@ -503,7 +503,7 @@ classdef CellNeighborResolverApp < handle
                 "FontWeight", "bold", ...
                 "ButtonPushedFcn", @(s,e) app.doKeepB());
             app.KeepBButton.Layout.Row = 1; app.KeepBButton.Layout.Column = 2;
-            app.setTooltip(app.KeepBButton, "Keep detection B, delete A. Shortcut: b");
+            CellToolkit.setTooltip(app.KeepBButton, "Keep detection B, delete A. Shortcut: b");
 
             % Row 2: Keep Both (full width)
             app.KeepBothButton = uibutton(g, "push", ...
@@ -513,52 +513,52 @@ classdef CellNeighborResolverApp < handle
                 "FontWeight", "bold", ...
                 "ButtonPushedFcn", @(s,e) app.doKeepBoth());
             app.KeepBothButton.Layout.Row = 2; app.KeepBothButton.Layout.Column = [1 2];
-            app.setTooltip(app.KeepBothButton, "Keep both detections, mark pair resolved. Shortcut: k or Space");
+            CellToolkit.setTooltip(app.KeepBothButton, "Keep both detections, mark pair resolved. Shortcut: k or Space");
 
             % Row 3: Merge | Skip
             app.MergeButton = uibutton(g, "push", ...
                 "Text", "Merge  [m]", ...
                 "ButtonPushedFcn", @(s,e) app.armMerge());
             app.MergeButton.Layout.Row = 3; app.MergeButton.Layout.Column = 1;
-            app.setTooltip(app.MergeButton, "Delete both; click tissue plot to place merged cell at new location. Shortcut: m");
+            CellToolkit.setTooltip(app.MergeButton, "Delete both; click tissue plot to place merged cell at new location. Shortcut: m");
 
             app.SkipButton = uibutton(g, "push", ...
                 "Text", "Skip  [s]", ...
                 "ButtonPushedFcn", @(s,e) app.doSkip());
             app.SkipButton.Layout.Row = 3; app.SkipButton.Layout.Column = 2;
-            app.setTooltip(app.SkipButton, "Defer this pair for later. Shortcut: s");
+            CellToolkit.setTooltip(app.SkipButton, "Defer this pair for later. Shortcut: s");
 
             % Row 4: Delete Point | Relocate Point
             app.DeletePointButton = uibutton(g, "push", ...
                 "Text", "Delete  [d]", ...
                 "ButtonPushedFcn", @(s,e) app.armDeletePoint());
             app.DeletePointButton.Layout.Row = 4; app.DeletePointButton.Layout.Column = 1;
-            app.setTooltip(app.DeletePointButton, "Arm point-deletion mode, then click any detection on the tissue plot to delete it. Affects all pairs containing that point. Shortcut: d. Press Esc to cancel.");
+            CellToolkit.setTooltip(app.DeletePointButton, "Arm point-deletion mode, then click any detection on the tissue plot to delete it. Affects all pairs containing that point. Shortcut: d. Press Esc to cancel.");
 
             app.RelocatePointButton = uibutton(g, "push", ...
                 "Text", "Relocate  [r]", ...
                 "ButtonPushedFcn", @(s,e) app.armRelocatePoint());
             app.RelocatePointButton.Layout.Row = 4; app.RelocatePointButton.Layout.Column = 2;
-            app.setTooltip(app.RelocatePointButton, "Arm relocation mode: first click selects a detection (highlighted in yellow), second click moves it to the new position. Undoable. Shortcut: r. Press Esc to cancel.");
+            CellToolkit.setTooltip(app.RelocatePointButton, "Arm relocation mode: first click selects a detection (highlighted in yellow), second click moves it to the new position. Undoable. Shortcut: r. Press Esc to cancel.");
 
             % Row 5: Add Point | Undo
             app.AddPointButton = uibutton(g, "push", ...
                 "Text", "Add Point  [n]", ...
                 "ButtonPushedFcn", @(s,e) app.armAddPoint());
             app.AddPointButton.Layout.Row = 5; app.AddPointButton.Layout.Column = 1;
-            app.setTooltip(app.AddPointButton, "Arm add-point mode, then click anywhere on the tissue plot to insert a new detection. The point inherits column values from the nearest existing row. Undoable. Shortcut: n. Press Esc to cancel.");
+            CellToolkit.setTooltip(app.AddPointButton, "Arm add-point mode, then click anywhere on the tissue plot to insert a new detection. The point inherits column values from the nearest existing row. Undoable. Shortcut: n. Press Esc to cancel.");
 
             app.UndoButton = uibutton(g, "push", ...
                 "Text", "Undo  [Ctrl+Z]", ...
                 "ButtonPushedFcn", @(s,e) app.undoLast());
             app.UndoButton.Layout.Row = 5; app.UndoButton.Layout.Column = 2;
-            app.setTooltip(app.UndoButton, "Undo the last resolution action. Shortcut: Ctrl+Z");
+            CellToolkit.setTooltip(app.UndoButton, "Undo the last resolution action. Shortcut: Ctrl+Z");
 
             % Row 6: pair detail label (fixed height, spans both columns)
             app.PairDetailLabel = uilabel(g, "Text", "No pair selected", ...
                 "WordWrap", "on", "VerticalAlignment", "top");
             app.PairDetailLabel.Layout.Row = 6; app.PairDetailLabel.Layout.Column = [1 2];
-            app.setTooltip(app.PairDetailLabel, "Pair identifier, pixel distance, X/Y coordinates of both detections, and current resolution status.");
+            CellToolkit.setTooltip(app.PairDetailLabel, "Pair identifier, pixel distance, X/Y coordinates of both detections, and current resolution status.");
 
             % Row 7-8: Overview thumbnail (moved here from left panel)
             app.OverviewLabel = uilabel(g, "Text", "Overview (click to navigate)", ...
@@ -572,13 +572,7 @@ classdef CellNeighborResolverApp < handle
             app.OverviewAxes.Toolbar.Visible = "off";
             app.OverviewAxes.Box = "on";
             disableDefaultInteractivity(app.OverviewAxes);
-            app.setTooltip(app.OverviewAxes, "Whole-page overview. The red rectangle shows the region visible in the center tissue plot and tracks zoom/pan. Click anywhere to recenter the tissue plot on that spot.");
-        end
-
-        function setTooltip(~, component, txt)
-            if ~isempty(component) && isvalid(component) && isprop(component, 'Tooltip')
-                component.Tooltip = char(txt);
-            end
+            CellToolkit.setTooltip(app.OverviewAxes, "Whole-page overview. The red rectangle shows the region visible in the center tissue plot and tracks zoom/pan. Click anywhere to recenter the tissue plot on that spot.");
         end
 
         % --------------------------------------------------------------
@@ -600,7 +594,7 @@ classdef CellNeighborResolverApp < handle
             defaults.LastActiveCsvPath   = "";
 
             % --- Rescoring (Stage 2) ---
-            defaults.CondaExe            = string(app.detectConda());
+            defaults.CondaExe            = string(CellToolkit.detectConda());
             defaults.CondaEnv            = string(app.DEFAULT_CONDA_ENV);
             defaults.PythonExe           = "python";
             defaults.RescoreDevice       = "cpu";
@@ -610,49 +604,15 @@ classdef CellNeighborResolverApp < handle
         end
 
         function loadSettings(app)
-            defaults = app.defaultSettings();
-            stored = [];
-
-            % Try MATLAB preferences first
-            if ispref(app.SettingsGroup, app.SettingsPrefKey)
-                try
-                    stored = getpref(app.SettingsGroup, app.SettingsPrefKey);
-                catch
-                end
-            end
-
-            % Fallback: MAT file
-            matPath = app.settingsMatPath();
-            if isempty(stored) && isfile(matPath)
-                try
-                    s = load(char(matPath), 'settings');
-                    if isfield(s, 'settings')
-                        stored = s.settings;
-                    end
-                catch
-                end
-            end
-
-            if isempty(stored)
-                app.Settings = defaults;
-            else
-                app.Settings = app.mergeSettings(defaults, stored);
-            end
+            app.Settings = CellToolkit.loadSettingsStruct(app.SettingsGroup, ...
+                app.SettingsPrefKey, app.defaultSettings(), app.settingsMatPath());
         end
 
         function saveSettings(app)
             app.readSettingsFromUI();
             app.Settings.SettingsSavedAt = posixtime(datetime('now'));
-            matPath = app.settingsMatPath();
-            settings = app.Settings; %#ok<NASGU>
-            try
-                save(char(matPath), 'settings');
-            catch
-            end
-            try
-                setpref(app.SettingsGroup, app.SettingsPrefKey, app.Settings);
-            catch
-            end
+            CellToolkit.saveSettingsStruct(app.SettingsGroup, ...
+                app.SettingsPrefKey, app.Settings, app.settingsMatPath());
         end
 
         function readSettingsFromUI(app)
@@ -685,20 +645,6 @@ classdef CellNeighborResolverApp < handle
             end
         end
 
-        function merged = mergeSettings(~, defaults, stored)
-            merged = defaults;
-            if ~isstruct(stored)
-                return
-            end
-            fields = fieldnames(stored);
-            for k = 1:numel(fields)
-                f = fields{k};
-                if isfield(defaults, f)
-                    merged.(f) = stored.(f);
-                end
-            end
-        end
-
         function applySettingsToUI(app)
             if strlength(app.Settings.LastParentDirectory) > 0
                 app.ParentDirEdit.Value = char(app.Settings.LastParentDirectory);
@@ -708,17 +654,7 @@ classdef CellNeighborResolverApp < handle
             app.DistanceSpinner.Value = app.Settings.NeighborDistance;
             app.AutoAdvanceCheckBox.Value = app.Settings.AutoAdvance;
             app.AutoSaveCheckBox.Value = app.Settings.AutoSave;
-            app.setDropDownValue(app.FilterDropDown, app.Settings.FilterMode);
-        end
-
-        function setDropDownValue(~, dd, value)
-            items = string(dd.Items);
-            value = string(value);
-            if any(items == value)
-                dd.Value = char(value);
-            elseif ~isempty(items)
-                dd.Value = char(items(1));
-            end
+            CellToolkit.setDropDownValue(app.FilterDropDown, app.Settings.FilterMode);
         end
 
         function p = settingsMatPath(~)
@@ -773,22 +709,10 @@ classdef CellNeighborResolverApp < handle
 
             pattern = char(strtrim(app.RegexEdit.Value));
             try
-                allFiles = app.recDir(char(parentDir));
+                matched = CellToolkit.scanFiles(char(parentDir), pattern);
             catch scanErr
                 app.updateStatus("Scan failed while listing files: " + string(scanErr.message));
                 return
-            end
-
-            matched = {};
-            for k = 1:numel(allFiles)
-                [~, name, ext] = fileparts(allFiles{k});
-                basename = [name, ext];
-                try
-                    if ~isempty(regexpi(basename, pattern, 'once'))
-                        matched{end+1} = allFiles{k}; %#ok<AGROW>
-                    end
-                catch
-                end
             end
 
             app.AllAbsFiles = matched;
@@ -1108,7 +1032,7 @@ classdef CellNeighborResolverApp < handle
             % navigation enabled.
             encPages = app.encodedPagesInTable();
             if isempty(encPages)
-                app.ActiveCsvPage = app.pageFromCsvName(csvPath);
+                app.ActiveCsvPage = CellToolkit.pageFromCsvName(csvPath);
                 app.CsvSpansMultiplePages = false;
             elseif isscalar(encPages)
                 app.ActiveCsvPage = encPages;
@@ -1119,7 +1043,7 @@ classdef CellNeighborResolverApp < handle
             end
 
             % Find companion image
-            app.ActiveImagePath = app.inferImagePath(csvPath);
+            app.ActiveImagePath = CellToolkit.inferImagePath(csvPath);
             if strlength(app.ActiveImagePath) > 0 && isfile(app.ActiveImagePath)
                 try
                     app.ActiveTiffInfo = imfinfo(char(app.ActiveImagePath));
@@ -1216,45 +1140,8 @@ classdef CellNeighborResolverApp < handle
             end
 
             app.updateStatus(sprintf('Loaded %d detections from %s%s%s', n, ...
-                char(app.makeRelativePath(char(csvPath), char(app.ParentDirectory))), ...
+                char(CellToolkit.makeRelativePath(char(csvPath), char(app.ParentDirectory))), ...
                 imgNote, autoFindNote));
-        end
-
-        function imagePath = inferImagePath(~, csvPath)
-            % Match the CellDiscovery convention: the TIFF has the same name
-            % as the CSV stem minus the channel suffix and _locs tag.
-            % E.g. "img_PNN1_locs.csv" -> "img.tif"
-            %      "img_locs.csv"       -> "img.tif"
-            %      "img_locs_resized.csv" -> "img.tif"
-            imagePath = "";
-            [folder, name, ~] = fileparts(char(csvPath));
-
-            % Build a list of stems to try, from most- to least-specific:
-            %   1. Strip _<anySuffix>_locs(_resized)?   (e.g. _PNN1_locs)
-            %   2. Strip _locs(_resized)?                (simple case)
-            stems = {};
-            s1 = regexprep(name, '_[^_]+_locs(_resized)?$', '', 'ignorecase');
-            if ~strcmp(s1, name), stems{end+1} = s1; end
-            s2 = regexprep(name, '_locs(_resized)?$', '', 'ignorecase');
-            if ~strcmp(s2, name), stems{end+1} = s2; end
-            % Also try the bare name in case there is no recognised suffix
-            stems{end+1} = name;
-
-            exts = {'.tif', '.tiff'};
-            % Prefer preprocessed variant; fall back to projection, then plain
-            suffixes = {'_preprocessed', '_proj', ''};
-
-            for si = 1:numel(stems)
-                for pi = 1:numel(suffixes)
-                    for ei = 1:numel(exts)
-                        candidate = fullfile(folder, [stems{si}, suffixes{pi}, exts{ei}]);
-                        if isfile(candidate)
-                            imagePath = string(candidate);
-                            return
-                        end
-                    end
-                end
-            end
         end
 
         function img = getImagePage(app, pageIndex)
@@ -1263,17 +1150,8 @@ classdef CellNeighborResolverApp < handle
                 return
             end
             pageIndex = max(1, min(pageIndex, numel(app.ActiveTiffInfo)));
-            fieldName = sprintf('page%d', pageIndex);
-            if isfield(app.ActiveImagePages, fieldName)
-                img = app.ActiveImagePages.(fieldName);
-                return
-            end
-            try
-                img = imread(char(app.ActiveImagePath), pageIndex);
-                app.ActiveImagePages.(fieldName) = img;
-            catch
-                img = [];
-            end
+            [img, app.ActiveImagePages] = CellToolkit.readImagePageCached( ...
+                char(app.ActiveImagePath), pageIndex, app.ActiveImagePages);
         end
 
         % --------------------------------------------------------------
@@ -1581,7 +1459,7 @@ classdef CellNeighborResolverApp < handle
             app.loadCsvFile(nextPath);   % auto-finds neighbors
 
             nPairs = numel(app.FilteredPairIndices);
-            relPath = char(app.makeRelativePath(char(nextPath), char(app.ParentDirectory)));
+            relPath = char(CellToolkit.makeRelativePath(char(nextPath), char(app.ParentDirectory)));
 
             if nPairs == 0
                 app.updateStatus(sprintf('Loaded %s — no pairs found.', relPath));
@@ -1663,7 +1541,7 @@ classdef CellNeighborResolverApp < handle
                 if ~isnan(firstUnresolved)
                     n = size(app.NeighborPairs, 1);
                     app.updateStatus(sprintf('Advanced to %s — %d pair(s) found.', ...
-                        char(app.makeRelativePath(char(nextPath), char(app.ParentDirectory))), n));
+                        char(CellToolkit.makeRelativePath(char(nextPath), char(app.ParentDirectory))), n));
                     app.selectPair(firstUnresolved);
                     return
                 end
@@ -2359,34 +2237,13 @@ classdef CellNeighborResolverApp < handle
             ids = cellstr(string(app.ActiveLocTable.imgName));
             rowPages = nan(numel(ids), 1);
             for k = 1:numel(ids)
-                rowPages(k) = app.pageFromIdentity(ids{k});
+                rowPages(k) = CellToolkit.pageFromIdentity(ids{k});
             end
             if all(isnan(rowPages))
                 return   % no page encoded anywhere — single-page CSV, show all
             end
             rowPages(isnan(rowPages)) = 1;   % unencoded rows belong to page 1
             mask = mask & (rowPages == app.ActiveDisplayPage);
-        end
-
-        function pg = pageFromIdentity(~, identity)
-            % Page index encoded in a per-page identity string of the form
-            % "<stem>_<suffix><page>", where <suffix> is alphabetic (e.g.
-            % "page", "PNN", "PV") and <page> is the TIFF page index. Returns
-            % NaN when no such page suffix is present (e.g. single-page CSVs,
-            % whose imgName is the bare image filename incl. extension).
-            pg = NaN;
-            tok = regexp(char(identity), '_[A-Za-z]+(\d+)$', 'tokens', 'once');
-            if ~isempty(tok)
-                pg = str2double(tok{1});
-            end
-        end
-
-        function pg = pageFromCsvName(app, csvPath)
-            % Page index encoded in a *_locs.csv filename following the
-            % CellDiscovery convention "<stem>_<suffix><page>_locs[_resized].csv".
-            [~, name, ~] = fileparts(char(csvPath));
-            core = regexprep(name, '_locs(_resized)?$', '', 'ignorecase');
-            pg = app.pageFromIdentity(core);
         end
 
         function pages = encodedPagesInTable(app)
@@ -2403,7 +2260,7 @@ classdef CellNeighborResolverApp < handle
             ids = cellstr(string(app.ActiveLocTable.imgName));
             p = nan(numel(ids), 1);
             for k = 1:numel(ids)
-                p(k) = app.pageFromIdentity(ids{k});
+                p(k) = CellToolkit.pageFromIdentity(ids{k});
             end
             pages = unique(p(~isnan(p)));
         end
@@ -3090,7 +2947,7 @@ classdef CellNeighborResolverApp < handle
             app.Dirty = false;
             app.markActiveFileReviewed();
             app.updateStatus(sprintf('Saved %d rows → %s', nOut, ...
-                char(app.makeRelativePath(char(app.ActiveCsvPath), char(app.ParentDirectory)))));
+                char(CellToolkit.makeRelativePath(char(app.ActiveCsvPath), char(app.ParentDirectory)))));
         end
 
         function saveIfDirty(app)
@@ -3235,25 +3092,9 @@ classdef CellNeighborResolverApp < handle
         % estimate is written back to each CSV's 'rescore' column.
 
         function discoverScoringModels(app)
-            % Scan the repo root for subdirectories containing best.pth whose
-            % name does NOT look like a detection model (no 'fasterrcnn').
-            % These are the Stage-2 scoring models rescore.py can load. Mirrors
-            % CellDiscovery.discoverModels so both GUIs see the same models.
-            app.ScoringModels = {};
-            root = char(app.RepoRoot);
-            if isempty(root) || ~isfolder(root)
-                return
-            end
-            d = dir(root);
-            subdirs = {d([d.isdir]).name};
-            subdirs = subdirs(~ismember(subdirs, {'.', '..'}));
-            for k = 1:numel(subdirs)
-                if exist(fullfile(root, subdirs{k}, 'best.pth'), 'file') && ...
-                        isempty(regexpi(subdirs{k}, 'fasterrcnn', 'once'))
-                    app.ScoringModels{end+1} = subdirs{k};
-                end
-            end
-            app.ScoringModels = sort(app.ScoringModels);
+            % Stage-2 scoring models rescore.py can load: run folders under the
+            % repo root that contain best.pth and are not detection models.
+            [~, app.ScoringModels] = CellToolkit.discoverModels(char(app.RepoRoot));
         end
 
         function onRescoreButtonPushed(app)
@@ -3312,7 +3153,7 @@ classdef CellNeighborResolverApp < handle
             ddScope = uidropdown(g, 'Items', ...
                 {'Included files', 'Active file only', 'All scanned files'});
             ddScope.Layout.Row = 2; ddScope.Layout.Column = [2 3];
-            app.setDropDownValueChar(ddScope, char(S.RescoreScope));
+            CellToolkit.setDropDownValue(ddScope, char(S.RescoreScope));
 
             % Row 3: device
             lblD = uilabel(g, 'Text', 'Device:', 'HorizontalAlignment', 'right');
@@ -3530,7 +3371,7 @@ classdef CellNeighborResolverApp < handle
                 ids = cellstr(string(T.imgName));
                 pp = nan(numel(ids), 1);
                 for k = 1:numel(ids)
-                    pp(k) = app.pageFromIdentity(ids{k});
+                    pp(k) = CellToolkit.pageFromIdentity(ids{k});
                 end
                 encPages = unique(pp(~isnan(pp)));
                 if numel(encPages) > 1
@@ -3541,12 +3382,12 @@ classdef CellNeighborResolverApp < handle
                 end
             end
             if isnan(pg)
-                pg = app.pageFromCsvName(csvPath);
+                pg = CellToolkit.pageFromCsvName(csvPath);
                 if isnan(pg), pg = 1; end
             end
 
             % Locate the companion image and extract the relevant page.
-            imgPath = app.inferImagePath(csvPath);
+            imgPath = CellToolkit.inferImagePath(csvPath);
             if strlength(imgPath) == 0 || ~isfile(imgPath)
                 st = "skip: no companion image";
                 return
@@ -3563,7 +3404,7 @@ classdef CellNeighborResolverApp < handle
             tmpImg   = [tempname '.tif'];
             tmpInCsv = [tempname '.csv'];
             tmpOut   = [tempname '.csv'];
-            cleanTmp = onCleanup(@() app.deleteFiles({tmpImg, tmpInCsv, tmpOut}));
+            cleanTmp = onCleanup(@() CellToolkit.deleteFiles({tmpImg, tmpInCsv, tmpOut}));
 
             try
                 imwrite(img, tmpImg);
@@ -3624,170 +3465,36 @@ classdef CellNeighborResolverApp < handle
             % Assemble and run the rescore.py command (optionally wrapped in
             % 'conda run'), with the repo root as the working directory so the
             % script and model-folder name resolve relative to it.
-            condaExe = char(cfg.condaExe);
-            condaEnv = char(cfg.condaEnv);
-            pyExe    = char(cfg.pythonExe);
-
-            args = {pyExe, 'rescore.py', char(cfg.model), tmpInCsv, ...
-                '--image',      tmpImg, ...
-                '--device',     char(cfg.device), ...
-                '--batch-size', num2str(cfg.batchSize), ...
-                '--output',     tmpOut};
-            if ~isempty(condaEnv)
-                args = [{condaExe, 'run', '--no-capture-output', '-n', condaEnv}, args];
-            end
-
-            qargs = cellfun(@(x) app.quoteIfSpaced(x), args, 'UniformOutput', false);
-            cmd   = sprintf('cd /d "%s" && %s', char(app.RepoRoot), strjoin(qargs, ' '));
+            pcfg = app.pythonConfigFromRescoreCfg(cfg);
+            args = CellToolkit.rescoreArgs(char(cfg.model), tmpInCsv, struct( ...
+                'image',     tmpImg, ...
+                'device',    char(cfg.device), ...
+                'batchSize', cfg.batchSize, ...
+                'output',    tmpOut));
+            cmd = CellToolkit.commandString(CellToolkit.pythonCommandParts(pcfg, args));
             fprintf('[RESCORE] CMD: %s\n', cmd);
-            [status, out] = system(cmd);
+            [status, out] = CellToolkit.runPython(pcfg, args);
         end
 
-        function [ok, msg] = testRescoreEnv(~, cfg)
+        function [ok, msg] = testRescoreEnv(app, cfg)
             % Quick synchronous check that hydra + torch import in the env.
-            ok = false;
-            condaExe = char(cfg.condaExe);
-            condaEnv = char(cfg.condaEnv);
-            pyExe    = char(cfg.pythonExe);
-            code = "import hydra, torch; print('OK')";
-            if ~isempty(condaEnv)
-                if isempty(condaExe)
-                    msg = ['Conda env "' condaEnv '" is set but the conda.exe path is empty.' newline ...
-                        'Browse for conda.exe / conda.bat in the Rescore dialog.'];
-                    return
-                end
-                cmd = sprintf('"%s" run --no-capture-output -n %s %s -c "%s"', ...
-                    condaExe, condaEnv, pyExe, code);
-            else
-                cmd = sprintf('%s -c "%s"', pyExe, code);
-            end
-            [stt, outp] = system(cmd);
-            outp = strtrim(outp);
-            if stt == 0 && contains(outp, 'OK')
-                ok = true; msg = '';
-            else
-                msg = sprintf(['Could not import hydra/torch in the configured environment.\n\n' ...
-                    'Command:\n%s\n\nOutput:\n%s'], cmd, outp);
-            end
+            pcfg = app.pythonConfigFromRescoreCfg(cfg);
+            [ok, msg] = CellToolkit.testPythonEnv(pcfg, {'hydra', 'torch'});
         end
 
-        function setDropDownValueChar(~, dd, value)
-            items = string(dd.Items);
-            if any(items == string(value))
-                dd.Value = char(value);
-            elseif ~isempty(items)
-                dd.Value = char(items(1));
-            end
+        function pcfg = pythonConfigFromRescoreCfg(app, cfg)
+            % Translate the rescore-dialog cfg into a CellToolkit python config,
+            % running with the repo root as the working directory.
+            pcfg = CellToolkit.pythonConfig( ...
+                'PythonExe',  char(cfg.pythonExe), ...
+                'CondaExe',   char(cfg.condaExe), ...
+                'CondaEnv',   char(cfg.condaEnv), ...
+                'WorkingDir', char(app.RepoRoot));
         end
 
         function closeProgress(~, dlg)
             if ~isempty(dlg) && isvalid(dlg)
                 close(dlg);
-            end
-        end
-
-        function deleteFiles(~, paths)
-            for k = 1:numel(paths)
-                p = paths{k};
-                if ~isempty(p) && isfile(p)
-                    try
-                        delete(p);
-                    catch
-                    end
-                end
-            end
-        end
-
-    end
-
-    % ==================================================================
-    methods (Static, Access = private)
-
-        function root = detectRepoRoot()
-            % Locate the repo root (the directory containing rescore.py).
-            % Works whether this class lives at the repo root or in a
-            % subdirectory such as customizations/.
-            classFile = which('CellNeighborResolverApp');
-            if isempty(classFile)
-                root = string(pwd);
-                return
-            end
-            classDir = fileparts(classFile);
-            if exist(fullfile(classDir, 'rescore.py'), 'file')
-                root = string(classDir);
-            else
-                parent = fileparts(classDir);
-                if exist(fullfile(parent, 'rescore.py'), 'file')
-                    root = string(parent);
-                else
-                    root = string(classDir);
-                end
-            end
-        end
-
-        function condaExe = detectConda()
-            % Auto-detect the conda executable on Windows from common install
-            % locations. Returns '' if nothing is found (user then browses).
-            candidates = { ...
-                fullfile(getenv('USERPROFILE'), 'miniconda3',  'Scripts', 'conda.exe'), ...
-                fullfile(getenv('USERPROFILE'), 'miniconda3',  'condabin', 'conda.bat'), ...
-                fullfile(getenv('USERPROFILE'), 'anaconda3',   'Scripts', 'conda.exe'), ...
-                fullfile(getenv('USERPROFILE'), 'anaconda3',   'condabin', 'conda.bat'), ...
-                fullfile(getenv('LOCALAPPDATA'), 'miniconda3', 'Scripts', 'conda.exe'), ...
-                fullfile(getenv('LOCALAPPDATA'), 'miniconda3', 'condabin', 'conda.bat'), ...
-                fullfile(getenv('LOCALAPPDATA'), 'anaconda3',  'Scripts', 'conda.exe'), ...
-                fullfile(getenv('LOCALAPPDATA'), 'anaconda3',  'condabin', 'conda.bat'), ...
-                'C:\ProgramData\miniconda3\Scripts\conda.exe', ...
-                'C:\ProgramData\miniconda3\condabin\conda.bat', ...
-                'C:\ProgramData\anaconda3\Scripts\conda.exe', ...
-                'C:\ProgramData\anaconda3\condabin\conda.bat' ...
-                };
-            for k = 1:numel(candidates)
-                if ~isempty(candidates{k}) && isfile(candidates{k})
-                    condaExe = candidates{k};
-                    return
-                end
-            end
-            condaExe = '';   % not found; leave blank so the user browses
-        end
-
-        function s = quoteIfSpaced(s)
-            % Wrap an argument in double-quotes when it contains a space, so it
-            % survives the cmd.exe command string built for system().
-            if ~isempty(s) && any(s == ' ')
-                s = ['"' s '"'];
-            end
-        end
-
-        function allFiles = recDir(rootDir)
-            % Recursively list every file under rootDir. Uses MATLAB's built-in
-            % '**' recursive glob, which (unlike a hand-rolled recursion) is
-            % robust to unreadable subfolders and reparse points / cloud-sync
-            % junctions — a manual walk throws or stalls on those, aborting the
-            % whole scan, whereas the glob simply skips them.
-            allFiles = {};
-            listing = dir(fullfile(char(rootDir), '**', '*'));
-            if isempty(listing)
-                return
-            end
-            listing = listing(~[listing.isdir]);
-            allFiles = cell(1, numel(listing));
-            for k = 1:numel(listing)
-                allFiles{k} = fullfile(listing(k).folder, listing(k).name);
-            end
-        end
-
-        function rel = makeRelativePath(absPath, rootDir)
-            % Normalize separators
-            absPath = strrep(absPath, '\', '/');
-            rootDir = strrep(rootDir, '\', '/');
-            if isempty(rootDir) || rootDir(end) ~= '/'
-                rootDir = [rootDir '/'];
-            end
-            if strncmpi(absPath, rootDir, numel(rootDir))
-                rel = absPath(numel(rootDir)+1:end);
-            else
-                rel = absPath;
             end
         end
 

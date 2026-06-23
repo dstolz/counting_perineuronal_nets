@@ -130,7 +130,7 @@ classdef CellDiscovery < handle
                 return;
             end
 
-            obj.repoRoot = CellDiscovery.detectRepoRoot();
+            obj.repoRoot = CellToolkit.detectRepoRoot();
             obj.discoverModels();
             obj.loadPrefs();
             obj.buildGUI();  % stores obj in figure appdata — prevents GC
@@ -160,7 +160,7 @@ classdef CellDiscovery < handle
                 'parentDir',       obj.repoRoot, ...
                 'fileRegex',       '(?i)\.tif$', ...
                 'pythonExe',       'python', ...
-                'condaExe',        CellDiscovery.detectConda(), ...
+                'condaExe',        CellToolkit.detectConda(), ...
                 'condaEnv',        '', ...
                 'device',          'cpu', ...
                 'batchSize',       '1', ...
@@ -217,23 +217,7 @@ classdef CellDiscovery < handle
         function discoverModels(obj)
             % Scan repo root for subdirs containing best.pth; split by type.
             % Names containing 'fasterrcnn' -> detection; all others -> rescore.
-            d       = dir(obj.repoRoot);
-            subdirs = {d([d.isdir]).name};
-            subdirs = subdirs(~ismember(subdirs, {'.', '..'}));
-
-            obj.detModels     = {};
-            obj.rescoreModels = {};
-            for k = 1:numel(subdirs)
-                if exist(fullfile(obj.repoRoot, subdirs{k}, 'best.pth'), 'file')
-                    if ~isempty(regexpi(subdirs{k}, 'fasterrcnn', 'once'))
-                        obj.detModels{end+1} = subdirs{k};
-                    else
-                        obj.rescoreModels{end+1} = subdirs{k}; 
-                    end
-                end
-            end
-            obj.detModels     = sort(obj.detModels);
-            obj.rescoreModels = sort(obj.rescoreModels);
+            [obj.detModels, obj.rescoreModels] = CellToolkit.discoverModels(obj.repoRoot);
         end
 
 
@@ -598,7 +582,7 @@ classdef CellDiscovery < handle
             obj.hFileCountLabel.FontColor = [0.6 0.4 0];
             drawnow;
 
-            allFiles = CellDiscovery.recDir(rootDir);
+            allFiles = CellToolkit.recDir(rootDir);
 
             if ~isempty(regexStr) && ~isempty(allFiles)
                 try
@@ -617,15 +601,15 @@ classdef CellDiscovery < handle
 
             n = numel(allFiles);
             if n > 0
-                relFiles = cellfun(@(f) CellDiscovery.makeRelPath(f, rootDir), ...
+                relFiles = cellfun(@(f) CellToolkit.makeRelativePath(f, rootDir), ...
                     allFiles, 'UniformOutput', false);
             else
                 relFiles = {};
             end
             obj.hFileList.Items = relFiles;
             obj.allAbsFiles = allFiles;
-            obj.hFileCountLabel.Text      = sprintf('%d file%s found', n, CellDiscovery.ternary(n == 1, '', 's'));
-            obj.hFileCountLabel.FontColor = CellDiscovery.ternary(n > 0, [0.1 0.45 0.1], [0.6 0.4 0]);
+            obj.hFileCountLabel.Text      = sprintf('%d file%s found', n, CellToolkit.ternary(n == 1, '', 's'));
+            obj.hFileCountLabel.FontColor = CellToolkit.ternary(n > 0, [0.1 0.45 0.1], [0.6 0.4 0]);
         end
 
 
@@ -714,77 +698,79 @@ classdef CellDiscovery < handle
             obj.savePrefs();
         end
 
+        function cfg = pythonCfg(obj)
+            % Build a CellToolkit Python-invocation config from the current
+            % Python Environment controls (interpreter, conda exe/env) with the
+            % repo root as the working directory.
+            cfg = CellToolkit.pythonConfig( ...
+                'PythonExe',  strtrim(obj.hPyEdit.Value), ...
+                'CondaExe',   strtrim(obj.hCondaExeEdit.Value), ...
+                'CondaEnv',   strtrim(obj.hCondaEdit.Value), ...
+                'WorkingDir', obj.repoRoot);
+        end
+
         function envStatus = onTestEnv(obj, ~, ~)
-            % Run a quick synchronous check that Python + required modules are importable.
+            % Run a quick synchronous check that Python + required modules are
+            % importable. Returns 0 on success, nonzero on failure.
             pyExe    = strtrim(obj.hPyEdit.Value);
             condaExe = strtrim(obj.hCondaExeEdit.Value);
             condaEnv = strtrim(obj.hCondaEdit.Value);
-
 
             obj.hProgressLabel.Text = 'Checking Python environment ...';
             set(obj.hFig, 'Pointer', 'watch');
             drawnow;
             fprintf('[CHECK] Verifying Python environment ...\n');
 
-            testCode = "import hydra, torch; print('OK')";
-            if ~isempty(condaEnv)
-                if isempty(condaExe)
-                    set(obj.hFig, 'Pointer', 'arrow');
-                    drawnow;
-                    errordlg(['Conda env name is set but the conda executable path is empty.' newline ...
-                        'Browse for conda.exe / conda.bat in the Python Environment panel.'], ...
-                        'conda not configured');
-                    return;
-                end
-                testCmd = sprintf('"%s" run --no-capture-output -n %s %s -c "%s"', ...
-                    condaExe, condaEnv, pyExe, testCode);
-            else
-                testCmd = sprintf('"%s" -c "%s"', pyExe, testCode);
-            end
-            [envStatus, envOut] = system(testCmd);
-            set(obj.hFig, 'Pointer', 'arrow');
-            drawnow;
-            envOut = strtrim(envOut);
-            if envStatus == 0
-                fprintf('[TEST] PASS: %s\n', envOut);
-                obj.hProgressLabel.Text = ['Environment OK: ' envOut];
-            else
-                fprintf('[TEST] FAIL (exit %d):\n%s\n', envStatus, envOut);
-                obj.hProgressLabel.Text = sprintf('Environment test FAILED (exit %d) — see Command Window', envStatus);
-            end
-
-
-            if envStatus ~= 0 || ~contains(envOut, 'OK')
-                % Build a helpful diagnostic message
-                if isempty(condaEnv)
-                    hint = sprintf( ...
-                        ['Python executable "%s" cannot import hydra or torch.\n\n' ...
-                        'Fix options:\n' ...
-                        '  1. Enter your conda environment name in the\n' ...
-                        '     "Conda env name" field (e.g.  countpnn)\n' ...
-                        '     and leave Python executable as  python\n\n' ...
-                        '  2. Set Python executable to the full path of\n' ...
-                        '     your conda env''s python.exe, e.g.:\n' ...
-                        '     C:\\...\\conda\\envs\\countpnn\\python.exe\n\n' ...
-                        'Use the "Test env" button to verify your settings.\n\n' ...
-                        'Error output:\n%s'], pyExe, envOut);
-                else
-                    hint = sprintf( ...
-                        ['conda env "%s" cannot import hydra or torch.\n\n' ...
-                        'Check that:\n' ...
-                        '  - The environment name is spelled correctly\n' ...
-                        '  - The conda executable path is correct\n' ...
-                        '  - The environment has the repo dependencies:\n' ...
-                        '      conda activate %s\n' ...
-                        '      pip install -r requirements.txt\n\n' ...
-                        'Use the "Test env" button to verify your settings.\n\n' ...
-                        'Error output:\n%s'], condaEnv, condaEnv, envOut);
-                end
-                obj.hProgressLabel.Text = 'Environment check failed — see error dialog.';
-                errordlg(hint, 'Python Environment Error');
+            if ~isempty(condaEnv) && isempty(condaExe)
+                set(obj.hFig, 'Pointer', 'arrow');
+                drawnow;
+                errordlg(['Conda env name is set but the conda executable path is empty.' newline ...
+                    'Browse for conda.exe / conda.bat in the Python Environment panel.'], ...
+                    'conda not configured');
                 envStatus = 1;
                 return;
             end
+
+            [ok, ~, envOut] = CellToolkit.testPythonEnv(obj.pythonCfg(), {'hydra', 'torch'});
+            set(obj.hFig, 'Pointer', 'arrow');
+            drawnow;
+            envOut = strtrim(envOut);
+            if ok
+                fprintf('[TEST] PASS: %s\n', envOut);
+                obj.hProgressLabel.Text = ['Environment OK: ' envOut];
+                envStatus = 0;
+                return;
+            end
+
+            fprintf('[TEST] FAIL:\n%s\n', envOut);
+            % Build a helpful diagnostic message
+            if isempty(condaEnv)
+                hint = sprintf( ...
+                    ['Python executable "%s" cannot import hydra or torch.\n\n' ...
+                    'Fix options:\n' ...
+                    '  1. Enter your conda environment name in the\n' ...
+                    '     "Conda env name" field (e.g.  countpnn)\n' ...
+                    '     and leave Python executable as  python\n\n' ...
+                    '  2. Set Python executable to the full path of\n' ...
+                    '     your conda env''s python.exe, e.g.:\n' ...
+                    '     C:\\...\\conda\\envs\\countpnn\\python.exe\n\n' ...
+                    'Use the "Test env" button to verify your settings.\n\n' ...
+                    'Error output:\n%s'], pyExe, envOut);
+            else
+                hint = sprintf( ...
+                    ['conda env "%s" cannot import hydra or torch.\n\n' ...
+                    'Check that:\n' ...
+                    '  - The environment name is spelled correctly\n' ...
+                    '  - The conda executable path is correct\n' ...
+                    '  - The environment has the repo dependencies:\n' ...
+                    '      conda activate %s\n' ...
+                    '      pip install -r requirements.txt\n\n' ...
+                    'Use the "Test env" button to verify your settings.\n\n' ...
+                    'Error output:\n%s'], condaEnv, condaEnv, envOut);
+            end
+            obj.hProgressLabel.Text = 'Environment check failed — see error dialog.';
+            errordlg(hint, 'Python Environment Error');
+            envStatus = 1;
         end
 
 
@@ -826,7 +812,7 @@ classdef CellDiscovery < handle
             if isempty(data)
                 nextPage = 1;
             else
-                pages    = cellfun(@(x) CellDiscovery.parseNum(x, 0), data(:,1));
+                pages    = cellfun(@(x) CellToolkit.parseNum(x, 0), data(:,1));
                 nextPage = max(pages) + 1;
             end
             defDet = detChoices{min(2, numel(detChoices))};   % first real model if any, else (skip)
@@ -894,7 +880,7 @@ classdef CellDiscovery < handle
             useLSM = false;
             if iscell(data) && size(data, 2) >= 5
                 for r = 1:size(data, 1)
-                    useLSM = useLSM || CellDiscovery.parseLogical(data{r,5}, false);
+                    useLSM = useLSM || CellToolkit.parseLogical(data{r,5}, false);
                 end
             end
             if useLSM
@@ -1172,11 +1158,11 @@ classdef CellDiscovery < handle
                 f = files{i};
                 [fdir, stem, ext] = fileparts(f);
                 if isempty(fdir), fdir = pwd; end
-                nPages = CellDiscovery.countPages(f);
+                nPages = CellToolkit.countPages(f);
 
                 firstPageForFile = true;   % first accepted page row for this source file
                 for r = 1:size(mapData, 1)
-                    pg   = CellDiscovery.parseNum(mapData{r,1}, 0);
+                    pg   = CellToolkit.parseNum(mapData{r,1}, 0);
                     detM = mapData{r,3};
                     if pg < 1, continue; end
                     if ~ischar(detM) || strcmp(detM, obj.SKIP_LABEL) || isempty(detM)
@@ -1191,9 +1177,9 @@ classdef CellDiscovery < handle
                     rescM = mapData{r,4};
                     if ~ischar(rescM) || strcmp(rescM, obj.NONE_LABEL), rescM = ''; end
 
-                    correctLSM = CellDiscovery.parseLogical(mapData{r,5}, false);
-                    bg = CellDiscovery.parseNum(mapData{r,6}, 0);
-                    rz = CellDiscovery.parseNum(mapData{r,7}, 1);
+                    correctLSM = CellToolkit.parseLogical(mapData{r,5}, false);
+                    bg = CellToolkit.parseNum(mapData{r,6}, 0);
+                    rz = CellToolkit.parseNum(mapData{r,7}, 1);
                     if rz <= 0, rz = 1; end
                     job = CellDiscovery.makeJob( ...
                         f, fdir, stem, ext, mapData{r,2}, pg, nPages, true, detM, rescM, correctLSM, bg, rz, obj.P.lsmOptions);
@@ -1223,17 +1209,7 @@ classdef CellDiscovery < handle
 
             %% Case B: active process — drain stdout, check for completion
             if ~isempty(obj.jProcess)
-                try
-                    while obj.jReader.ready()
-                        line = obj.jReader.readLine();
-                        if isequal(line, []), break; end
-                        lineStr = char(line);
-                        if ~isempty(lineStr)
-                            fprintf('  %s\n', lineStr);
-                        end
-                    end
-                catch
-                end
+                CellDiscovery.echoLines(CellToolkit.drainReader(obj.jReader));
 
                 done     = false;
                 exitCode = 0;
@@ -1245,17 +1221,8 @@ classdef CellDiscovery < handle
                 end
 
                 if done
-                    try
-                        line = obj.jReader.readLine();
-                        while ~isequal(line, [])
-                            lineStr = char(line);
-                            if ~isempty(lineStr)
-                                fprintf('  %s\n', lineStr);
-                            end
-                            line = obj.jReader.readLine();
-                        end
-                    catch
-                    end
+                    % Block-drain anything still buffered after exit.
+                    CellDiscovery.echoLines(CellToolkit.drainReader(obj.jReader, true));
 
                     job = obj.jobQueue{obj.fileIdx};
                     if exitCode == 0
@@ -1271,8 +1238,8 @@ classdef CellDiscovery < handle
                             obj.fileIdx, total, exitCode, job.label);
                     end
 
-                    CellDiscovery.deleteFileQuiet(job.tmpImg);   % drop scratch page image
-                    CellDiscovery.deleteFileQuiet(job.tmpCsv);
+                    CellToolkit.deleteFiles(job.tmpImg);   % drop scratch page image
+                    CellToolkit.deleteFiles(job.tmpCsv);
 
                     obj.jProcess = [];
                     obj.jReader  = [];
@@ -1335,57 +1302,31 @@ classdef CellDiscovery < handle
             end
             obj.jobQueue{obj.fileIdx} = job;   % persist tmp paths for Case B
 
-            pyExe      = strtrim(obj.hPyEdit.Value);
-            condaEnv   = strtrim(obj.hCondaEdit.Value);
             device     = strtrim(obj.hDeviceEdit.Value);
             batchSize  = strtrim(obj.hBatchEdit.Value);
             threshold  = strtrim(obj.hThrEdit.Value);
 
-            % Core predict.py arguments (paths may contain spaces — ProcessBuilder
-            % passes each element as a separate argument, so no quoting is needed).
-            % predict.py runs on the preprocessed scratch image; coordinates are
-            % mapped back to original-image space in postProcess.
-            predictArgs = {pyExe, 'predict.py', job.detModel, job.tmpImg, ...
-                '--output',     job.tmpCsv, ...
-                '--device',     device, ...
-                '--batch-size', batchSize};
-
-            if ~isempty(threshold) && ~isnan(str2double(threshold))
-                predictArgs = [predictArgs, {'--threshold', threshold}];
-            end
-
-            if ~isempty(job.rescoreModel)
-                predictArgs = [predictArgs, {'--rescore', job.rescoreModel}];
-            end
-
-            condaExe   = strtrim(obj.hCondaExeEdit.Value);
-
-            % Prepend 'conda run' when a named env is specified.
-            % --no-capture-output is required for real-time stdout streaming.
-            % Use the full path to conda.exe so MATLAB's PATH doesn't matter.
-            if ~isempty(condaEnv)
-                cmdParts = [{condaExe, 'run', '--no-capture-output', '-n', condaEnv}, predictArgs];
-            else
-                cmdParts = predictArgs;
-            end
+            % Core predict.py arguments. predict.py runs on the preprocessed
+            % scratch image; coordinates are mapped back to original-image space
+            % in postProcess. A blank/NaN threshold and an empty rescore model
+            % are omitted by CellToolkit.predictArgs. Paths may contain spaces —
+            % launchPythonAsync passes each token as a separate argument, so no
+            % quoting is needed (conda-run wrapping is applied by the toolkit).
+            predOpts = struct( ...
+                'output',       job.tmpCsv, ...
+                'device',       device, ...
+                'batchSize',    batchSize, ...
+                'threshold',    threshold, ...
+                'rescoreModel', job.rescoreModel);
+            args = CellToolkit.predictArgs(job.detModel, job.tmpImg, predOpts);
+            cfg  = obj.pythonCfg();
 
             fprintf('[RUN ] (%d/%d) %s\n', obj.fileIdx, total, job.label);
-            fprintf('  CMD: %s\n', strjoin(CellDiscovery.quotedArgs(cmdParts), ' '));
+            fprintf('  CMD: %s\n', ...
+                CellToolkit.commandString(CellToolkit.pythonCommandParts(cfg, args)));
 
             try
-                n    = numel(cmdParts);
-                jCmd = javaArray('java.lang.String', n);
-                for k = 1:n
-                    jCmd(k) = java.lang.String(cmdParts{k});
-                end
-                pb = java.lang.ProcessBuilder(jCmd);
-                pb.directory(java.io.File(obj.repoRoot));
-                pb.redirectErrorStream(true);
-                proc   = pb.start();
-                reader = java.io.BufferedReader( ...
-                    java.io.InputStreamReader(proc.getInputStream()));
-                obj.jProcess = proc;
-                obj.jReader  = reader;
+                [obj.jProcess, obj.jReader] = CellToolkit.launchPythonAsync(cfg, args);
             catch ME
                 fprintf(2,'[ERROR] Could not start process: %s\n', ME.message);
                 obj.fileIdx = obj.fileIdx + 1;
@@ -1474,7 +1415,7 @@ classdef CellDiscovery < handle
                     img = imread(job.tmpImg);   % preprocessed (resized) image
                     if hasX && hasY, plotsX = locs.X;     plotsY = locs.Y;     end
                 else
-                    img = CellDiscovery.readPage(job.imgFile, job.page, job.nPages);
+                    img = CellToolkit.readPage(job.imgFile, job.page, job.nPages);
                     if hasX && hasY, plotsX = locsOrig.X; plotsY = locsOrig.Y; end
                 end
             catch ME
@@ -1663,8 +1604,8 @@ classdef CellDiscovery < handle
                 % Remove scratch files for the job that was in flight.
                 if obj.fileIdx >= 1 && obj.fileIdx <= numel(obj.jobQueue)
                     inflight = obj.jobQueue{obj.fileIdx};
-                    CellDiscovery.deleteFileQuiet(inflight.tmpImg);
-                    CellDiscovery.deleteFileQuiet(inflight.tmpCsv);
+                    CellToolkit.deleteFiles(inflight.tmpImg);
+                    CellToolkit.deleteFiles(inflight.tmpCsv);
                 end
             end
 
@@ -1738,31 +1679,14 @@ classdef CellDiscovery < handle
     %% ---- Static private helpers -----------------------------------------
     methods (Static, Access = private)
 
-        function condaExe = detectConda()
-            % Auto-detect the conda executable on Windows from common install
-            % locations. Returns 'conda' (bare name) if nothing is found, which
-            % works when the user has conda on their PATH.
-            candidates = { ...
-                fullfile(getenv('USERPROFILE'), 'miniconda3',  'Scripts', 'conda.exe'), ...
-                fullfile(getenv('USERPROFILE'), 'miniconda3',  'condabin', 'conda.bat'), ...
-                fullfile(getenv('USERPROFILE'), 'anaconda3',   'Scripts', 'conda.exe'), ...
-                fullfile(getenv('USERPROFILE'), 'anaconda3',   'condabin', 'conda.bat'), ...
-                fullfile(getenv('LOCALAPPDATA'), 'miniconda3', 'Scripts', 'conda.exe'), ...
-                fullfile(getenv('LOCALAPPDATA'), 'miniconda3', 'condabin', 'conda.bat'), ...
-                fullfile(getenv('LOCALAPPDATA'), 'anaconda3',  'Scripts', 'conda.exe'), ...
-                fullfile(getenv('LOCALAPPDATA'), 'anaconda3',  'condabin', 'conda.bat'), ...
-                'C:\ProgramData\miniconda3\Scripts\conda.exe', ...
-                'C:\ProgramData\miniconda3\condabin\conda.bat', ...
-                'C:\ProgramData\anaconda3\Scripts\conda.exe', ...
-                'C:\ProgramData\anaconda3\condabin\conda.bat' ...
-                };
-            for k = 1:numel(candidates)
-                if exist(candidates{k}, 'file')
-                    condaExe = candidates{k};
-                    return;
+        function echoLines(lines)
+            % Print each non-empty line drained from a subprocess reader to the
+            % Command Window, matching the streaming format used for live output.
+            for k = 1:numel(lines)
+                if ~isempty(lines{k})
+                    fprintf('  %s\n', lines{k});
                 end
             end
-            condaExe = '';   % not found; leave blank so user browses
         end
 
         function job = makeJob(f, fdir, stem, ext, suffix, pg, nPages, multiPage, detM, rescM, correctLSM, bg, rz, lsmOptions)
@@ -1806,58 +1730,6 @@ classdef CellDiscovery < handle
             job.firstPage = false;   % set by buildJobs: true for the first page of each source file
         end
 
-        function v = parseNum(x, dflt)
-            % Robustly coerce a table cell / edit-field value to a scalar double.
-            if isnumeric(x)
-                if isempty(x) || ~isscalar(x) || isnan(x), v = dflt; else, v = double(x); end
-                return;
-            end
-            v = str2double(strtrim(char(x)));
-            if isnan(v), v = dflt; end
-        end
-
-        function tf = parseLogical(x, dflt)
-            % Robustly coerce table values to scalar logical.
-            if islogical(x)
-                tf = isscalar(x) && x;
-                return;
-            end
-            if isnumeric(x)
-                tf = isscalar(x) && x ~= 0 && ~isnan(x);
-                return;
-            end
-            if isstring(x) || ischar(x)
-                v = lower(strtrim(char(x)));
-                if ismember(v, {'true','t','yes','y','on','1'})
-                    tf = true;
-                    return;
-                elseif ismember(v, {'false','f','no','n','off','0',''})
-                    tf = false;
-                    return;
-                end
-            end
-            tf = logical(dflt);
-        end
-
-        function n = countPages(f)
-            % Number of pages/frames in an image file (1 for non-multi-image formats).
-            try
-                n = numel(imfinfo(f));
-            catch
-                n = 1;
-            end
-        end
-
-        function img = readPage(f, page, nPages)
-            % Read a specific page. For single-image formats, omit the index
-            % (some formats reject a frame index argument).
-            if nPages <= 1
-                img = imread(f);
-            else
-                img = imread(f, page);
-            end
-        end
-
         function img = applyPreprocess(img, correctLSM, lsmOptions, bgRadius, resizeFactor)
             % Optional preprocessing applied before detection:
             %   - bidirectional LSM line artifact correction
@@ -1883,13 +1755,6 @@ classdef CellDiscovery < handle
             end
             if resizeFactor > 0 && resizeFactor ~= 1
                 img = imresize(img, resizeFactor);
-            end
-        end
-
-        function deleteFileQuiet(p)
-            % Delete a file if it exists, ignoring any error.
-            if ~isempty(p) && exist(p, 'file')
-                try delete(p); catch, end
             end
         end
 
@@ -2054,7 +1919,7 @@ classdef CellDiscovery < handle
             detFallback = detChoices{min(2, numel(detChoices))};   % first real model if any
             for r = 1:size(data, 1)
                 % Page index
-                p = CellDiscovery.parseNum(data{r,1}, 1);
+                p = CellToolkit.parseNum(data{r,1}, 1);
                 if p < 1, p = 1; end
                 data{r,1} = round(p);
                 % Detection model (must be a valid dropdown member)
@@ -2069,63 +1934,15 @@ classdef CellDiscovery < handle
                 v = data{r,4};
                 if ~ischar(v) || ~ismember(v, rescoreChoices), data{r,4} = rescoreChoices{1}; end
                 % Correct bidirectional LSM artifact
-                data{r,5} = CellDiscovery.parseLogical(data{r,5}, false);
+                data{r,5} = CellToolkit.parseLogical(data{r,5}, false);
                 % Background radius (>= 0)
-                b = CellDiscovery.parseNum(data{r,6}, 0);
+                b = CellToolkit.parseNum(data{r,6}, 0);
                 if b < 0, b = 0; end
                 data{r,6} = b;
                 % Resize factor (> 0)
-                z = CellDiscovery.parseNum(data{r,7}, 1);
+                z = CellToolkit.parseNum(data{r,7}, 1);
                 if z <= 0, z = 1; end
                 data{r,7} = z;
-            end
-        end
-
-        function root = detectRepoRoot()
-            % Locate the repo root (the directory containing predict.py).
-            % Searches the class file's own directory, then one level up,
-            % so the class works whether it lives at the repo root or in a
-            % subdirectory such as customizations/.
-            classFile = which('CellDiscovery');
-            if isempty(classFile)
-                root = pwd;
-                return;
-            end
-            classDir = fileparts(classFile);
-            if exist(fullfile(classDir, 'predict.py'), 'file')
-                root = classDir;                        % class is at repo root
-            else
-                parent = fileparts(classDir);
-                if exist(fullfile(parent, 'predict.py'), 'file')
-                    root = parent;                      % class is one level down
-                else
-                    root = classDir;                    % fallback
-                end
-            end
-        end
-
-        function files = recDir(rootDir)
-            % Recursively list all files under rootDir.
-            % Returns an Nx1 cell array of absolute paths.
-            files = {};
-            d = dir(rootDir);
-            for k = 1:numel(d)
-                if d(k).isdir
-                    if ~ismember(d(k).name, {'.', '..'})
-                        sub   = CellDiscovery.recDir(fullfile(rootDir, d(k).name));
-                        files = [files; sub]; %#ok<AGROW>
-                    end
-                else
-                    files{end+1, 1} = fullfile(rootDir, d(k).name); %#ok<AGROW>
-                end
-            end
-        end
-
-        function result = ternary(cond, ifTrue, ifFalse)
-            if cond
-                result = ifTrue;
-            else
-                result = ifFalse;
             end
         end
 
@@ -2147,7 +1964,7 @@ classdef CellDiscovery < handle
             % Build a lookup: page number -> row index in mapData.
             pageToRow = containers.Map('KeyType', 'int32', 'ValueType', 'int32');
             for r = 1:size(mapData, 1)
-                pg = int32(CellDiscovery.parseNum(mapData{r,1}, 0));
+                pg = int32(CellToolkit.parseNum(mapData{r,1}, 0));
                 if pg >= 1
                     pageToRow(pg) = int32(r);
                 end
@@ -2159,12 +1976,12 @@ classdef CellDiscovery < handle
             bgArr    = zeros(1, nPages);
             rzArr    = ones(1, nPages);
             for pg = 1:nPages
-                rawPages{pg} = CellDiscovery.readPage(imgFile, pg, nPages);
+                rawPages{pg} = CellToolkit.readPage(imgFile, pg, nPages);
                 if isKey(pageToRow, int32(pg))
                     r           = pageToRow(int32(pg));
-                    wantLSM(pg) = CellDiscovery.parseLogical(mapData{r,5}, false);
-                    bgArr(pg)   = CellDiscovery.parseNum(mapData{r,6}, 0);
-                    rz          = CellDiscovery.parseNum(mapData{r,7}, 1);
+                    wantLSM(pg) = CellToolkit.parseLogical(mapData{r,5}, false);
+                    bgArr(pg)   = CellToolkit.parseNum(mapData{r,6}, 0);
+                    rz          = CellToolkit.parseNum(mapData{r,7}, 1);
                     if rz <= 0, rz = 1; end
                     rzArr(pg)   = rz;
                 end
@@ -2368,39 +2185,6 @@ classdef CellDiscovery < handle
                 end
             end
             desc = strjoin(lines(keep), newline);
-        end
-
-        function parts = quotedArgs(cmdParts)
-            % Return cmdParts with any element containing a space wrapped in
-            % double-quotes. Used only for the CMD: log line — ProcessBuilder
-            % does NOT need quoting (each element is a separate argument).
-            parts = cellfun(@(x) CellDiscovery.quoteIfSpaced(x), ...
-                cmdParts, 'UniformOutput', false);
-        end
-
-        function s = quoteIfSpaced(s)
-            if ~isempty(s) && any(s == ' ')
-                s = ['"' s '"'];
-            end
-        end
-
-        function rel = makeRelPath(absPath, rootDir)
-            % Return absPath relative to rootDir (case-insensitive on Windows).
-            % Falls back to absPath if absPath does not start with rootDir.
-            if isempty(rootDir)
-                rel = absPath;
-                return;
-            end
-            % Normalise: ensure rootDir ends with a separator
-            if rootDir(end) ~= filesep
-                rootDir = [rootDir filesep];
-            end
-            n = length(rootDir);
-            if strncmpi(absPath, rootDir, n)
-                rel = absPath(n+1:end);
-            else
-                rel = absPath;
-            end
         end
 
     end  % static methods
