@@ -8,6 +8,12 @@ classdef CellNeighborResolverApp < handle
 %   Tick "Resized" in the scan toolbar to scan for *_locs_resized.csv files
 %   (resized-image coordinates) instead of the standard *_locs.csv.
 %
+%   The "Rescore…" toolbar button runs a Stage-2 scoring model (rescore.py,
+%   in the countpnn conda env) over the curated detections of the included
+%   dataset(s). Pick the scoring model and device in the dialog; only live
+%   (kept) points are scored and the [0-1] quality estimate is written back
+%   to each CSV's "rescore" column.
+%
 %   Keyboard shortcuts (when a text field is not focused):
 %     a         Keep A (delete B)
 %     b         Keep B (delete A)
@@ -34,6 +40,7 @@ classdef CellNeighborResolverApp < handle
         MaxUndoDepth      = 200
         DEFAULT_REGEX_LOCS         = '(?i)_locs\.csv$'
         DEFAULT_REGEX_LOCS_RESIZED = '(?i)_locs_resized\.csv$'
+        DEFAULT_CONDA_ENV          = 'countpnn'
         STATUS_UNRESOLVED = "Unresolved"
         STATUS_KEEP_A     = "Keep A"
         STATUS_KEEP_B     = "Keep B"
@@ -47,6 +54,10 @@ classdef CellNeighborResolverApp < handle
         % --- Settings & scan state ---
         Settings   struct  = struct()
         ParentDirectory string = ""
+
+        % --- Rescoring (Stage 2) ---
+        RepoRoot      string = ""    % repo root (folder containing rescore.py)
+        ScoringModels cell   = {}     % discovered scoring-model run folders (best.pth, non-fasterrcnn)
         AllAbsFiles cell   = {}
         FileReviewState logical = []   % per-AllAbsFiles flag: CSV carries saved resolver annotations
 
@@ -101,6 +112,7 @@ classdef CellNeighborResolverApp < handle
         AutoSaveCheckBox
         SaveButton
         NextPageButton
+        RescoreButton
         ShowPointsCheckBox
 
         % --- UI: left panel ---
@@ -166,6 +178,8 @@ classdef CellNeighborResolverApp < handle
 
         function app = CellNeighborResolverApp()
             app.loadSettings();
+            app.RepoRoot = app.detectRepoRoot();
+            app.discoverScoringModels();
             app.buildUI();
             app.applySettingsToUI();
 
@@ -256,8 +270,13 @@ classdef CellNeighborResolverApp < handle
             app.setTooltip(app.ResizedCsvCheckBox, "Scan for resized-coordinate localization files (*_locs_resized.csv) instead of the standard *_locs.csv. Toggling overwrites the Filter pattern and re-scans.");
 
             app.FileCountLabel = uilabel(app.TopToolbarGrid, "Text", "No files scanned");
-            app.FileCountLabel.Layout.Row = 1; app.FileCountLabel.Layout.Column = [8 11];
+            app.FileCountLabel.Layout.Row = 1; app.FileCountLabel.Layout.Column = [8 10];
             app.setTooltip(app.FileCountLabel, "Number of CSV files found by the most recent scan.");
+
+            app.RescoreButton = uibutton(app.TopToolbarGrid, "push", "Text", "Rescore…", ...
+                "ButtonPushedFcn", @(s,e) app.onRescoreButtonPushed());
+            app.RescoreButton.Layout.Row = 1; app.RescoreButton.Layout.Column = 11;
+            app.setTooltip(app.RescoreButton, "Run a Stage-2 scoring model (in the countpnn conda env) on the curated detections of the included dataset(s), writing/updating the 'rescore' column in each CSV.");
 
             % Row 2: neighbor settings
             lbl3 = uilabel(app.TopToolbarGrid, "Text", "Dist (px)", "HorizontalAlignment", "right");
@@ -579,6 +598,15 @@ classdef CellNeighborResolverApp < handle
             defaults.FilterMode          = "Show all";
             defaults.WindowPosition      = [100 100 1400 820];
             defaults.LastActiveCsvPath   = "";
+
+            % --- Rescoring (Stage 2) ---
+            defaults.CondaExe            = string(app.detectConda());
+            defaults.CondaEnv            = string(app.DEFAULT_CONDA_ENV);
+            defaults.PythonExe           = "python";
+            defaults.RescoreDevice       = "cpu";
+            defaults.RescoreBatchSize    = 1;
+            defaults.RescoreScope        = "Included files";
+            defaults.LastScoringModel    = "";
         end
 
         function loadSettings(app)
@@ -3196,10 +3224,540 @@ classdef CellNeighborResolverApp < handle
             end
         end
 
+        % --------------------------------------------------------------
+        % RESCORING (Stage 2)
+        % --------------------------------------------------------------
+        %
+        % After curation, run a Stage-2 scoring model (rescore.py) in the
+        % countpnn conda env over the curated detections of one or more
+        % datasets. Only live points (CURATED_X/Y not blanked, or X/Y when a
+        % CSV has no curation columns) are scored; the model's [0-1] quality
+        % estimate is written back to each CSV's 'rescore' column.
+
+        function discoverScoringModels(app)
+            % Scan the repo root for subdirectories containing best.pth whose
+            % name does NOT look like a detection model (no 'fasterrcnn').
+            % These are the Stage-2 scoring models rescore.py can load. Mirrors
+            % CellDiscovery.discoverModels so both GUIs see the same models.
+            app.ScoringModels = {};
+            root = char(app.RepoRoot);
+            if isempty(root) || ~isfolder(root)
+                return
+            end
+            d = dir(root);
+            subdirs = {d([d.isdir]).name};
+            subdirs = subdirs(~ismember(subdirs, {'.', '..'}));
+            for k = 1:numel(subdirs)
+                if exist(fullfile(root, subdirs{k}, 'best.pth'), 'file') && ...
+                        isempty(regexpi(subdirs{k}, 'fasterrcnn', 'once'))
+                    app.ScoringModels{end+1} = subdirs{k};
+                end
+            end
+            app.ScoringModels = sort(app.ScoringModels);
+        end
+
+        function onRescoreButtonPushed(app)
+            app.discoverScoringModels();   % refresh in case models were added
+            if isempty(app.ScoringModels)
+                uialert(app.UIFigure, sprintf(['No scoring models found in:\n%s\n\n' ...
+                    'A scoring model is a run folder containing best.pth whose name does ' ...
+                    'not contain "fasterrcnn" (e.g. pnn_v2_scoring_rank_learning).'], ...
+                    char(app.RepoRoot)), 'No scoring models');
+                return
+            end
+            if isempty(app.AllAbsFiles)
+                uialert(app.UIFigure, 'Scan a directory for CSV files first.', 'Nothing to rescore');
+                return
+            end
+            cfg = app.showRescoreDialog();
+            if isempty(cfg)
+                return   % cancelled
+            end
+            app.runRescore(cfg);
+        end
+
+        function cfg = showRescoreDialog(app)
+            % Modal configuration dialog. Returns a config struct, or [] if the
+            % user cancels.
+            cfg = [];
+            S = app.Settings;
+
+            dlg = uifigure('Name', 'Rescore Curated Detections', ...
+                'Position', [100 100 470 330], 'WindowStyle', 'modal');
+            try
+                mp = app.UIFigure.Position;
+                dlg.Position(1:2) = [mp(1) + (mp(3)-470)/2, mp(2) + (mp(4)-330)/2];
+            catch
+            end
+
+            g = uigridlayout(dlg, [8 3]);
+            g.RowHeight   = {26, 26, 26, 26, 26, 26, '1x', 32};
+            g.ColumnWidth = {105, '1x', 70};
+            g.Padding     = [12 12 12 12];
+            g.RowSpacing  = 6;
+            g.ColumnSpacing = 6;
+
+            % Row 1: scoring model
+            lblM = uilabel(g, 'Text', 'Scoring model:', 'HorizontalAlignment', 'right');
+            lblM.Layout.Row = 1; lblM.Layout.Column = 1;
+            ddModel = uidropdown(g, 'Items', app.ScoringModels);
+            ddModel.Layout.Row = 1; ddModel.Layout.Column = [2 3];
+            if any(strcmp(app.ScoringModels, char(S.LastScoringModel)))
+                ddModel.Value = char(S.LastScoringModel);
+            end
+
+            % Row 2: scope
+            lblS = uilabel(g, 'Text', 'Apply to:', 'HorizontalAlignment', 'right');
+            lblS.Layout.Row = 2; lblS.Layout.Column = 1;
+            ddScope = uidropdown(g, 'Items', ...
+                {'Included files', 'Active file only', 'All scanned files'});
+            ddScope.Layout.Row = 2; ddScope.Layout.Column = [2 3];
+            app.setDropDownValueChar(ddScope, char(S.RescoreScope));
+
+            % Row 3: device
+            lblD = uilabel(g, 'Text', 'Device:', 'HorizontalAlignment', 'right');
+            lblD.Layout.Row = 3; lblD.Layout.Column = 1;
+            edDevice = uieditfield(g, 'text', 'Value', char(S.RescoreDevice));
+            edDevice.Layout.Row = 3; edDevice.Layout.Column = [2 3];
+            edDevice.Tooltip = "Torch device, e.g. cpu, cuda:0";
+
+            % Row 4: batch size
+            lblB = uilabel(g, 'Text', 'Batch size:', 'HorizontalAlignment', 'right');
+            lblB.Layout.Row = 4; lblB.Layout.Column = 1;
+            spBatch = uispinner(g, 'Limits', [1 4096], 'RoundFractionalValues', 'on', ...
+                'Value', max(1, double(S.RescoreBatchSize)));
+            spBatch.Layout.Row = 4; spBatch.Layout.Column = [2 3];
+
+            % Row 5: conda env
+            lblE = uilabel(g, 'Text', 'Conda env:', 'HorizontalAlignment', 'right');
+            lblE.Layout.Row = 5; lblE.Layout.Column = 1;
+            edEnv = uieditfield(g, 'text', 'Value', char(S.CondaEnv));
+            edEnv.Layout.Row = 5; edEnv.Layout.Column = [2 3];
+            edEnv.Tooltip = "Conda environment to run rescore.py in. Leave blank to call Python directly.";
+
+            % Row 6: conda exe + browse
+            lblC = uilabel(g, 'Text', 'conda.exe:', 'HorizontalAlignment', 'right');
+            lblC.Layout.Row = 6; lblC.Layout.Column = 1;
+            edConda = uieditfield(g, 'text', 'Value', char(S.CondaExe));
+            edConda.Layout.Row = 6; edConda.Layout.Column = 2;
+            edConda.Tooltip = "Full path to conda.exe / conda.bat (auto-detected). Used only when a conda env is set.";
+            btnBrowse = uibutton(g, 'push', 'Text', 'Browse', ...
+                'ButtonPushedFcn', @(s,e) onBrowseConda());
+            btnBrowse.Layout.Row = 6; btnBrowse.Layout.Column = 3;
+
+            % Row 7: info
+            info = uilabel(g, 'Text', sprintf(['Runs rescore.py per dataset in the conda env. ' ...
+                'Only curated live points are scored; results are written to each ' ...
+                'CSV''s "rescore" column. Repo: %s'], char(app.RepoRoot)), ...
+                'WordWrap', 'on', 'FontColor', [0.4 0.4 0.4], 'VerticalAlignment', 'top');
+            info.Layout.Row = 7; info.Layout.Column = [1 3];
+
+            % Row 8: Run / Cancel
+            btnGrid = uigridlayout(g, [1 3]);
+            btnGrid.Layout.Row = 8; btnGrid.Layout.Column = [1 3];
+            btnGrid.ColumnWidth = {'1x', 100, 100};
+            btnGrid.Padding = [0 0 0 0];
+            uilabel(btnGrid, 'Text', '');
+            btnRun = uibutton(btnGrid, 'push', 'Text', 'Rescore', ...
+                'BackgroundColor', [0.25 0.6 0.35], 'FontColor', [1 1 1], ...
+                'FontWeight', 'bold', 'ButtonPushedFcn', @(s,e) onRun());
+            btnRun.Layout.Column = 2;
+            btnCancel = uibutton(btnGrid, 'push', 'Text', 'Cancel', ...
+                'ButtonPushedFcn', @(s,e) onCancel());
+            btnCancel.Layout.Column = 3;
+
+            uiwait(dlg);
+            return
+
+            function onBrowseConda()
+                [f, p] = uigetfile({'*.exe;*.bat', 'conda executable (*.exe, *.bat)'; ...
+                    '*', 'All Files (*)'}, 'Select conda executable');
+                if isequal(f, 0), return; end
+                edConda.Value = fullfile(p, f);
+                figure(dlg);   % restore modal focus
+            end
+
+            function onRun()
+                cfg = struct();
+                cfg.model      = string(ddModel.Value);
+                cfg.scope      = string(ddScope.Value);
+                cfg.device     = string(strtrim(edDevice.Value));
+                cfg.batchSize  = spBatch.Value;
+                cfg.condaEnv   = string(strtrim(edEnv.Value));
+                cfg.condaExe   = string(strtrim(edConda.Value));
+                cfg.pythonExe  = string(app.Settings.PythonExe);
+                if strlength(cfg.pythonExe) == 0, cfg.pythonExe = "python"; end
+
+                % Persist choices
+                app.Settings.LastScoringModel = cfg.model;
+                app.Settings.RescoreScope     = cfg.scope;
+                app.Settings.RescoreDevice    = cfg.device;
+                app.Settings.RescoreBatchSize = cfg.batchSize;
+                app.Settings.CondaEnv         = cfg.condaEnv;
+                app.Settings.CondaExe         = cfg.condaExe;
+                app.saveSettings();
+
+                uiresume(dlg);
+                delete(dlg);
+            end
+
+            function onCancel()
+                cfg = [];
+                uiresume(dlg);
+                delete(dlg);
+            end
+        end
+
+        function runRescore(app, cfg)
+            % Resolve the set of target CSV files, then rescore each in turn.
+            switch char(cfg.scope)
+                case 'Active file only'
+                    if strlength(app.ActiveCsvPath) == 0
+                        uialert(app.UIFigure, 'No active file is loaded.', 'Nothing to rescore');
+                        return
+                    end
+                    if app.Dirty, app.saveResolved(); end
+                    targets = {char(app.ActiveCsvPath)};
+                case 'All scanned files'
+                    if app.Dirty && strlength(app.ActiveCsvPath) > 0, app.saveResolved(); end
+                    targets = app.AllAbsFiles;
+                otherwise   % 'Included files'
+                    if app.Dirty && strlength(app.ActiveCsvPath) > 0, app.saveResolved(); end
+                    inc = app.FileInclude;
+                    if numel(inc) ~= numel(app.AllAbsFiles)
+                        inc = true(numel(app.AllAbsFiles), 1);
+                    end
+                    targets = app.AllAbsFiles(logical(inc));
+            end
+            if isempty(targets)
+                uialert(app.UIFigure, 'No target files selected for rescoring.', 'Nothing to rescore');
+                return
+            end
+
+            % Verify the Python environment once before looping.
+            app.updateStatus("Checking Python environment for rescoring...");
+            drawnow
+            [ok, envMsg] = app.testRescoreEnv(cfg);
+            if ~ok
+                uialert(app.UIFigure, envMsg, 'Python environment not ready');
+                app.updateStatus("Rescoring aborted: Python environment not ready.");
+                return
+            end
+
+            n = numel(targets);
+            dlg = uiprogressdlg(app.UIFigure, 'Title', 'Rescoring datasets', ...
+                'Message', sprintf('Starting... (0/%d)', n), ...
+                'Cancelable', 'on', 'Value', 0);
+            guard = onCleanup(@() app.closeProgress(dlg));
+
+            nOk = 0; nSkip = 0; nErr = 0;
+            for i = 1:n
+                if dlg.CancelRequested
+                    break
+                end
+                csvPath = targets{i};
+                [~, nm, ex] = fileparts(csvPath);
+                dlg.Value   = (i - 1) / n;
+                dlg.Message = sprintf('(%d/%d) %s', i, n, [nm ex]);
+                drawnow
+
+                try
+                    st = app.rescoreOneFile(csvPath, cfg);
+                catch ME
+                    st = "error: " + string(ME.message);
+                end
+
+                if startsWith(st, "ok")
+                    nOk = nOk + 1;
+                elseif startsWith(st, "skip")
+                    nSkip = nSkip + 1;
+                else
+                    nErr = nErr + 1;
+                end
+                fprintf('[RESCORE] (%d/%d) %s -> %s\n', i, n, [nm ex], char(st));
+            end
+
+            clear guard   % closes the progress dialog
+
+            app.updateStatus(sprintf('Rescore complete: %d scored, %d skipped, %d error(s).', ...
+                nOk, nSkip, nErr));
+
+            % Reload the active file so its refreshed 'rescore' column is reflected.
+            if strlength(app.ActiveCsvPath) > 0 && isfile(char(app.ActiveCsvPath))
+                try
+                    app.loadCsvFile(app.ActiveCsvPath);
+                catch
+                end
+            end
+        end
+
+        function st = rescoreOneFile(app, csvPath, cfg)
+            % Rescore a single curated CSV in place. Returns a short status
+            % string beginning with "ok", "skip", or "error".
+            csvPath = string(csvPath);
+
+            T  = readtable(char(csvPath), 'VariableNamingRule', 'preserve');
+            vn = string(T.Properties.VariableNames);
+            n  = height(T);
+            if ~all(ismember(["X", "Y"], vn))
+                st = "skip: CSV missing X/Y columns";
+                return
+            end
+
+            % Determine live points and their effective coordinates.
+            if all(ismember(["CURATED_X", "CURATED_Y"], vn))
+                cx = T.CURATED_X; cy = T.CURATED_Y;
+                if ~isnumeric(cx), cx = str2double(string(cx)); end
+                if ~isnumeric(cy), cy = str2double(string(cy)); end
+                ex = cx; ey = cy;
+            else
+                ex = T.X; ey = T.Y;
+                if ~isnumeric(ex), ex = str2double(string(ex)); end
+                if ~isnumeric(ey), ey = str2double(string(ey)); end
+            end
+            live = ~isnan(ex) & ~isnan(ey);
+            keys = find(live);
+            if isempty(keys)
+                st = "skip: no live points";
+                return
+            end
+
+            % Reject combined CSVs that span multiple TIFF pages: rescoring
+            % crops patches from a single extracted page, so a multi-page CSV
+            % cannot be handled here (curate per-page CSVs instead).
+            pg = NaN;
+            if ismember("imgName", vn)
+                ids = cellstr(string(T.imgName));
+                pp = nan(numel(ids), 1);
+                for k = 1:numel(ids)
+                    pp(k) = app.pageFromIdentity(ids{k});
+                end
+                encPages = unique(pp(~isnan(pp)));
+                if numel(encPages) > 1
+                    st = "skip: combined multi-page CSV";
+                    return
+                elseif isscalar(encPages)
+                    pg = encPages;
+                end
+            end
+            if isnan(pg)
+                pg = app.pageFromCsvName(csvPath);
+                if isnan(pg), pg = 1; end
+            end
+
+            % Locate the companion image and extract the relevant page.
+            imgPath = app.inferImagePath(csvPath);
+            if strlength(imgPath) == 0 || ~isfile(imgPath)
+                st = "skip: no companion image";
+                return
+            end
+            try
+                info = imfinfo(char(imgPath));
+                pg   = max(1, min(pg, numel(info)));
+                img  = imread(char(imgPath), pg);
+            catch ME
+                st = "error: could not read image (" + string(ME.message) + ")";
+                return
+            end
+
+            tmpImg   = [tempname '.tif'];
+            tmpInCsv = [tempname '.csv'];
+            tmpOut   = [tempname '.csv'];
+            cleanTmp = onCleanup(@() app.deleteFiles({tmpImg, tmpInCsv, tmpOut}));
+
+            try
+                imwrite(img, tmpImg);
+            catch ME
+                st = "error: could not write temp image (" + string(ME.message) + ")";
+                return
+            end
+
+            % Write the rescore input: live X/Y plus a stable key for merge-back.
+            inTbl = table();
+            inTbl.X           = double(ex(live));
+            inTbl.Y           = double(ey(live));
+            inTbl.rescore_key = keys;
+            writetable(inTbl, tmpInCsv);
+
+            % Build and run the rescore.py command in the configured env.
+            [status, out] = app.runRescoreProcess(cfg, tmpInCsv, tmpImg, tmpOut);
+            if status ~= 0 || ~isfile(tmpOut)
+                fprintf(2, '[RESCORE] rescore.py output:\n%s\n', out);
+                st = "error: rescore.py failed (exit " + string(status) + ")";
+                return
+            end
+
+            % Merge the model scores back into the full table by key.
+            R   = readtable(tmpOut, 'VariableNamingRule', 'preserve');
+            rvn = string(R.Properties.VariableNames);
+            if ~all(ismember(["rescore_key", "rescore"], rvn))
+                st = "error: rescore output missing expected columns";
+                return
+            end
+            rk = R.rescore_key; if ~isnumeric(rk), rk = str2double(string(rk)); end
+            rv = R.rescore;     if ~isnumeric(rv), rv = str2double(string(rv)); end
+            newScore = nan(n, 1);
+            for k = 1:numel(rk)
+                if rk(k) >= 1 && rk(k) <= n
+                    newScore(rk(k)) = rv(k);
+                end
+            end
+            T.rescore = newScore;
+
+            % Atomic write back to the original CSV.
+            tmpWrite = char(csvPath + ".tmp_" + ...
+                string(char(java.util.UUID.randomUUID())) + ".csv");
+            try
+                writetable(T, tmpWrite);
+            catch ME
+                if isfile(tmpWrite), delete(tmpWrite); end
+                st = "error: could not write CSV (" + string(ME.message) + ")";
+                return
+            end
+            if isfile(char(csvPath)), delete(char(csvPath)); end
+            movefile(tmpWrite, char(csvPath), 'f');
+
+            st = "ok: " + string(numel(keys)) + " point(s)";
+        end
+
+        function [status, out] = runRescoreProcess(app, cfg, tmpInCsv, tmpImg, tmpOut)
+            % Assemble and run the rescore.py command (optionally wrapped in
+            % 'conda run'), with the repo root as the working directory so the
+            % script and model-folder name resolve relative to it.
+            condaExe = char(cfg.condaExe);
+            condaEnv = char(cfg.condaEnv);
+            pyExe    = char(cfg.pythonExe);
+
+            args = {pyExe, 'rescore.py', char(cfg.model), tmpInCsv, ...
+                '--image',      tmpImg, ...
+                '--device',     char(cfg.device), ...
+                '--batch-size', num2str(cfg.batchSize), ...
+                '--output',     tmpOut};
+            if ~isempty(condaEnv)
+                args = [{condaExe, 'run', '--no-capture-output', '-n', condaEnv}, args];
+            end
+
+            qargs = cellfun(@(x) app.quoteIfSpaced(x), args, 'UniformOutput', false);
+            cmd   = sprintf('cd /d "%s" && %s', char(app.RepoRoot), strjoin(qargs, ' '));
+            fprintf('[RESCORE] CMD: %s\n', cmd);
+            [status, out] = system(cmd);
+        end
+
+        function [ok, msg] = testRescoreEnv(~, cfg)
+            % Quick synchronous check that hydra + torch import in the env.
+            ok = false;
+            condaExe = char(cfg.condaExe);
+            condaEnv = char(cfg.condaEnv);
+            pyExe    = char(cfg.pythonExe);
+            code = "import hydra, torch; print('OK')";
+            if ~isempty(condaEnv)
+                if isempty(condaExe)
+                    msg = ['Conda env "' condaEnv '" is set but the conda.exe path is empty.' newline ...
+                        'Browse for conda.exe / conda.bat in the Rescore dialog.'];
+                    return
+                end
+                cmd = sprintf('"%s" run --no-capture-output -n %s %s -c "%s"', ...
+                    condaExe, condaEnv, pyExe, code);
+            else
+                cmd = sprintf('%s -c "%s"', pyExe, code);
+            end
+            [stt, outp] = system(cmd);
+            outp = strtrim(outp);
+            if stt == 0 && contains(outp, 'OK')
+                ok = true; msg = '';
+            else
+                msg = sprintf(['Could not import hydra/torch in the configured environment.\n\n' ...
+                    'Command:\n%s\n\nOutput:\n%s'], cmd, outp);
+            end
+        end
+
+        function setDropDownValueChar(~, dd, value)
+            items = string(dd.Items);
+            if any(items == string(value))
+                dd.Value = char(value);
+            elseif ~isempty(items)
+                dd.Value = char(items(1));
+            end
+        end
+
+        function closeProgress(~, dlg)
+            if ~isempty(dlg) && isvalid(dlg)
+                close(dlg);
+            end
+        end
+
+        function deleteFiles(~, paths)
+            for k = 1:numel(paths)
+                p = paths{k};
+                if ~isempty(p) && isfile(p)
+                    try
+                        delete(p);
+                    catch
+                    end
+                end
+            end
+        end
+
     end
 
     % ==================================================================
     methods (Static, Access = private)
+
+        function root = detectRepoRoot()
+            % Locate the repo root (the directory containing rescore.py).
+            % Works whether this class lives at the repo root or in a
+            % subdirectory such as customizations/.
+            classFile = which('CellNeighborResolverApp');
+            if isempty(classFile)
+                root = string(pwd);
+                return
+            end
+            classDir = fileparts(classFile);
+            if exist(fullfile(classDir, 'rescore.py'), 'file')
+                root = string(classDir);
+            else
+                parent = fileparts(classDir);
+                if exist(fullfile(parent, 'rescore.py'), 'file')
+                    root = string(parent);
+                else
+                    root = string(classDir);
+                end
+            end
+        end
+
+        function condaExe = detectConda()
+            % Auto-detect the conda executable on Windows from common install
+            % locations. Returns '' if nothing is found (user then browses).
+            candidates = { ...
+                fullfile(getenv('USERPROFILE'), 'miniconda3',  'Scripts', 'conda.exe'), ...
+                fullfile(getenv('USERPROFILE'), 'miniconda3',  'condabin', 'conda.bat'), ...
+                fullfile(getenv('USERPROFILE'), 'anaconda3',   'Scripts', 'conda.exe'), ...
+                fullfile(getenv('USERPROFILE'), 'anaconda3',   'condabin', 'conda.bat'), ...
+                fullfile(getenv('LOCALAPPDATA'), 'miniconda3', 'Scripts', 'conda.exe'), ...
+                fullfile(getenv('LOCALAPPDATA'), 'miniconda3', 'condabin', 'conda.bat'), ...
+                fullfile(getenv('LOCALAPPDATA'), 'anaconda3',  'Scripts', 'conda.exe'), ...
+                fullfile(getenv('LOCALAPPDATA'), 'anaconda3',  'condabin', 'conda.bat'), ...
+                'C:\ProgramData\miniconda3\Scripts\conda.exe', ...
+                'C:\ProgramData\miniconda3\condabin\conda.bat', ...
+                'C:\ProgramData\anaconda3\Scripts\conda.exe', ...
+                'C:\ProgramData\anaconda3\condabin\conda.bat' ...
+                };
+            for k = 1:numel(candidates)
+                if ~isempty(candidates{k}) && isfile(candidates{k})
+                    condaExe = candidates{k};
+                    return
+                end
+            end
+            condaExe = '';   % not found; leave blank so the user browses
+        end
+
+        function s = quoteIfSpaced(s)
+            % Wrap an argument in double-quotes when it contains a space, so it
+            % survives the cmd.exe command string built for system().
+            if ~isempty(s) && any(s == ' ')
+                s = ['"' s '"'];
+            end
+        end
 
         function allFiles = recDir(rootDir)
             % Recursively list every file under rootDir. Uses MATLAB's built-in
