@@ -1,4 +1,4 @@
-# Cell Neighbor Resolver — Resolving Duplicate Detections
+﻿# Cell Neighbor Resolver — Resolving Duplicate Detections
 
 [← Back to the User Guide home](Home.md)
 
@@ -11,7 +11,7 @@ one detection, keep both, or merge them into a single point. It is the
 Open it from the MATLAB Command Window:
 
 ```matlab
-CellNeighborResolverApp
+CellNeighborResolution
 ```
 
 ---
@@ -153,7 +153,7 @@ detections of the included file(s). In the dialog you pick:
 
 Only live (kept) points are scored. The model writes a `0–1` quality estimate
 into each CSV's `rescore` column, which the
-[Cell Localization QC](CellLocalizationQCApp.md) tool can then use for sorting,
+[Cell Localization QC](CellQualityControl.md) tool can then use for sorting,
 filtering, and threshold classification.
 
 This requires the same Python environment as Cell Discovery (the `countpnn`
@@ -180,10 +180,10 @@ the optional `rescore` column. Because edits happen in place:
 | **No pairs found** | Increase the **distance** threshold, or there genuinely are no close detections. |
 | **Image won't display** | The matching image/TIFF for the CSV couldn't be found next to it, or the page index is out of range. |
 | **Rescore fails** | Check your Python environment (conda env `countpnn`, with project requirements). See [Cell Discovery → Python environment](CellDiscovery.md#python-environment). |
-| **Buttons stopped responding after a code update** | Run `clear classes; CellNeighborResolverApp` in MATLAB. |
+| **Buttons stopped responding after a code update** | Run `clear classes; CellNeighborResolution` in MATLAB. |
 
 ---
 
 [← Cell Discovery](CellDiscovery.md) ·
 [Back to home](Home.md) ·
-Next: [Cell Localization QC →](CellLocalizationQCApp.md)
+Next: [Cell Localization QC →](CellQualityControl.md)

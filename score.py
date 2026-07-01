@@ -50,7 +50,7 @@ def main(args):
     dataset = RandomAccessMultiImageDataset.from_paths_and_locs(paths, locs, **dataset_params)
     print(f'[  DATA] {dataset}')
 
-    loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=8)
+    loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=0)
 
     model_params = cfg.model.get('wrapper', cfg.model.base)
     model = hydra.utils.instantiate(model_params)

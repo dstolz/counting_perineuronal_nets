@@ -14,6 +14,15 @@ classdef CellDiscovery < handle
     %       morphological background subtraction (disk radius) and resize;
     %       optional bidirectional LSM artifact correction can also be run
     %       before detection, configured per page.
+    %     - Optional post-processing applied after detection: snapToCellCentroid
+    %       localization refinement, enabled per page (Snap column) with its own
+    %       per-page parameters (Snap options... dialog). Adds non-destructive
+    %       SNAP_X/SNAP_Y/SNAP_Shift/SNAP_Snapped columns to the result CSV and,
+    %       when requested, overwrites X/Y with the snapped coordinates.
+    %     - Pipeline order per page: detection (predict.py) -> snap
+    %       (snapToCellCentroid) -> Stage-2 rescoring (score.py). Rescoring runs
+    %       after snap so the scoring model crops patches centred on the snapped
+    %       (refined) cell locations; the score lands in the 'rescore' column.
     %     - Full predict.py argument exposure (device, batch-size, threshold)
     %     - Real-time stdout/stderr streaming to the MATLAB Command Window
     %     - Stop button that kills the active Python subprocess
@@ -23,8 +32,13 @@ classdef CellDiscovery < handle
     %       is also written: <image_stem>[_page<k>]_locs_resized.csv
     %     - Result figure with colormap, auto-contrast, scatter overlay,
     %       stats annotation; figure is reused across files. The raw page or
-    %       the preprocessed image may be shown (user-selectable).
+    %       the resized image may be shown (user-selectable).
     %     - Optional PNG export of the annotated result
+    %     - Optional diagnostic mode: pauses after each page and opens a window
+    %       showing the raw page, the preprocessed image the detector saw
+    %       (LSM/background/resize), and — when Snap is enabled — the snap-input
+    %       image with arrows from each original detection to its snapped point.
+    %       Continue/Stop buttons resume or end the batch.
     %     - Ignore or Overwrite existing results
     %     - All user preferences persisted across MATLAB sessions
     %
@@ -69,6 +83,7 @@ classdef CellDiscovery < handle
         hColormapPop
         hAutoContrast
         hSavePng
+        hDiagnosticChk
         hDotColorPop
         hDotSizeEdit
         hStartBtn
@@ -86,9 +101,10 @@ classdef CellDiscovery < handle
         hPreprocGlobalChk       % use one set of preprocessing settings for all pages
         hGlobalBgEdit           % global background-subtraction radius
         hGlobalResizeEdit       % global resize factor
-        hDisplayPreprocChk      % show preprocessed image instead of raw page
+        hDisplayPreprocChk      % show resized image instead of raw page
         hLSMOptionsBtn          % edit advanced bidirectional LSM correction options
-        hSaveLsmTif             % save final preprocessed image as TIF alongside CSV
+        hSnapOptionsBtn         % edit per-page snapToCellCentroid post-processing options
+        hSaveLsmTif             % save final resized image as TIF alongside CSV
         pageTableSelRow = []    % last-selected page-table row (for Remove)
 
         % --- App state ---
@@ -105,8 +121,8 @@ classdef CellDiscovery < handle
         fileIdx       = 1
         jobQueue      = {}      % cell array of job structs (see buildJobs)
         allAbsFiles   = {}      % absolute paths from last search (listbox shows relative)
-        tmpDir        = ''      % scratch dir for preprocessed page images
-        preprocCache  = []      % per-file cache of preprocessed pages (see ensurePreprocCache)
+        tmpDir        = ''      % scratch dir for resized page images
+        preprocCache  = []      % per-file cache of preprocessed pages: resized (detector input) + source-resolution (snap input); see ensurePreprocCache
     end
 
     %% ---- Public interface ------------------------------------------------
@@ -145,6 +161,51 @@ classdef CellDiscovery < handle
             end
         end
 
+        function setSearchDir(obj, folder, doSearchNow)
+            % Point the GUI at a folder and (optionally) run the file search.
+            %   app = CellDiscovery();  app.setSearchDir(folder)
+            % Used by CellDatasetManager to open detection on a chosen dataset.
+            % Resolves the live GUI object even when the constructor re-used an
+            % already-open window (in which case this handle has no figure).
+            if nargin < 3, doSearchNow = true; end
+            target = obj;
+            if isempty(target.hFig) || ~isvalid(target.hFig)
+                h = findobj(0, 'Tag', 'PNNBatchGUIMain');
+                if ~isempty(h) && isappdata(h(1), 'PNNBatchGUIObj')
+                    target = getappdata(h(1), 'PNNBatchGUIObj');
+                end
+            end
+            if isempty(target.hFig) || ~isvalid(target.hFig)
+                return;
+            end
+            target.hDirEdit.Value = char(folder);
+            target.P.parentDir    = char(folder);
+            target.savePrefs();
+            if doSearchNow
+                target.doSearch();
+            end
+            figure(target.hFig);
+        end
+
+        function addCloseListener(obj, fcn)
+            % Register a callback to fire when this app's window is
+            % destroyed. Used by CellDatasetManager to re-scan its dashboard
+            % once detection is done. Resolves the live GUI object (the
+            % constructor may have re-used an already-open window, in which
+            % case this handle has no figure).
+            target = obj;
+            if isempty(target.hFig) || ~isvalid(target.hFig)
+                h = findobj(0, 'Tag', 'PNNBatchGUIMain');
+                if ~isempty(h) && isappdata(h(1), 'PNNBatchGUIObj')
+                    target = getappdata(h(1), 'PNNBatchGUIObj');
+                end
+            end
+            if ~isempty(target.hFig) && isvalid(target.hFig)
+                addlistener(target.hFig, 'ObjectBeingDestroyed', ...
+                    @(~,~) fcn());
+            end
+        end
+
     end  % public methods
 
     %% ---- Private methods -------------------------------------------------
@@ -170,10 +231,12 @@ classdef CellDiscovery < handle
                 'autoContrast',    true, ...
                 'savePng',         false, ...
                 'saveLsmTif',      false, ...
+                'diagnosticMode',  false, ...
                 'dotColorIdx',     1, ...
                 'dotSize',         '5', ...
                 'displayPreproc',  false, ...
                 'lsmOptions',      CellDiscovery.defaultLSMOptions(), ...
+                'snapOptions',     struct(), ...
                 'pageMapData',     {CellDiscovery.defaultPageMap()} ...
                 );
             obj.P = defaults;
@@ -202,6 +265,7 @@ classdef CellDiscovery < handle
             obj.P.autoContrast    = obj.hAutoContrast.Value;
             obj.P.savePng         = obj.hSavePng.Value;
             obj.P.saveLsmTif      = obj.hSaveLsmTif.Value;
+            obj.P.diagnosticMode  = obj.hDiagnosticChk.Value;
             obj.P.dotColorIdx     = find(strcmp(obj.hDotColorPop.Items, obj.hDotColorPop.Value), 1);
             obj.P.dotSize         = obj.hDotSizeEdit.Value;
             obj.P.displayPreproc  = obj.hDisplayPreprocChk.Value;
@@ -378,16 +442,29 @@ classdef CellDiscovery < handle
                 'ButtonPushedFcn', @obj.onLSMOptionsButton);
             obj.hLSMOptionsBtn.Layout.Row = 1; obj.hLSMOptionsBtn.Layout.Column = 2;
 
+            obj.hSnapOptionsBtn = uibutton(gMP, 'push', ...
+                'Text', 'Snap options...', ...
+                'Tooltip', ['Edit per-page parameters for the snapToCellCentroid post-processing step ' ...
+                '(localization refinement). The button is enabled when at least one page row has Snap checked.'], ...
+                'ButtonPushedFcn', @obj.onSnapOptionsButton);
+            obj.hSnapOptionsBtn.Layout.Row = 1; obj.hSnapOptionsBtn.Layout.Column = 1;
+
             lbl = uilabel(gMP, ...
                 'Text', 'Map a detection (and optional rescore) model to each TIFF page.', ...
                 'HorizontalAlignment', 'left', 'FontColor', [0.45 0.45 0.45], 'FontSize', 11);
             lbl.Layout.Row = 1; lbl.Layout.Column = [6 8];
 
             % --- Row 2: preprocessing controls ---
+            lbl = uilabel(gMP, ...
+                'Text', ['Snap: post-process each result to cell-mass centroids (snapToCellCentroid). ' ...
+                'Tick Snap per page; tune per-page parameters via "Snap options...".'], ...
+                'HorizontalAlignment', 'left', 'FontColor', [0.45 0.45 0.45], 'FontSize', 11);
+            lbl.Layout.Row = 2; lbl.Layout.Column = [1 6];
+
             obj.hDisplayPreprocChk = uicheckbox(gMP, ...
-                'Text', 'Show preprocessed image in results (default: raw page)', ...
+                'Text', 'Show resized image in results (default: raw page)', ...
                 'Value', logical(obj.P.displayPreproc), 'Tag', 'displayPreprocChk', ...
-                'Tooltip', ['When on, the result figure/PNG show the preprocessed image the model saw ' ...
+                'Tooltip', ['When on, the result figure/PNG show the resized image the model saw ' ...
                 '(background-subtracted / resized). When off, the raw page is shown with ' ...
                 'detections mapped onto it.'], ...
                 'ValueChangedFcn', @obj.onDisplayPreprocChange);
@@ -400,16 +477,17 @@ classdef CellDiscovery < handle
 
             obj.hPageTable = uitable(gMP, ...
                 'Data',          tableData, ...
-                'ColumnName',    {'Page','Suffix', 'Detection Model', 'Rescore Model', 'Correct LSM', 'Bg radius', 'Resize x'}, ...
-                'ColumnFormat',  {'numeric', 'char', detChoices, rescoreChoices, 'logical', 'numeric', 'numeric'}, ...
-                'ColumnEditable', [true true true true true true true], ...
-                'ColumnWidth',   {50, 70, 220, 300, 80, 80, 70}, ...
+                'ColumnName',    {'Page','Suffix', 'Detection Model', 'Rescore Model', 'LSM', 'Bg radius', 'Resize x', 'Snap'}, ...
+                'ColumnFormat',  {'numeric', 'char', detChoices, rescoreChoices, 'logical', 'numeric', 'numeric', 'logical'}, ...
+                'ColumnEditable', [true true true true true true true true], ...
+                'ColumnWidth',   {50, 70, 220, 300, 80, 80, 70, 60}, ...
                 'RowName',       {}, ...
                 'Tag',           'pageTable', ...
                 'CellEditCallback',      @obj.onPageTableEdit, ...
                 'CellSelectionCallback', @obj.onPageTableSelect);
             obj.hPageTable.Layout.Row = 3; obj.hPageTable.Layout.Column = [1 8];
             obj.updateLSMOptionsButton();
+            obj.updateSnapOptionsButton();
 
             %% ---- Row 4 — predict.py Options ----------------------------
             pPred = uipanel(rootGrid, 'Title', 'predict.py Options');
@@ -474,11 +552,11 @@ classdef CellDiscovery < handle
             %% ---- Row 5 — Display & Export ------------------------------
             pDisp = uipanel(rootGrid, 'Title', 'Display & Export Options');
             pDisp.Layout.Row = 5;
-            gDisp = uigridlayout(pDisp, [4 8]);
+            gDisp = uigridlayout(pDisp, [5 8]);
             gDisp.Padding       = [6 6 6 6];
             gDisp.RowSpacing    = 4;
             gDisp.ColumnSpacing = 4;
-            gDisp.RowHeight     = {22, 22, 20};
+            gDisp.RowHeight     = {22, 22, 20, 22};
             gDisp.ColumnWidth   = {'fit', 110, 'fit', 180, 'fit', 100, 'fit', 70};
 
             lbl = uilabel(gDisp, 'Text', 'Colormap:', 'HorizontalAlignment', 'left');
@@ -523,18 +601,29 @@ classdef CellDiscovery < handle
             obj.hSavePng.Layout.Row = 2; obj.hSavePng.Layout.Column = [1 8];
 
             obj.hSaveLsmTif = uicheckbox(gDisp, ...
-                'Text', 'Save final preprocessed image as TIF alongside each result CSV', ...
+                'Text', 'Save final resized image as TIF alongside each result CSV', ...
                 'Value', logical(obj.P.saveLsmTif), 'Tag', 'saveLsmTif', ...
-                'Tooltip', ['Exports  <stem>_preprocessed.tif  in the image subdirectory. ' ...
+                'Tooltip', ['Exports  <stem>_resized.tif  in the image subdirectory. ' ...
                 'Saves the image after LSM correction, background subtraction, and resize — ' ...
                 'the exact image the detection model received.'], ...
                 'ValueChangedFcn', @obj.onSaveLsmTifChange);
             obj.hSaveLsmTif.Layout.Row = 3; obj.hSaveLsmTif.Layout.Column = [1 8];
 
+            obj.hDiagnosticChk = uicheckbox(gDisp, ...
+                'Text', 'Diagnostic mode (pause after each page; show processing / snap images)', ...
+                'Value', logical(obj.P.diagnosticMode), 'Tag', 'diagnosticChk', ...
+                'Tooltip', ['When on, the batch pauses after each page and opens a diagnostic window ' ...
+                'showing the raw page, the preprocessed image the detector saw (LSM / background / ' ...
+                'resize), and — when Snap is enabled — the snap-input image with arrows from each ' ...
+                'original detection to its snapped location. Click Continue to proceed or Stop batch ' ...
+                'to end. May be toggled during a run to start/stop pausing.'], ...
+                'ValueChangedFcn', @obj.onDiagnosticChange);
+            obj.hDiagnosticChk.Layout.Row = 4; obj.hDiagnosticChk.Layout.Column = [1 8];
+
             lbl = uilabel(gDisp, ...
-                'Text', 'Display: raw page (or preprocessed image, see above) with detections overlaid; window is reused across pages', ...
+                'Text', 'Display: raw page (or resized image, see above) with detections overlaid; window is reused across pages', ...
                 'HorizontalAlignment', 'left', 'FontColor', [0.45 0.45 0.45], 'FontSize', 11);
-            lbl.Layout.Row = 4; lbl.Layout.Column = [1 8];
+            lbl.Layout.Row = 5; lbl.Layout.Column = [1 8];
 
             %% ---- Row 6 — Run Controls ----------------------------------
             pRun = uipanel(rootGrid, 'BorderType', 'line');
@@ -816,10 +905,11 @@ classdef CellDiscovery < handle
                 nextPage = max(pages) + 1;
             end
             defDet = detChoices{min(2, numel(detChoices))};   % first real model if any, else (skip)
-            newRow = {nextPage, sprintf('page%d',nextPage), defDet, obj.NONE_LABEL, false, 0, 1};
+            newRow = {nextPage, sprintf('page%d',nextPage), defDet, obj.NONE_LABEL, false, 0, 1, false};
             obj.hPageTable.Data = [data; newRow];
             obj.P.pageMapData   = obj.hPageTable.Data;
             obj.updateLSMOptionsButton();
+            obj.updateSnapOptionsButton();
             obj.savePrefs();
         end
 
@@ -836,12 +926,14 @@ classdef CellDiscovery < handle
             obj.hPageTable.Data  = data;
             obj.P.pageMapData    = data;
             obj.updateLSMOptionsButton();
+            obj.updateSnapOptionsButton();
             obj.savePrefs();
         end
 
         function onPageTableEdit(obj, ~, ~)
             obj.P.pageMapData = obj.hPageTable.Data;
             obj.updateLSMOptionsButton();
+            obj.updateSnapOptionsButton();
             obj.savePrefs();
         end
 
@@ -887,6 +979,26 @@ classdef CellDiscovery < handle
                 obj.hLSMOptionsBtn.Enable = 'on';
             else
                 obj.hLSMOptionsBtn.Enable = 'off';
+            end
+        end
+
+        function updateSnapOptionsButton(obj)
+            % Enable the snap-options button only when at least one page row is
+            % configured to run snapToCellCentroid post-processing (Snap column).
+            if isempty(obj.hSnapOptionsBtn) || ~isvalid(obj.hSnapOptionsBtn)
+                return;
+            end
+            data = obj.hPageTable.Data;
+            useSnap = false;
+            if iscell(data) && size(data, 2) >= 8
+                for r = 1:size(data, 1)
+                    useSnap = useSnap || CellToolkit.parseLogical(data{r,8}, false);
+                end
+            end
+            if useSnap
+                obj.hSnapOptionsBtn.Enable = 'on';
+            else
+                obj.hSnapOptionsBtn.Enable = 'off';
             end
         end
 
@@ -969,6 +1081,167 @@ classdef CellDiscovery < handle
             end
         end
 
+        function onSnapOptionsButton(obj, ~, ~)
+            % Modal, per-page editor for the snapToCellCentroid post-processing
+            % parameters. A page selector at the top lets each TIFF page (as
+            % listed in the page-mapping table) carry its own snap settings, so
+            % e.g. a PNN page can use the "oval" preset while a PV page uses
+            % "round". Settings are stored per page number in obj.P.snapOptions.
+            spec  = CellDiscovery.snapOptionSpec();
+            nOpt  = size(spec, 1);
+
+            % Distinct page numbers present in the page-mapping table.
+            data  = obj.hPageTable.Data;
+            pages = [];
+            suffByPage = containers.Map('KeyType', 'double', 'ValueType', 'char');
+            if iscell(data)
+                for r = 1:size(data, 1)
+                    pg = round(CellToolkit.parseNum(data{r,1}, 0));
+                    if pg >= 1 && ~ismember(pg, pages)
+                        pages(end+1) = pg; %#ok<AGROW>
+                        sfx = '';
+                        if size(data, 2) >= 2 && ischar(data{r,2}), sfx = data{r,2}; end
+                        suffByPage(pg) = sfx;
+                    end
+                end
+            end
+            if isempty(pages), pages = 1; suffByPage(1) = ''; end
+            pages = sort(pages);
+
+            % Working copy of each page's options (defaults filled in).
+            work = struct();
+            for pg = pages
+                work.(sprintf('page%d', pg)) = obj.resolveSnapOptionsForPage(pg);
+            end
+            curPage = pages(1);
+
+            pageItems = arrayfun(@(pg) ...
+                CellDiscovery.snapPageLabel(pg, suffByPage(pg)), pages, ...
+                'UniformOutput', false);
+
+            % Height tracks the option count so every row + the button strip
+            % stays visible as options are added.
+            dlgH = 32 * (nOpt + 2) + 34 + 40;
+            dlg = uifigure('Name', 'snapToCellCentroid post-processing options', ...
+                'WindowStyle', 'modal', 'Position', [100 100 640 dlgH]);
+            g = uigridlayout(dlg, [nOpt+3, 3]);
+            g.Padding = [10 10 10 10];
+            g.RowSpacing = 6;
+            g.ColumnSpacing = 8;
+            g.ColumnWidth = {180, '1x', 150};
+            g.RowHeight = [{26}, repmat({26}, 1, nOpt+1), {34}];
+
+            pgLab = uilabel(g, 'Text', 'Configure page:', 'FontWeight', 'bold', ...
+                'HorizontalAlignment', 'right');
+            pgLab.Layout.Row = 1; pgLab.Layout.Column = 1;
+            pgDrop = uidropdown(g, 'Items', pageItems, 'Value', pageItems{1}, ...
+                'Tooltip', 'Pick which TIFF page these snap parameters apply to.', ...
+                'ValueChangedFcn', @onPageChange);
+            pgDrop.Layout.Row = 1; pgDrop.Layout.Column = [2 3];
+
+            hdr1 = uilabel(g, 'Text', 'Parameter', 'FontWeight', 'bold');
+            hdr1.Layout.Row = 2; hdr1.Layout.Column = 1;
+            hdr2 = uilabel(g, 'Text', 'Value', 'FontWeight', 'bold');
+            hdr2.Layout.Row = 2; hdr2.Layout.Column = 2;
+            hdr3 = uilabel(g, 'Text', 'Default', 'FontWeight', 'bold');
+            hdr3.Layout.Row = 2; hdr3.Layout.Column = 3;
+
+            w = struct();
+            for k = 1:nOpt
+                nm   = spec{k,1};
+                kind = spec{k,2};
+                tip  = spec{k,5};
+                lab = uilabel(g, 'Text', nm, 'Tooltip', tip, 'HorizontalAlignment', 'right');
+                lab.Layout.Row = k + 2; lab.Layout.Column = 1;
+                switch kind
+                    case 'enum'
+                        w.(nm) = uidropdown(g, 'Items', spec{k,3}, 'Tooltip', tip);
+                    case 'bool'
+                        w.(nm) = uicheckbox(g, 'Text', '', 'Tooltip', tip);
+                    otherwise   % 'num' / 'text' — free text ('auto' = use preset)
+                        w.(nm) = uieditfield(g, 'text', 'Tooltip', tip);
+                end
+                w.(nm).Layout.Row = k + 2; w.(nm).Layout.Column = 2;
+                defLab = uilabel(g, 'Text', CellDiscovery.lsmOptionValueToText(spec{k,4}), ...
+                    'Tooltip', tip, 'FontColor', [0.45 0.45 0.45]);
+                defLab.Layout.Row = k + 2; defLab.Layout.Column = 3;
+            end
+
+            btnGrid = uigridlayout(g, [1 3]);
+            btnGrid.Padding = [0 0 0 0];
+            btnGrid.ColumnWidth = {'1x', 100, 100};
+            btnGrid.Layout.Row = nOpt + 3; btnGrid.Layout.Column = [1 3];
+
+            resetBtn = uibutton(btnGrid, 'push', 'Text', 'Reset page', ...
+                'Tooltip', 'Restore this page''s snap parameters to default values.', ...
+                'ButtonPushedFcn', @resetOptions);
+            resetBtn.Layout.Row = 1; resetBtn.Layout.Column = 1;
+            cancelBtn = uibutton(btnGrid, 'push', 'Text', 'Cancel', ...
+                'ButtonPushedFcn', @(~,~) delete(dlg));
+            cancelBtn.Layout.Row = 1; cancelBtn.Layout.Column = 2;
+            okBtn = uibutton(btnGrid, 'push', 'Text', 'OK', ...
+                'Tooltip', 'Save snap parameters for every page and close.', ...
+                'ButtonPushedFcn', @saveAll);
+            okBtn.Layout.Row = 1; okBtn.Layout.Column = 3;
+
+            loadWidgets(work.(sprintf('page%d', curPage)));
+
+            function s = readWidgets()
+                s = struct();
+                for q = 1:nOpt
+                    nmq = spec{q,1};
+                    switch spec{q,2}
+                        case 'enum'
+                            s.(nmq) = char(w.(nmq).Value);
+                        case 'bool'
+                            s.(nmq) = CellToolkit.ternary(w.(nmq).Value, 'true', 'false');
+                        otherwise
+                            s.(nmq) = strtrim(w.(nmq).Value);
+                    end
+                end
+            end
+
+            function loadWidgets(s)
+                s = CellDiscovery.sanitizeSnapOptions(s);
+                for q = 1:nOpt
+                    nmq = spec{q,1};
+                    val = s.(nmq);
+                    switch spec{q,2}
+                        case 'enum'
+                            CellToolkit.setDropDownValue(w.(nmq), val);
+                        case 'bool'
+                            w.(nmq).Value = CellToolkit.parseLogical(val, false);
+                        otherwise
+                            w.(nmq).Value = CellDiscovery.lsmOptionValueToText(val);
+                    end
+                end
+            end
+
+            function onPageChange(src, ~)
+                work.(sprintf('page%d', curPage)) = readWidgets();   % stash current
+                idx = find(strcmp(pageItems, src.Value), 1);
+                if isempty(idx), idx = 1; end
+                curPage = pages(idx);
+                loadWidgets(work.(sprintf('page%d', curPage)));
+            end
+
+            function resetOptions(~, ~)
+                loadWidgets(CellDiscovery.defaultSnapOptions());
+            end
+
+            function saveAll(~, ~)
+                work.(sprintf('page%d', curPage)) = readWidgets();   % stash current
+                newOpts = struct();
+                for q = 1:numel(pages)
+                    key = sprintf('page%d', pages(q));
+                    newOpts.(key) = CellDiscovery.sanitizeSnapOptions(work.(key));
+                end
+                obj.P.snapOptions = newOpts;
+                obj.savePrefs();
+                delete(dlg);
+            end
+        end
+
 
         %% Callbacks: predict.py options
 
@@ -1016,6 +1289,11 @@ classdef CellDiscovery < handle
 
         function onSaveLsmTifChange(obj, src, ~)
             obj.P.saveLsmTif = src.Value;
+            obj.savePrefs();
+        end
+
+        function onDiagnosticChange(obj, src, ~)
+            obj.P.diagnosticMode = src.Value;
             obj.savePrefs();
         end
 
@@ -1101,7 +1379,7 @@ classdef CellDiscovery < handle
                 return;
             end
 
-            % Scratch directory for preprocessed page images.
+            % Scratch directory for resized page images.
             obj.tmpDir = fullfile(tempdir, 'CellDiscovery');
             if ~isfolder(obj.tmpDir)
                 try mkdir(obj.tmpDir); catch, end
@@ -1181,8 +1459,13 @@ classdef CellDiscovery < handle
                     bg = CellToolkit.parseNum(mapData{r,6}, 0);
                     rz = CellToolkit.parseNum(mapData{r,7}, 1);
                     if rz <= 0, rz = 1; end
+                    snapOn = false;
+                    if size(mapData, 2) >= 8
+                        snapOn = CellToolkit.parseLogical(mapData{r,8}, false);
+                    end
+                    snapOpts = obj.resolveSnapOptionsForPage(pg);
                     job = CellDiscovery.makeJob( ...
-                        f, fdir, stem, ext, mapData{r,2}, pg, nPages, true, detM, rescM, correctLSM, bg, rz, obj.P.lsmOptions);
+                        f, fdir, stem, ext, mapData{r,2}, pg, nPages, true, detM, rescM, correctLSM, bg, rz, obj.P.lsmOptions, snapOn, snapOpts);
                     job.firstPage = firstPageForFile;
                     jobs{end+1} = job; %#ok<AGROW>
                     firstPageForFile = false;
@@ -1306,18 +1589,22 @@ classdef CellDiscovery < handle
             batchSize  = strtrim(obj.hBatchEdit.Value);
             threshold  = strtrim(obj.hThrEdit.Value);
 
-            % Core predict.py arguments. predict.py runs on the preprocessed
+            % Core predict.py arguments. predict.py runs on the resized
             % scratch image; coordinates are mapped back to original-image space
-            % in postProcess. A blank/NaN threshold and an empty rescore model
-            % are omitted by CellToolkit.predictArgs. Paths may contain spaces —
+            % in postProcess. A blank/NaN threshold is omitted by
+            % CellToolkit.predictArgs. Paths may contain spaces —
             % launchPythonAsync passes each token as a separate argument, so no
             % quoting is needed (conda-run wrapping is applied by the toolkit).
+            %
+            % Detection ONLY: Stage-2 rescoring (job.rescoreModel) is deferred
+            % to postProcess so it runs AFTER snapToCellCentroid refinement,
+            % letting the scoring model crop patches centred on the snapped
+            % cell locations rather than the raw detected ones.
             predOpts = struct( ...
                 'output',       job.tmpCsv, ...
                 'device',       device, ...
                 'batchSize',    batchSize, ...
-                'threshold',    threshold, ...
-                'rescoreModel', job.rescoreModel);
+                'threshold',    threshold);
             args = CellToolkit.predictArgs(job.detModel, job.tmpImg, predOpts);
             cfg  = obj.pythonCfg();
 
@@ -1338,7 +1625,7 @@ classdef CellDiscovery < handle
 
 
         function postProcess(obj, job)
-            % Read predict.py output (in preprocessed/resized coordinates),
+            % Read predict.py output (in resized/resized coordinates),
             % map detections back to original-image space, write the final
             % CSV(s), and render/optionally export the result figure.
             imgDir = job.imgDir;
@@ -1372,6 +1659,54 @@ classdef CellDiscovery < handle
                 if hasX, locsOrig.X = locs.X / f; end
                 if hasY, locsOrig.Y = locs.Y / f; end
             end
+
+            % --- Optional localization refinement (snapToCellCentroid) ---------
+            % Runs in original-image space on the preprocessed source-resolution
+            % page (the same joint-LSM + background-subtracted pixels the
+            % detector saw, minus the resize). Adds non-destructive
+            % SNAP_X/Y/Shift/Snapped columns and, when configured, overwrites
+            % X/Y with the snapped coordinates. Best effort: a snap failure
+            % never blocks writing the detection CSV.
+            %
+            % Snapshot the pre-snap detection coordinates (original-image space)
+            % so the diagnostic view can draw arrows from each original point to
+            % its snapped location even when ApplyToXY overwrites X/Y below.
+            diagFromX = []; diagFromY = [];
+            if hasX && hasY
+                diagFromX = locsOrig.X;
+                diagFromY = locsOrig.Y;
+            end
+            if isfield(job, 'snapEnable') && job.snapEnable && nDets > 0 && hasX && hasY
+                try
+                    locsOrig = obj.applySnap(job, locsOrig);
+                catch ME
+                    fprintf('[WARN] Snap failed for %s: %s\n', job.label, ME.message);
+                end
+            end
+
+            % --- Stage-2 rescoring (score.py), AFTER detection + snap ----------
+            % Deferred out of the predict.py call so the scoring model crops its
+            % 64x64 patches around the snapped (refined) cell centres. Scoring
+            % runs on the resized detector-input scratch image at the training
+            % pixel size, so applyRescore maps the snapped original-space
+            % coordinates back into resized space. The computed scores populate
+            % the 'rescore' column on both the original- and resized-coordinate
+            % tables. Best effort: a scoring failure never blocks the CSV write.
+            if isfield(job, 'rescoreModel') && ~isempty(job.rescoreModel) ...
+                    && nDets > 0 && hasX && hasY
+                try
+                    rv = obj.applyRescore(job, locsOrig, f);
+                catch ME
+                    rv = [];
+                    fprintf('[WARN] Rescore failed for %s: %s\n', job.label, ME.message);
+                end
+                if ~isempty(rv)
+                    locsOrig.rescore = rv;
+                    locs.rescore     = rv;
+                    hasRescore       = true;
+                end
+            end
+
             try
                 writetable(locsOrig, job.outCsvOrig);
                 fprintf('[CSV ] Saved: %s\n', job.outCsvOrig);
@@ -1387,9 +1722,31 @@ classdef CellDiscovery < handle
                 end
             end
 
-            % --- Optionally save the preprocessed image as TIF ---
+            % --- Record the detection (and any rescoring) in the dataset
+            %     manifest (CellDatasetManifest) so the active analysis file,
+            %     analyzed image/pages and provenance are the authoritative
+            %     record every other Cell* tool reads. Best effort: never let
+            %     manifest bookkeeping disrupt a batch run. ---
+            try
+                mf  = CellDatasetManifest.forImage(job.imgFile);
+                key = CellDatasetManifest.keyForCsv(job.outCsvOrig);
+                mf.recordDetection(key, struct('image', job.imgFile, ...
+                    'page', job.page, 'locs', job.outCsvOrig, ...
+                    'tool', 'CellDiscovery', 'model', job.detModel, 'count', nDets));
+                if f ~= 1 && ~isempty(job.outCsvResized)
+                    mf.recordResized(key, job.outCsvResized, job.outTif);
+                end
+                if ~isempty(job.rescoreModel) && hasRescore
+                    mf.recordRescore(key, struct('tool', 'CellDiscovery', ...
+                        'model', job.rescoreModel));
+                end
+                mf.save();
+            catch
+            end
+
+            % --- Optionally save the resized image as TIF ---
             % Written once per source file (on the first job for that file).
-            % All pages of the source file are preprocessed using the page-map
+            % All pages of the source file are resized using the page-map
             % settings for each page (falling back to no-op for unmapped pages)
             % so the output TIF has the same number of pages as the input TIF.
             if obj.hSaveLsmTif.Value && job.firstPage
@@ -1412,7 +1769,7 @@ classdef CellDiscovery < handle
             plotsX = []; plotsY = [];
             try
                 if showPreproc
-                    img = imread(job.tmpImg);   % preprocessed (resized) image
+                    img = imread(job.tmpImg);   % resized (resized) image
                     if hasX && hasY, plotsX = locs.X;     plotsY = locs.Y;     end
                 else
                     img = CellToolkit.readPage(job.imgFile, job.page, job.nPages);
@@ -1531,8 +1888,301 @@ classdef CellDiscovery < handle
                     fprintf('[WARN] PNG save failed for: %s\n', job.label);
                 end
             end
+
+            % --- Optional diagnostic pause -------------------------------------
+            % When Diagnostic mode is enabled, open a window showing the images
+            % this page passed through (raw page, the preprocessed detector
+            % input, and — when snap ran — the snap-input image with
+            % original->snapped arrows) and block the batch until the user
+            % continues or stops. Read live so the checkbox can be toggled
+            % mid-run. Best effort — a diagnostic failure never disrupts the run.
+            if ~isempty(obj.hDiagnosticChk) && isvalid(obj.hDiagnosticChk) ...
+                    && obj.hDiagnosticChk.Value
+                try
+                    obj.diagnosticPause(job, locs, locsOrig, diagFromX, diagFromY);
+                catch ME
+                    fprintf('[WARN] Diagnostic display failed for %s: %s\n', ...
+                        job.label, ME.message);
+                end
+            end
         end
 
+
+        function diagnosticPause(obj, job, locs, locsOrig, diagFromX, diagFromY)
+            % DIAGNOSTICPAUSE  Show the images this page passed through and block
+            % the batch until the user continues or stops.
+            %
+            % Opens (and reuses) a diagnostic window with one axes per relevant
+            % image:
+            %   * Raw page        — the unprocessed input page
+            %   * Detector input  — raw after LSM / background / resize (the
+            %                       pixels predict.py saw), with detections
+            %                       overlaid
+            %   * Snap input      — (only when Snap ran) the source-resolution
+            %                       preprocessed page snap operated on, with an
+            %                       arrow from each original detection to its
+            %                       snapped location
+            %
+            % Execution blocks in uiwait until the user clicks Continue (resume
+            % the batch), Stop batch (request a stop, then resume so the timer
+            % can wind down), or closes the window (treated as Continue).
+            %
+            %   locs        detections in resized (detector) coordinates
+            %   locsOrig    detections in original-image coordinates, carrying any
+            %               SNAP_* columns added by applySnap
+            %   diagFromX/Y pre-snap detection coordinates (original space)
+
+            % --- Gather the images used for processing / postprocessing ---
+            raw = [];
+            try raw = CellToolkit.readPage(job.imgFile, job.page, job.nPages); catch, end
+
+            detImg = [];
+            if ~isempty(obj.preprocCache) && isfield(obj.preprocCache, 'pages') ...
+                    && job.page >= 1 && job.page <= numel(obj.preprocCache.pages)
+                detImg = obj.preprocCache.pages{job.page};
+            end
+            if isempty(detImg)
+                try detImg = imread(job.tmpImg); catch, end
+            end
+
+            snapRan = isfield(job, 'snapEnable') && job.snapEnable ...
+                && ismember('SNAP_X', locsOrig.Properties.VariableNames);
+            snapImg = [];
+            if snapRan
+                if ~isempty(obj.preprocCache) && isfield(obj.preprocCache, 'pagesFull') ...
+                        && job.page >= 1 && job.page <= numel(obj.preprocCache.pagesFull)
+                    snapImg = obj.preprocCache.pagesFull{job.page};
+                end
+                if isempty(snapImg), snapImg = raw; end
+            end
+
+            % --- Build / refresh the diagnostic figure ---
+            hDiag = findobj(0, 'Tag', 'PNNDiagFig');
+            if isempty(hDiag)
+                hDiag = figure('Tag', 'PNNDiagFig', 'Name', 'Processing diagnostic', ...
+                    'NumberTitle', 'off', 'Color', 'w', 'Position', [120 90 1180 760]);
+            else
+                hDiag = hDiag(1);
+                figure(hDiag);
+                clf(hDiag);
+            end
+
+            nPanels  = 2 + double(snapRan);
+            cmapName = obj.hColormapPop.Value;
+
+            uicontrol(hDiag, 'Style', 'text', 'Units', 'normalized', ...
+                'Position', [0 0.94 1 0.05], 'BackgroundColor', 'w', ...
+                'FontWeight', 'bold', 'FontSize', 12, 'String', job.label);
+
+            % One row of equal-width axes, leaving the bottom strip for controls.
+            margin = 0.035; gap = 0.03; aBottom = 0.14; aHeight = 0.76;
+            aWidth = (1 - 2*margin - (nPanels-1)*gap) / nPanels;
+            axPos  = @(k) [margin + (k-1)*(aWidth+gap), aBottom, aWidth, aHeight];
+
+            % Panel 1 — raw page
+            ax1 = axes('Parent', hDiag, 'Position', axPos(1));
+            CellDiscovery.showDiagImage(ax1, raw, cmapName);
+            title(ax1, 'Raw page', 'Interpreter', 'none');
+
+            % Panel 2 — preprocessed image the detector saw
+            ax2 = axes('Parent', hDiag, 'Position', axPos(2));
+            CellDiscovery.showDiagImage(ax2, detImg, cmapName);
+            title(ax2, sprintf('Detector input  (%s)', CellDiscovery.preprocSummary(job)), ...
+                'Interpreter', 'none');
+            if all(ismember({'X','Y'}, locs.Properties.VariableNames)) && height(locs) > 0
+                hold(ax2, 'on');
+                plot(ax2, locs.X, locs.Y, 'o', 'MarkerEdgeColor', [1 1 0], ...
+                    'MarkerSize', 4, 'LineWidth', 0.5);
+                hold(ax2, 'off');
+            end
+
+            % Panel 3 — snap input with original -> snapped arrows
+            if snapRan
+                nSnapped = 0;
+                if ismember('SNAP_Snapped', locsOrig.Properties.VariableNames)
+                    nSnapped = sum(logical(locsOrig.SNAP_Snapped));
+                end
+                ax3 = axes('Parent', hDiag, 'Position', axPos(3));
+                CellDiscovery.showDiagImage(ax3, snapImg, cmapName);
+                title(ax3, sprintf('Snap input (source res):  %d snapped, original \\rightarrow new', ...
+                    nSnapped), 'Interpreter', 'tex');
+                CellDiscovery.drawSnapArrows(ax3, diagFromX, diagFromY, locsOrig);
+            end
+
+            % --- Pause controls ---
+            uicontrol(hDiag, 'Style', 'text', 'Units', 'normalized', ...
+                'Position', [0.035 0.005 0.5 0.085], 'BackgroundColor', 'w', ...
+                'HorizontalAlignment', 'left', 'FontSize', 9, ...
+                'String', sprintf(['Diagnostic pause (page %d/%d).  Review the images, then ' ...
+                'Continue or Stop.  Untick "Diagnostic mode" in the main window to stop pausing.'], ...
+                job.page, job.nPages));
+            uicontrol(hDiag, 'Style', 'pushbutton', 'Units', 'normalized', ...
+                'Position', [0.59 0.02 0.18 0.07], 'FontWeight', 'bold', ...
+                'String', 'Continue', 'Callback', @(~,~) uiresume(hDiag));
+            uicontrol(hDiag, 'Style', 'pushbutton', 'Units', 'normalized', ...
+                'Position', [0.79 0.02 0.18 0.07], 'ForegroundColor', [0.6 0 0], ...
+                'String', 'Stop batch', 'Callback', @onStopDiag);
+            % While paused, closing the window just continues (don't destroy the
+            % reusable figure); restore normal close behaviour afterwards.
+            hDiag.CloseRequestFcn = @(~,~) uiresume(hDiag);
+            drawnow;
+            uiwait(hDiag);
+            if isvalid(hDiag)
+                hDiag.CloseRequestFcn = 'closereq';
+            end
+
+            function onStopDiag(~, ~)
+                obj.stopRequested = true;
+                fprintf('[STOP] Stop requested from diagnostic window.\n');
+                if isvalid(hDiag), uiresume(hDiag); end
+            end
+        end
+
+
+        function s = resolveSnapOptionsForPage(obj, pageNum)
+            % Resolve the stored snapToCellCentroid options for a page number,
+            % falling back to defaults for any page that has not been configured.
+            s   = CellDiscovery.defaultSnapOptions();
+            key = sprintf('page%d', round(pageNum));
+            if isstruct(obj.P.snapOptions) && isfield(obj.P.snapOptions, key) ...
+                    && isstruct(obj.P.snapOptions.(key))
+                s = CellDiscovery.sanitizeSnapOptions(obj.P.snapOptions.(key));
+            end
+        end
+
+        function T = applySnap(obj, job, T)
+            % Run snapToCellCentroid on a localization table (original-image
+            % coordinates), returning the table with SNAP_X/Y/Shift/Snapped
+            % columns added. When the page's ApplyToXY option is set, the
+            % snapped coordinates overwrite X/Y for the points that moved.
+            %
+            % Snap operates on the preprocessed page at SOURCE resolution
+            % (joint-LSM + background subtraction, no resize) — the same pixels
+            % the detector saw apart from the resampling. Using the source
+            % resolution keeps the table's coordinates and the snap PixelSize in
+            % original-image space, so no resize remapping is needed.
+            if exist('snapToCellCentroid', 'file') ~= 2
+                fprintf('[WARN] snapToCellCentroid.m is not on the MATLAB path; skipping snap for %s.\n', job.label);
+                return;
+            end
+            if ~all(ismember({'X','Y'}, T.Properties.VariableNames)) || height(T) == 0
+                return;
+            end
+
+            opts    = CellDiscovery.sanitizeSnapOptions(job.snapOptions);
+            args    = CellDiscovery.snapOptionsToNameValue(opts);
+            applyXY = CellToolkit.parseLogical(opts.ApplyToXY, false);
+
+            % Pull the preprocessed source-resolution page from the per-file
+            % cache (recomputed only if the cache is not for this file). Fall
+            % back to the raw page if, for any reason, the cache lacks it.
+            snapImg = [];
+            try
+                obj.ensurePreprocCache(job.imgFile, job.nPages);
+                if isfield(obj.preprocCache, 'pagesFull') ...
+                        && job.page >= 1 && job.page <= numel(obj.preprocCache.pagesFull)
+                    snapImg = obj.preprocCache.pagesFull{job.page};
+                end
+            catch
+            end
+            if isempty(snapImg)
+                snapImg = CellToolkit.readPage(job.imgFile, job.page, job.nPages);
+            end
+            [T, info] = snapToCellCentroid(snapImg, T, args{:});
+
+            if applyXY && ismember('SNAP_Snapped', T.Properties.VariableNames)
+                sn = logical(T.SNAP_Snapped);
+                if any(sn)
+                    T.X(sn) = T.SNAP_X(sn);
+                    T.Y(sn) = T.SNAP_Y(sn);
+                end
+            end
+
+            applyTxt = CellToolkit.ternary(applyXY, ' (applied to X/Y)', ' (columns only)');
+            fprintf('[SNAP] %s: %d / %d point(s) snapped%s\n', ...
+                job.label, info.NumSnapped, info.NumPoints, applyTxt);
+        end
+
+        function rv = applyRescore(obj, job, locsOrig, f)
+            % Run Stage-2 rescoring (score.py) AFTER detection and snap.
+            % Returns an N-by-1 rescore vector aligned to locsOrig's rows, or []
+            % on skip/failure (best effort: never blocks writing the CSV).
+            %
+            % Scoring crops 64x64 patches from the resized detector-input
+            % scratch image (job.tmpImg) at the training pixel size, so the
+            % (snapped) original-image coordinates are mapped back into resized
+            % space (* the resize factor f). When snap ran, SNAP_X/SNAP_Y carry
+            % the refined centres (snapped points moved, unsnapped points keep
+            % their original location), so the model sees crops centred on the
+            % best available cell location regardless of the ApplyToXY setting.
+            rv = [];
+            n  = height(locsOrig);
+            if isempty(job.rescoreModel) || n == 0, return; end
+            if exist(job.tmpImg, 'file') ~= 2
+                fprintf('[WARN] Scratch image missing; skipping rescore for %s.\n', job.label);
+                return;
+            end
+
+            % Effective scoring centres in original-image space.
+            vn = locsOrig.Properties.VariableNames;
+            if all(ismember({'SNAP_X','SNAP_Y'}, vn))
+                ex = locsOrig.SNAP_X; ey = locsOrig.SNAP_Y;
+            else
+                ex = locsOrig.X;      ey = locsOrig.Y;
+            end
+            if ~isnumeric(ex), ex = str2double(string(ex)); end
+            if ~isnumeric(ey), ey = str2double(string(ey)); end
+            live = ~isnan(ex) & ~isnan(ey);
+            keys = find(live);
+            if isempty(keys), return; end
+
+            % Write the score.py input. score.py consumes the first column as
+            % the DataFrame index, derives integer crop centres from Yp/Xp, and
+            % resolves imgName against --root. rescore_key rides through so the
+            % score can be merged back onto the right rows afterwards.
+            [~, imgStem, imgExt] = fileparts(job.tmpImg);
+            nLive = numel(keys);
+            inTbl = table();
+            inTbl.idx         = (0:nLive-1)';
+            inTbl.imgName     = repmat(string([imgStem imgExt]), nLive, 1);
+            inTbl.Xp          = double(ex(live)) * f;   % original -> resized space
+            inTbl.Yp          = double(ey(live)) * f;
+            inTbl.rescore_key = keys;
+
+            tmpInCsv = fullfile(obj.tmpDir, [imgStem '_scorein.csv']);
+            tmpOut   = fullfile(obj.tmpDir, [imgStem '_scoreout.csv']);
+            cleanup  = onCleanup(@() CellToolkit.deleteFiles({tmpInCsv, tmpOut})); %#ok<NASGU>
+            writetable(inTbl, tmpInCsv);
+
+            args = CellToolkit.scoreArgs(char(job.rescoreModel), tmpInCsv, struct( ...
+                'root',      obj.tmpDir, ...
+                'device',    strtrim(obj.hDeviceEdit.Value), ...
+                'batchSize', strtrim(obj.hBatchEdit.Value), ...
+                'output',    tmpOut));
+            cfg = obj.pythonCfg();
+            fprintf('[SCORE] %s\n  CMD: %s\n', job.label, ...
+                CellToolkit.commandString(CellToolkit.pythonCommandParts(cfg, args)));
+            [status, out] = CellToolkit.runPython(cfg, args);
+            if status ~= 0 || exist(tmpOut, 'file') ~= 2
+                fprintf(2, '[WARN] Rescore failed for %s (exit %d):\n%s\n', ...
+                    job.label, status, out);
+                return;
+            end
+
+            R   = readtable(tmpOut, 'VariableNamingRule', 'preserve');
+            rvn = string(R.Properties.VariableNames);
+            if ~all(ismember(["rescore_key","rescore"], rvn))
+                fprintf(2, '[WARN] Rescore output missing expected columns for %s.\n', job.label);
+                return;
+            end
+            rk = R.rescore_key; if ~isnumeric(rk), rk = str2double(string(rk)); end
+            rs = R.rescore;     if ~isnumeric(rs), rs = str2double(string(rs)); end
+            rv = nan(n, 1);
+            ok = rk >= 1 & rk <= n;
+            rv(rk(ok)) = rs(ok);
+            fprintf('[SCORE] %s: rescored %d / %d point(s)\n', ...
+                job.label, sum(~isnan(rv)), n);
+        end
 
         function ensurePreprocCache(obj, imgFile, nPages)
             % Preprocess every page of imgFile exactly once and cache the result
@@ -1544,13 +2194,14 @@ classdef CellDiscovery < handle
                     && strcmp(obj.preprocCache.imgFile, imgFile)
                 return;   % cache already valid for this file
             end
-            mapData        = obj.hPageTable.Data;
-            [pages, rzArr] = CellDiscovery.preprocessAllPages(imgFile, nPages, mapData, obj.P.lsmOptions);
-            obj.preprocCache = struct('imgFile', imgFile, 'pages', {pages}, 'rzArr', rzArr);
+            mapData                   = obj.hPageTable.Data;
+            [pages, rzArr, pagesFull] = CellDiscovery.preprocessAllPages(imgFile, nPages, mapData, obj.P.lsmOptions);
+            obj.preprocCache = struct('imgFile', imgFile, 'pages', {pages}, ...
+                'rzArr', rzArr, 'pagesFull', {pagesFull});
         end
 
         function writeFullPreprocTif(obj, job)
-            % Write a multi-page preprocessed TIF whose page count matches the
+            % Write a multi-page resized TIF whose page count matches the
             % source file, using the already-computed per-file cache so the saved
             % image is byte-identical to what the detection model received.
             obj.ensurePreprocCache(job.imgFile, job.nPages);
@@ -1558,7 +2209,7 @@ classdef CellDiscovery < handle
             rzArr  = obj.preprocCache.rzArr;
             nPages = numel(pages);
 
-            fprintf('[TIF ] Writing %d-page preprocessed TIF: %s\n', nPages, job.outTif);
+            fprintf('[TIF ] Writing %d-page resized TIF: %s\n', nPages, job.outTif);
 
             % All pages are written in a SINGLE Tiff session: open once, write
             % page 1, then writeDirectory() + write for each subsequent page,
@@ -1570,7 +2221,7 @@ classdef CellDiscovery < handle
                 for pg = 1:nPages
                     % Carry the source page's spatial calibration forward,
                     % scaling pixels-per-unit by the resize factor so the
-                    % preprocessed image reports the correct physical pixel size.
+                    % resized image reports the correct physical pixel size.
                     res = CellDiscovery.readPageResInfo(job.imgFile, pg);
 
                     if pg > 1
@@ -1614,7 +2265,7 @@ classdef CellDiscovery < handle
                 delete(obj.timerObj);
             end
             obj.timerObj = [];
-            obj.preprocCache = [];   % release cached preprocessed pages
+            obj.preprocCache = [];   % release cached resized pages
 
             if obj.stopRequested
                 msg = sprintf('Stopped by user  (%d / %d job(s) processed).', ...
@@ -1647,13 +2298,14 @@ classdef CellDiscovery < handle
                 obj.hDotColorPop, obj.hDotSizeEdit, ...
                 obj.hPerPageChk,  obj.hAddPageBtn,   obj.hDelPageBtn, ...
                 obj.hPreprocGlobalChk, obj.hGlobalBgEdit, obj.hGlobalResizeEdit, ...
-                obj.hDisplayPreprocChk, obj.hLSMOptionsBtn, obj.hPageTable, ...
+                obj.hDisplayPreprocChk, obj.hLSMOptionsBtn, obj.hSnapOptionsBtn, obj.hPageTable, ...
                 obj.hFileList,    obj.hStartBtn};
             for k = 1:numel(ctrls)
                 try ctrls{k}.Enable = state; catch, end
             end
             if isequal(state, true) || isequal(state, 'on')
                 obj.updateLSMOptionsButton();
+                obj.updateSnapOptionsButton();
             end
         end
 
@@ -1689,9 +2341,11 @@ classdef CellDiscovery < handle
             end
         end
 
-        function job = makeJob(f, fdir, stem, ext, suffix, pg, nPages, multiPage, detM, rescM, correctLSM, bg, rz, lsmOptions)
+        function job = makeJob(f, fdir, stem, ext, suffix, pg, nPages, multiPage, detM, rescM, correctLSM, bg, rz, lsmOptions, snapEnable, snapOptions)
             % Assemble a single processing-job struct. Output filenames use a
             % per-page suffix only for genuine multi-page jobs.
+            if nargin < 15, snapEnable = false; end
+            if nargin < 16, snapOptions = CellDiscovery.defaultSnapOptions(); end
             if multiPage
                 base    = sprintf('%s_%s%d', stem, suffix, pg);
                 imgName = base;                              % identity in CSV
@@ -1715,10 +2369,12 @@ classdef CellDiscovery < handle
             job.rescoreModel = rescM;     % '' = no rescoring
             job.correctLSM   = logical(correctLSM);  % true = correct bidirectional LSM artifact
             job.lsmOptions   = CellDiscovery.sanitizeLSMOptions(lsmOptions);
+            job.snapEnable   = logical(snapEnable);  % true = run snapToCellCentroid post-processing
+            job.snapOptions  = CellDiscovery.sanitizeSnapOptions(snapOptions);
             job.bgRadius     = bg;        % 0 = no background subtraction
             job.resize       = rz;        % 1 = no resizing
             job.outCsvOrig   = fullfile(fdir, [base '_locs.csv']);
-            job.outTif       = fullfile(fdir, [stem '_preprocessed.tif']);   % shared across pages
+            job.outTif       = fullfile(fdir, [stem '_resized.tif']);   % shared across pages
             if rz ~= 1
                 job.outCsvResized = fullfile(fdir, [base '_locs_resized.csv']);
             else
@@ -1754,7 +2410,7 @@ classdef CellDiscovery < handle
                 end
             end
             if resizeFactor > 0 && resizeFactor ~= 1
-                img = imresize(img, resizeFactor);
+                img = imresize(img, resizeFactor, 'lanczos3', 'Antialiasing', true, 'Colormap', 'original', 'Dither', false);
             end
         end
 
@@ -1902,7 +2558,7 @@ classdef CellDiscovery < handle
         function data = defaultPageMap()
             % One default page-map row. The empty detection-model cell is coerced
             % to the first real model by sanitizePageMap once models are known.
-            data = {1, '', '(none)', '(none)', false, 0, 1};
+            data = {1, '', '(none)', '(none)', false, 0, 1, false};
         end
 
         function data = sanitizePageMap(data, detChoices, rescoreChoices)
@@ -1912,8 +2568,14 @@ classdef CellDiscovery < handle
             if isempty(data) || ~iscell(data)
                 data = CellDiscovery.defaultPageMap();
             elseif size(data, 2) == 6
-                data = [data(:,1:4), repmat({false}, size(data,1), 1), data(:,5:6)];
-            elseif size(data, 2) ~= 7
+                % Legacy (pre-LSM, pre-Snap): insert Correct LSM after Rescore
+                % model, then append Snap.
+                data = [data(:,1:4), repmat({false}, size(data,1), 1), data(:,5:6), ...
+                        repmat({false}, size(data,1), 1)];
+            elseif size(data, 2) == 7
+                % Pre-Snap layout: append the Snap column.
+                data = [data, repmat({false}, size(data,1), 1)];
+            elseif size(data, 2) ~= 8
                 data = CellDiscovery.defaultPageMap();
             end
             detFallback = detChoices{min(2, numel(detChoices))};   % first real model if any
@@ -1943,12 +2605,133 @@ classdef CellDiscovery < handle
                 z = CellToolkit.parseNum(data{r,7}, 1);
                 if z <= 0, z = 1; end
                 data{r,7} = z;
+                % Snap (snapToCellCentroid post-processing)
+                data{r,8} = CellToolkit.parseLogical(data{r,8}, false);
             end
         end
 
-        function [pages, rzArr] = preprocessAllPages(imgFile, nPages, mapData, lsmOptions)
+        function spec = snapOptionSpec()
+            % Per-page snapToCellCentroid options exposed in the Snap dialog.
+            % Columns: {name, kind, choices, default, tooltip}. 'kind' drives the
+            % editor widget ('enum' dropdown, 'num'/'text' edit field, 'bool'
+            % checkbox). Numeric/text values of 'auto' (or blank) fall back to
+            % snapToCellCentroid's own cell-size presets. ApplyToXY is consumed
+            % by CellDiscovery, not passed to snapToCellCentroid.
+            spec = {
+                'CellType',              'enum', {'auto','round','oval'},                                  'auto',   'Cell-shape preset: round (PV somata), oval (ring-like PNNs), or auto (balanced).'
+                'Method',                'enum', {'auto','weighted-centroid','mean-shift','radial-symmetry'}, 'auto', 'auto picks from CellType (oval => radial-symmetry). radial-symmetry finds the centre of an open/ring-like net; weighted-centroid suits solid somata; mean-shift is threshold-free but lands on the bright wall.'
+                'PixelSize',             'num',  {},                                                       '0.645',  'Microns per pixel (training resolution is 0.645).'
+                'CellDiameter',          'num',  {},                                                       '18',     'Expected cell diameter in microns.'
+                'BackgroundSubtraction', 'enum', {'tophat','gaussian','none'},                             'tophat', 'Global background removal before snapping.'
+                'ThresholdMethod',       'enum', {'otsu','adaptive','relative'},                           'otsu',   'Per-window foreground threshold (weighted-centroid only).'
+                'ThresholdScale',        'num',  {},                                                       '1.0',    'Multiplier on the Otsu threshold; <1 grows blobs, >1 shrinks them (weighted-centroid only).'
+                'RingRadius',            'num',  {},                                                       'auto',   'Expected net ring radius in px, centre-to-wall (radial-symmetry). auto = ~half the cell diameter.'
+                'RingRadiusTolerance',   'num',  {},                                                       'auto',   'Fractional ring-radius band voted over (radial-symmetry). auto = preset.'
+                'DarkCenter',            'bool', {},                                                       'true',   'Bias the snap toward dark ring centres (radial-symmetry); on for PNN holes.'
+                'SearchRadius',          'num',  {},                                                       'auto',   'Max distance (px) from a detection to an eligible centre. auto = from cell size.'
+                'MaxShift',              'num',  {},                                                       'auto',   'Max distance (px) a detection may move. auto = SearchRadius.'
+                'OverMaxShiftAction',    'enum', {'reject','clamp','keep'},                                'reject', 'What to do when the snap exceeds MaxShift.'
+                'ApplyToXY',             'bool', {},                                                       'false',  'Overwrite X/Y with the snapped coordinates (SNAP_* columns are always added regardless).'
+                };
+        end
+
+        function opts = defaultSnapOptions()
+            % Default per-page snap options struct (string-valued, from the spec).
+            spec = CellDiscovery.snapOptionSpec();
+            opts = struct();
+            for k = 1:size(spec, 1)
+                opts.(spec{k,1}) = spec{k,4};
+            end
+        end
+
+        function opts = sanitizeSnapOptions(opts)
+            % Restrict a stored snap-options struct to the supported fields,
+            % filling any missing/empty field from the defaults.
+            dflt = CellDiscovery.defaultSnapOptions();
+            if ~isstruct(opts)
+                opts = dflt;
+                return;
+            end
+            names = fieldnames(dflt);
+            clean = struct();
+            for k = 1:numel(names)
+                nm = names{k};
+                if isfield(opts, nm) && ~isempty(opts.(nm))
+                    clean.(nm) = opts.(nm);
+                else
+                    clean.(nm) = dflt.(nm);
+                end
+            end
+            opts = clean;
+        end
+
+        function args = snapOptionsToNameValue(opts)
+            % Convert a snap-options struct into a name-value cell for
+            % snapToCellCentroid. ApplyToXY is omitted (CellDiscovery handles it);
+            % 'auto'/blank values are dropped so the function uses its presets.
+            opts  = CellDiscovery.sanitizeSnapOptions(opts);
+            spec  = CellDiscovery.snapOptionSpec();
+            args  = {};
+            for k = 1:size(spec, 1)
+                nm = spec{k,1};
+                if strcmp(nm, 'ApplyToXY'), continue; end
+                [val, skip] = CellDiscovery.parseSnapOptionValue(opts.(nm));
+                if skip, continue; end
+                args = [args, {nm, val}]; %#ok<AGROW>
+            end
+        end
+
+        function [val, skip] = parseSnapOptionValue(v)
+            % Coerce a stored string option value to the type snapToCellCentroid
+            % expects. 'auto' / '' signals "use the preset" (skip = true).
+            val = []; skip = false;
+            if isnumeric(v) || islogical(v)
+                val = v; return;
+            end
+            if isstring(v), v = char(v); end
+            if ~ischar(v)
+                skip = true; return;
+            end
+            txt = strtrim(v);
+            if isempty(txt) || strcmpi(txt, 'auto')
+                skip = true; return;
+            end
+            low = lower(txt);
+            if any(strcmp(low, {'true','false'}))
+                val = strcmp(low, 'true'); return;
+            end
+            num = str2double(txt);
+            if ~isnan(num)
+                val = num; return;
+            end
+            num = str2num(txt); %#ok<ST2NM>
+            if ~isempty(num)
+                val = num; return;
+            end
+            val = txt;   % string-valued option (e.g. 'tophat', 'round', 'reject')
+        end
+
+        function lbl = snapPageLabel(pageNum, suffix)
+            % Human-readable page-selector label for the Snap options dialog.
+            if nargin >= 2 && ischar(suffix) && ~isempty(strtrim(suffix))
+                lbl = sprintf('Page %d  (%s)', round(pageNum), strtrim(suffix));
+            else
+                lbl = sprintf('Page %d', round(pageNum));
+            end
+        end
+
+        function [pages, rzArr, pagesFull] = preprocessAllPages(imgFile, nPages, mapData, lsmOptions)
             % Preprocess every page of a source file and return the finished
             % per-page images plus their resize factors.
+            %
+            % Two image sets are returned per page:
+            %   pages     - joint-LSM + background-subtracted + RESIZED. This is
+            %               exactly the input the detection model receives.
+            %   pagesFull - the same preprocessing WITHOUT the final resize, i.e.
+            %               at the source resolution. Snap (snapToCellCentroid)
+            %               uses this so it sees the same pixels the detector did
+            %               while keeping coordinates and PixelSize in
+            %               original-image space (no resize remapping).
             %
             % LSM bidirectional correction is driven by ALL channels jointly
             % (correctBidirectionalLSMArtifact, UseAllChannels). Correcting each
@@ -2013,10 +2796,22 @@ classdef CellDiscovery < handle
                 end
             end
 
-            % Per-page background subtraction + resize (LSM already applied above).
-            pages = cell(1, nPages);
+            % Per-page background subtraction (LSM already applied above), then
+            % resize. pagesFull holds the bg-subtracted page at source
+            % resolution; pages resizes it. Splitting the single applyPreprocess
+            % call into "bg, then resize" yields pixels identical to the previous
+            % combined call (order is unchanged: bg first, resize second) while
+            % exposing the pre-resize image for snap.
+            pages     = cell(1, nPages);
+            pagesFull = cell(1, nPages);
             for pg = 1:nPages
-                pages{pg} = CellDiscovery.applyPreprocess(corrPages{pg}, false, lsmOptions, bgArr(pg), rzArr(pg));
+                full          = CellDiscovery.applyPreprocess(corrPages{pg}, false, lsmOptions, bgArr(pg), 1);
+                pagesFull{pg} = full;
+                if rzArr(pg) > 0 && rzArr(pg) ~= 1
+                    pages{pg} = CellDiscovery.applyPreprocess(full, false, lsmOptions, 0, rzArr(pg));
+                else
+                    pages{pg} = full;
+                end
             end
         end
 
@@ -2061,7 +2856,7 @@ classdef CellDiscovery < handle
 
         function res = readPageResInfo(file, page)
             % Read a source page's spatial calibration so it can be propagated
-            % to the preprocessed output. Returns a struct with:
+            % to the resized output. Returns a struct with:
             %   hasRes  - true if XResolution/YResolution were present
             %   xres    - X resolution (pixels per ResolutionUnit), double
             %   yres    - Y resolution, double
@@ -2185,6 +2980,114 @@ classdef CellDiscovery < handle
                 end
             end
             desc = strjoin(lines(keep), newline);
+        end
+
+
+        %% Diagnostic-view helpers
+
+
+        function showDiagImage(ax, img, cmapName)
+            % Display a (possibly multi-channel) diagnostic image with a robust
+            % 1-99 percentile contrast stretch so dim fluorescence is visible.
+            if isempty(img)
+                axis(ax, 'off');
+                text(ax, 0.5, 0.5, '(image unavailable)', 'Units', 'normalized', ...
+                    'HorizontalAlignment', 'center', 'Color', [0.5 0.5 0.5]);
+                return;
+            end
+            if size(img, 3) == 1
+                [lo, hi] = CellDiscovery.robustRange(img);
+                imshow(img, [lo hi], 'Parent', ax);
+                try colormap(ax, cmapName); catch, colormap(ax, 'gray'); end
+            else
+                imshow(CellDiscovery.normalizeRGBForDisplay(img), 'Parent', ax);
+            end
+        end
+
+        function [lo, hi] = robustRange(img)
+            % 1st/99th percentile of the finite pixels (no Statistics Toolbox
+            % dependency), used as a display range for the diagnostic view.
+            v = double(img(:));
+            v = v(isfinite(v));
+            if isempty(v)
+                lo = 0; hi = 1; return;
+            end
+            sv = sort(v);
+            lo = sv(max(1, round(0.01 * numel(sv))));
+            hi = sv(max(1, round(0.99 * numel(sv))));
+            if hi <= lo, hi = lo + 1; end
+        end
+
+        function rgb = normalizeRGBForDisplay(img)
+            % Per-channel robust normalization of a multi-channel image to [0,1].
+            rgb = zeros(size(img));
+            for c = 1:size(img, 3)
+                ch = double(img(:,:,c));
+                [lo, hi] = CellDiscovery.robustRange(ch);
+                rgb(:,:,c) = min(max((ch - lo) / (hi - lo), 0), 1);
+            end
+        end
+
+        function s = preprocSummary(job)
+            % One-line summary of the preprocessing steps applied to a job's
+            % page, used as the Detector-input panel subtitle.
+            parts = {};
+            if isfield(job, 'correctLSM') && job.correctLSM
+                parts{end+1} = 'LSM';
+            end
+            if isfield(job, 'bgRadius') && job.bgRadius > 0
+                parts{end+1} = sprintf('bg=%g', job.bgRadius);
+            end
+            if isfield(job, 'resize') && job.resize ~= 1
+                parts{end+1} = sprintf('resize=%g', job.resize);
+            end
+            if isempty(parts)
+                s = 'no preprocessing';
+            else
+                s = strjoin(parts, ', ');
+            end
+        end
+
+        function drawSnapArrows(ax, fromX, fromY, T)
+            % Overlay snapToCellCentroid movement on the snap-input axes: an
+            % arrow from each original detection to its snapped location, with
+            % original points in red, snapped points in green, and unmoved
+            % points in grey.
+            vn = T.Properties.VariableNames;
+            if isempty(fromX) || ~all(ismember({'SNAP_X','SNAP_Y'}, vn))
+                return;
+            end
+            fromX = double(fromX(:));
+            fromY = double(fromY(:));
+            toX   = double(T.SNAP_X);
+            toY   = double(T.SNAP_Y);
+            if ismember('SNAP_Snapped', vn)
+                moved = logical(T.SNAP_Snapped);
+            else
+                moved = (toX ~= fromX) | (toY ~= fromY);
+            end
+            n = min([numel(fromX), numel(toX), numel(moved)]);
+            if n == 0, return; end
+            fromX = fromX(1:n); fromY = fromY(1:n);
+            toX = toX(1:n); toY = toY(1:n); moved = logical(moved(1:n));
+
+            hold(ax, 'on');
+            if any(~moved)
+                plot(ax, fromX(~moved), fromY(~moved), 'o', ...
+                    'MarkerEdgeColor', [0.6 0.6 0.6], 'MarkerSize', 5);
+            end
+            if any(moved)
+                quiver(ax, fromX(moved), fromY(moved), ...
+                    toX(moved) - fromX(moved), toY(moved) - fromY(moved), 0, ...
+                    'Color', [1 0.3 0.3], 'LineWidth', 1, 'MaxHeadSize', 0.6, ...
+                    'AutoScale', 'off');
+                plot(ax, fromX(moved), fromY(moved), 'o', ...
+                    'MarkerEdgeColor', [1 0.2 0.2], 'MarkerSize', 5, 'LineWidth', 1);
+                plot(ax, toX(moved), toY(moved), 'o', ...
+                    'MarkerFaceColor', [0.2 1 0.2], 'MarkerEdgeColor', 'none', ...
+                    'MarkerSize', 5);
+            end
+            hold(ax, 'off');
         end
 
     end  % static methods

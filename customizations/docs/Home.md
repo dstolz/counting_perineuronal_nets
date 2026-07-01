@@ -1,4 +1,4 @@
-# Cell Detection & QC Toolkit — User Guide
+﻿# Cell Detection & QC Toolkit — User Guide
 
 Welcome to the user guide for the MATLAB graphical tools in the
 `customizations/` folder. These three GUIs wrap the project's Python deep
@@ -11,15 +11,18 @@ tool you need.
 
 ---
 
-## The three tools at a glance
+## The tools at a glance
 
 | Tool | What it does | When you use it |
 |------|--------------|-----------------|
+| **[Cell Dataset Manager](CellDatasetManager.md)** | Finds every dataset under a folder, shows how far each has moved through the pipeline, and launches the other tools on a chosen dataset. | **Any time.** As your home base / status dashboard. |
 | **[Cell Discovery](CellDiscovery.md)** | Runs automatic cell detection on a whole folder of images and writes one results file (`*_locs.csv`) per image. | **First.** To find cells in new images. |
-| **[Cell Neighbor Resolver](CellNeighborResolverApp.md)** | Finds pairs of detections that sit too close together (likely duplicates of the same cell) and lets you keep one, keep both, or merge them. | **Second.** To clean up over-counting. |
-| **[Cell Localization QC](CellLocalizationQCApp.md)** | Shows every detection as a small image crop so you can mark each one Good / Bad / Uncertain and produce a reviewed dataset. | **Third.** To verify and grade the detections. |
+| **[Cell Neighbor Resolver](CellNeighborResolution.md)** | Finds pairs of detections that sit too close together (likely duplicates of the same cell) and lets you keep one, keep both, or merge them. | **Second.** To clean up over-counting. |
+| **[Cell Localization QC](CellQualityControl.md)** | Shows every detection as a small image crop so you can mark each one Good / Bad / Uncertain and produce a reviewed dataset. | **Third.** To verify and grade the detections. |
 
-These are normally used **in order**, but each one can also be used on its own.
+The last three are normally used **in order**, but each one can also be used on
+its own. The **Cell Dataset Manager** sits above them: open it first to see what
+still needs doing, then launch the right tool from there.
 
 ```
    Microscopy images (.tif)
@@ -123,6 +126,14 @@ These terms come up across all three tools.
   the optional Stage-2 quality estimate. Both can be used for sorting,
   filtering, and threshold classification in the QC tool.
 
+- **Dataset manifest** — A small sidecar file (`<base>.celldataset.json`) each
+  tool keeps next to your image. It is the toolkit's record of which image and
+  page were analyzed, and **which localization file is the active analysis
+  file** for each channel/page. Every tool reads/writes the file recorded there,
+  so they all agree on "the right file." You never edit it by hand; if you need a
+  different localization file treated as the active one, use **Set active
+  locs…** in the [Cell Dataset Manager](CellDatasetManager.md).
+
 ---
 
 ## Tips that apply to every tool
@@ -144,9 +155,11 @@ These terms come up across all three tools.
 
 ## Per-tool guides
 
+- **[Cell Dataset Manager](CellDatasetManager.md)** — dataset discovery, status overview, and launcher
 - **[Cell Discovery](CellDiscovery.md)** — batch cell detection
-- **[Cell Neighbor Resolver](CellNeighborResolverApp.md)** — resolving duplicate detections
-- **[Cell Localization QC](CellLocalizationQCApp.md)** — manual quality control review
+- **[Cell Neighbor Resolver](CellNeighborResolution.md)** — resolving duplicate detections
+- **[Cell Localization QC](CellQualityControl.md)** — manual quality control review
+- **[Cell Dataset Manifest](CellDatasetManifest.md)** — the per-dataset record behind the tools (schema + code API)
 
 ---
 

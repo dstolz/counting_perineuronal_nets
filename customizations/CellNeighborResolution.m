@@ -1,6 +1,6 @@
-classdef CellNeighborResolverApp < handle
-% CellNeighborResolverApp  GUI for reviewing and resolving nearby cell detections.
-%   app = CellNeighborResolverApp() opens the GUI.  Load a *_locs.csv file,
+﻿classdef CellNeighborResolution < handle
+% CellNeighborResolution  GUI for reviewing and resolving nearby cell detections.
+%   app = CellNeighborResolution() opens the GUI.  Load a *_locs.csv file,
 %   set a pixel-distance threshold, click "Find Neighbors" to detect pairs,
 %   then resolve each pair using the action buttons or keyboard shortcuts.
 %   Results are saved back to the original CSV file in place.
@@ -8,11 +8,14 @@ classdef CellNeighborResolverApp < handle
 %   Tick "Resized" in the scan toolbar to scan for *_locs_resized.csv files
 %   (resized-image coordinates) instead of the standard *_locs.csv.
 %
-%   The "Rescore…" toolbar button runs a Stage-2 scoring model (rescore.py,
+%   The "Rescore…" toolbar button runs a Stage-2 scoring model (score.py,
 %   in the countpnn conda env) over the curated detections of the included
-%   dataset(s). Pick the scoring model and device in the dialog; only live
-%   (kept) points are scored and the [0-1] quality estimate is written back
-%   to each CSV's "rescore" column.
+%   dataset(s). Like CellDiscovery, the dialog maps a scoring model to each
+%   TIFF page, so per-page CSVs (e.g. *_PNN1_locs.csv, *_PV2_locs.csv) are
+%   each scored with the model for their page; a page mapped to "(none)" (or
+%   with no row) is skipped. Single-page / non-page-encoded CSVs use page 1's
+%   row. Only live (kept) points are scored and the [0-1] quality estimate is
+%   written back to each CSV's "rescore" column.
 %
 %   Keyboard shortcuts (when a text field is not focused):
 %     a         Keep A (delete B)
@@ -34,13 +37,14 @@ classdef CellNeighborResolverApp < handle
 
     % ------------------------------------------------------------------
     properties (Constant, Access = private)
-        SettingsGroup     = 'CellNeighborResolverApp'
+        SettingsGroup     = 'CellNeighborResolution'
         SettingsPrefKey   = 'Settings'
         AppVersion        = '1.0'
         MaxUndoDepth      = 200
         DEFAULT_REGEX_LOCS         = '(?i)_locs\.csv$'
         DEFAULT_REGEX_LOCS_RESIZED = '(?i)_locs_resized\.csv$'
         DEFAULT_CONDA_ENV          = 'countpnn'
+        SCORE_NONE_LABEL           = '(none)'   % page-map sentinel: do not rescore this page
         STATUS_UNRESOLVED = "Unresolved"
         STATUS_KEEP_A     = "Keep A"
         STATUS_KEEP_B     = "Keep B"
@@ -56,7 +60,7 @@ classdef CellNeighborResolverApp < handle
         ParentDirectory string = ""
 
         % --- Rescoring (Stage 2) ---
-        RepoRoot      string = ""    % repo root (folder containing rescore.py)
+        RepoRoot      string = ""    % repo root (folder containing score.py)
         ScoringModels cell   = {}     % discovered scoring-model run folders (best.pth, non-fasterrcnn)
         AllAbsFiles cell   = {}
         FileReviewState logical = []   % per-AllAbsFiles flag: CSV carries saved resolver annotations
@@ -176,9 +180,9 @@ classdef CellNeighborResolverApp < handle
     % ==================================================================
     methods (Access = public)
 
-        function app = CellNeighborResolverApp()
+        function app = CellNeighborResolution()
             app.loadSettings();
-            app.RepoRoot = string(CellToolkit.detectRepoRoot('rescore.py'));
+            app.RepoRoot = string(CellToolkit.detectRepoRoot('score.py'));
             app.discoverScoringModels();
             app.buildUI();
             app.applySettingsToUI();
@@ -189,6 +193,35 @@ classdef CellNeighborResolverApp < handle
                 app.doScan();
             else
                 app.updateStatus("Select a parent directory and press Scan.");
+            end
+        end
+
+        function openParent(app, parentDir, csvPath)
+            % Point the resolver at a folder, scan it, and optionally load a
+            % specific CSV. Used by CellDatasetManager to open a chosen dataset.
+            if nargin >= 2 && ~isempty(parentDir)
+                app.ParentDirEdit.Value = char(parentDir);
+            end
+            app.doScan();
+            if nargin >= 3 && ~isempty(csvPath) && isfile(char(csvPath))
+                try
+                    app.loadCsvFile(char(csvPath));
+                catch
+                end
+            end
+            if ~isempty(app.UIFigure) && isvalid(app.UIFigure)
+                figure(app.UIFigure);
+            end
+        end
+
+        function addCloseListener(app, fcn)
+            % Register a callback to fire when this app's window is
+            % destroyed. Used by CellDatasetManager to re-scan its dashboard
+            % once resolution is done, without coupling to the private figure
+            % handle.
+            if ~isempty(app.UIFigure) && isvalid(app.UIFigure)
+                addlistener(app.UIFigure, 'ObjectBeingDestroyed', ...
+                    @(~,~) fcn());
             end
         end
 
@@ -261,7 +294,7 @@ classdef CellNeighborResolverApp < handle
             app.ScanButton = uibutton(app.TopToolbarGrid, "push", "Text", "Scan", ...
                 "ButtonPushedFcn", @(s,e) app.doScan());
             app.ScanButton.Layout.Row = 1; app.ScanButton.Layout.Column = 6;
-            CellToolkit.setTooltip(app.ScanButton, "Recursively scan the parent directory for CSV files matching the filter pattern and populate the file list.");
+            CellToolkit.setTooltip(app.ScanButton, "Recursively scan the parent directory for CSV files matching the filter pattern and populate the file list. Only CSVs with a matching companion TIFF image are listed, so the image and locations always pair.");
 
             app.ResizedCsvCheckBox = uicheckbox(app.TopToolbarGrid, "Text", "Resized", ...
                 "Value", app.Settings.UseResizedCsv, ...
@@ -601,6 +634,7 @@ classdef CellNeighborResolverApp < handle
             defaults.RescoreBatchSize    = 1;
             defaults.RescoreScope        = "Included files";
             defaults.LastScoringModel    = "";
+            defaults.RescorePageMap      = {};   % per-page scoring map: {page, modelName}
         end
 
         function loadSettings(app)
@@ -658,7 +692,7 @@ classdef CellNeighborResolverApp < handle
         end
 
         function p = settingsMatPath(~)
-            p = fullfile(prefdir, 'CellNeighborResolverApp_Settings.mat');
+            p = fullfile(prefdir, 'CellNeighborResolution_Settings.mat');
         end
 
         % --------------------------------------------------------------
@@ -715,6 +749,17 @@ classdef CellNeighborResolverApp < handle
                 return
             end
 
+            % Keep only CSVs that have a companion TIFF image, so a loaded
+            % localization file always has a matching image to review against.
+            % CSVs whose image cannot be resolved are dropped from the list.
+            nMatched   = numel(matched);
+            hasImage   = false(nMatched, 1);
+            for k = 1:nMatched
+                hasImage(k) = strlength(CellToolkit.inferImagePath(matched{k})) > 0;
+            end
+            nNoImage = sum(~hasImage);
+            matched  = matched(hasImage);
+
             app.AllAbsFiles = matched;
             n = numel(matched);
 
@@ -729,7 +774,12 @@ classdef CellNeighborResolverApp < handle
                 app.FileCountLabel.Text = 'No files found';
                 app.FileCountLabel.FontColor = [0.8 0.2 0.2];
                 app.updateDatasetProgress();
-                app.updateStatus("No CSV files matched the filter pattern.");
+                if nNoImage > 0
+                    app.updateStatus(sprintf(['No CSV files with a matching image found ' ...
+                        '(%d CSV(s) skipped: no companion TIFF).'], nNoImage));
+                else
+                    app.updateStatus("No CSV files matched the filter pattern.");
+                end
                 return
             end
 
@@ -740,8 +790,14 @@ classdef CellNeighborResolverApp < handle
             app.FileCountLabel.Text = sprintf('%d file(s) found', n);
             app.FileCountLabel.FontColor = [0.1 0.5 0.1];
             app.updateDatasetProgress();
-            app.updateStatus(sprintf('Scan complete: %d file(s) found, %d already reviewed.', ...
-                n, sum(app.FileReviewState)));
+            if nNoImage > 0
+                app.updateStatus(sprintf(['Scan complete: %d file(s) found, %d already reviewed. ' ...
+                    '%d CSV(s) skipped (no companion TIFF).'], ...
+                    n, sum(app.FileReviewState), nNoImage));
+            else
+                app.updateStatus(sprintf('Scan complete: %d file(s) found, %d already reviewed.', ...
+                    n, sum(app.FileReviewState)));
+            end
 
             % Restore last active file. Guard the load so a problem opening the
             % previously-active file can never abort the scan (the file list is
@@ -799,9 +855,13 @@ classdef CellNeighborResolverApp < handle
 
         function [hasReview, nObs, nUnreviewed, nNeighbors] = analyzeOneFile(~, csvPath)
             % Read CSV header + rows cheaply to determine review state and counts.
-            % nNeighbors  = distinct non-empty NeighborPairID values (all pairs).
-            % nUnreviewed = distinct NeighborPairIDs where NeighborResolved is not
-            %               true (skipped / unresolved pairs).
+            % A detection may belong to several neighbor pairs, so its
+            % NeighborPairID / NeighborResolvedStatus cells can carry ";"-joined
+            % tokens; split them so every pair is counted (not just the last one
+            % written to a shared row).
+            % nNeighbors  = distinct pair labels found across all rows.
+            % nUnreviewed = distinct pair labels with no resolved record (status
+            %               empty, "Unresolved", or "Skipped").
             hasReview = false; nObs = 0; nUnreviewed = 0; nNeighbors = 0;
             fid = fopen(char(csvPath), 'r');
             if fid < 0, return; end
@@ -809,11 +869,11 @@ classdef CellNeighborResolverApp < handle
             headerLine = fgetl(fid);
             if ~ischar(headerLine), return; end
             hasReview = contains(headerLine, 'NeighborResolved');
-            headers = regexp(headerLine, ',', 'split');
-            reviewedColIdx = find(strcmpi(strtrim(headers), 'NeighborResolved'), 1);
-            pairIdColIdx   = find(strcmpi(strtrim(headers), 'NeighborPairID'),   1);
-            pairIdsAll   = {};
-            pairIdsUnrev = {};
+            headers = strtrim(regexp(headerLine, ',', 'split'));
+            pairIdColIdx = find(strcmpi(headers, 'NeighborPairID'),         1);
+            statusColIdx = find(strcmpi(headers, 'NeighborResolvedStatus'), 1);
+            allLabels      = strings(0, 1);
+            resolvedLabels = strings(0, 1);
             while true
                 line = fgetl(fid);
                 if ~ischar(line), break; end
@@ -822,19 +882,31 @@ classdef CellNeighborResolverApp < handle
                 if isempty(pairIdColIdx), continue; end
                 fields = regexp(line, ',', 'split');
                 if pairIdColIdx > numel(fields), continue; end
-                pid = strtrim(fields{pairIdColIdx});
-                if isempty(pid), continue; end
-                pairIdsAll{end+1} = pid; %#ok<AGROW>
-                isResolved = ~isempty(reviewedColIdx) && ...
-                             reviewedColIdx <= numel(fields) && ...
-                             (strcmpi(strtrim(fields{reviewedColIdx}), 'true') || ...
-                              strcmp(strtrim(fields{reviewedColIdx}), '1'));
-                if ~isResolved
-                    pairIdsUnrev{end+1} = pid; %#ok<AGROW>
+                ids = strsplit(strtrim(fields{pairIdColIdx}), ';', 'CollapseDelimiters', false);
+                if ~isempty(statusColIdx) && statusColIdx <= numel(fields)
+                    sts = strsplit(strtrim(fields{statusColIdx}), ';', 'CollapseDelimiters', false);
+                else
+                    sts = {};
+                end
+                for t = 1:numel(ids)
+                    lbl = strtrim(ids{t});
+                    if isempty(lbl), continue; end
+                    if t <= numel(sts)
+                        stv = strtrim(sts{t});
+                    else
+                        stv = '';
+                    end
+                    allLabels(end+1) = string(lbl); %#ok<AGROW>
+                    isResolved = ~isempty(stv) && ...
+                                 ~strcmpi(stv, 'Unresolved') && ~strcmpi(stv, 'Skipped');
+                    if isResolved
+                        resolvedLabels(end+1) = string(lbl); %#ok<AGROW>
+                    end
                 end
             end
-            nNeighbors  = numel(unique(pairIdsAll));
-            nUnreviewed = numel(unique(pairIdsUnrev));
+            uAll        = unique(allLabels);
+            nNeighbors  = numel(uAll);
+            nUnreviewed = numel(setdiff(uAll, unique(resolvedLabels)));
         end
 
         function refreshFileTable(app)
@@ -1025,6 +1097,12 @@ classdef CellNeighborResolverApp < handle
 
             app.ActiveLocTable = tbl;
 
+            % The dataset manifest is the authoritative record of which image
+            % and page this CSV belongs to; naming conventions are only a
+            % fallback when the manifest cannot resolve them.
+            mf   = CellDatasetManifest.forCsv(csvPath);
+            mfKey = CellDatasetManifest.keyForCsv(csvPath);
+
             % Determine which TIFF page(s) this CSV addresses. Per-page CSVs
             % (the CellDiscovery convention) reference exactly one page and the
             % view is locked to it, so detections are never drawn over another
@@ -1032,7 +1110,12 @@ classdef CellNeighborResolverApp < handle
             % navigation enabled.
             encPages = app.encodedPagesInTable();
             if isempty(encPages)
-                app.ActiveCsvPage = CellToolkit.pageFromCsvName(csvPath);
+                [~, mfPage] = mf.channelPage(mfKey);
+                if ~isnan(mfPage)
+                    app.ActiveCsvPage = mfPage;
+                else
+                    app.ActiveCsvPage = CellToolkit.pageFromCsvName(csvPath);
+                end
                 app.CsvSpansMultiplePages = false;
             elseif isscalar(encPages)
                 app.ActiveCsvPage = encPages;
@@ -1042,8 +1125,11 @@ classdef CellNeighborResolverApp < handle
                 app.CsvSpansMultiplePages = true;
             end
 
-            % Find companion image
-            app.ActiveImagePath = CellToolkit.inferImagePath(csvPath);
+            % Find companion image (manifest first, then naming convention).
+            app.ActiveImagePath = string(mf.imageForLocs(csvPath));
+            if strlength(app.ActiveImagePath) == 0
+                app.ActiveImagePath = CellToolkit.inferImagePath(csvPath);
+            end
             if strlength(app.ActiveImagePath) > 0 && isfile(app.ActiveImagePath)
                 try
                     app.ActiveTiffInfo = imfinfo(char(app.ActiveImagePath));
@@ -1236,11 +1322,20 @@ classdef CellNeighborResolverApp < handle
         function restoreSavedPairStatuses(app)
             % After (re)building neighbor pairs, restore the resolution status
             % of any pair that was resolved in a previous session and saved to
-            % the CSV. A re-found pair is matched when both of its rows carry
-            % the same non-empty NeighborPairID; its status is taken from the
-            % saved NeighborResolvedStatus column. This makes auto-saved
-            % resolutions persist across app restarts instead of all reverting
-            % to "Unresolved".
+            % the CSV.
+            %
+            % A neighbor pair is labelled "<rowA>-<rowB>" from the absolute row
+            % numbers in ActiveLocTable, which stay stable across save/reload
+            % (the saver preserves every original row in place and only appends
+            % merged-result rows), so the freshly re-found pairs reproduce the
+            % same labels. A single detection can belong to several pairs, so a
+            % row's NeighborPairID / NeighborResolvedStatus cells may carry
+            % ";"-joined tokens. We build a label->status map across ALL rows
+            % and look each re-found pair up by its label. This recovers every
+            % pair even when a shared row's cells were last written by a
+            % different pair — the previous bug (matching only when both rows
+            % carried the same single ID) silently reverted such pairs to
+            % "Unresolved".
             if isempty(app.ActiveLocTable) || size(app.NeighborPairs, 1) == 0
                 return
             end
@@ -1250,21 +1345,49 @@ classdef CellNeighborResolverApp < handle
             end
             statusCol = string(app.ActiveLocTable.NeighborResolvedStatus);
             pairIdCol = string(app.ActiveLocTable.NeighborPairID);
+            label2status = containers.Map('KeyType', 'char', 'ValueType', 'char');
             nRows = height(app.ActiveLocTable);
+            for r = 1:nRows
+                ids = split(pairIdCol(r), ";");
+                sts = split(statusCol(r), ";");
+                for t = 1:numel(ids)
+                    lbl = strtrim(ids(t));
+                    if strlength(lbl) == 0
+                        continue
+                    end
+                    if t <= numel(sts)
+                        stv = strtrim(sts(t));
+                    else
+                        stv = "";
+                    end
+                    if strlength(stv) > 0
+                        label2status(char(lbl)) = char(stv);
+                    end
+                end
+            end
+            if label2status.Count == 0
+                return
+            end
             for p = 1:size(app.NeighborPairs, 1)
                 rA = app.NeighborPairs(p, 1);
                 rB = app.NeighborPairs(p, 2);
-                if rA < 1 || rA > nRows || rB < 1 || rB > nRows
-                    continue
+                lbl = char(string(rA) + "-" + string(rB));
+                if isKey(label2status, lbl)
+                    app.PairStatus(p) = string(label2status(lbl));
                 end
-                idA = pairIdCol(rA);
-                idB = pairIdCol(rB);
-                if strlength(idA) > 0 && idA == idB
-                    st = statusCol(rA);
-                    if strlength(st) > 0
-                        app.PairStatus(p) = st;
-                    end
-                end
+            end
+        end
+
+        function out = joinToken(~, existing, tok)
+            % Append a token to a ";"-joined list held in a single CSV cell,
+            % so a detection that belongs to multiple neighbor pairs records
+            % all of them instead of only the last one written.
+            existing = string(existing);
+            tok = string(tok);
+            if strlength(existing) == 0
+                out = tok;
+            else
+                out = existing + ";" + tok;
             end
         end
 
@@ -2853,12 +2976,16 @@ classdef CellNeighborResolverApp < handle
                 idxA = find(origRowNums == rA, 1);
                 idxB = find(origRowNums == rB, 1);
 
-                % Always write pair ID and status so the file can report total
-                % and unreviewed pair counts without re-running detection.
+                % Always record pair ID and status so the file can report
+                % total and unreviewed pair counts without re-running
+                % detection. A detection may belong to several pairs, so append
+                % to a ";"-joined list rather than overwriting — otherwise the
+                % last pair written to a shared row clobbers the others and they
+                % revert to "Unresolved" on reload.
                 for idx = [idxA, idxB]
                     if ~isempty(idx)
-                        outTbl.NeighborPairID(idx)         = pairLabel;
-                        outTbl.NeighborResolvedStatus(idx) = st;
+                        outTbl.NeighborPairID(idx)         = app.joinToken(outTbl.NeighborPairID(idx), pairLabel);
+                        outTbl.NeighborResolvedStatus(idx) = app.joinToken(outTbl.NeighborResolvedStatus(idx), st);
                     end
                 end
 
@@ -2944,6 +3071,17 @@ classdef CellNeighborResolverApp < handle
             end
             movefile(tmpPath, char(resolvedPath), 'f');
 
+            % Record the resolve stage in the dataset manifest (best effort).
+            % Curation is in-place (CURATED_* columns are added to the existing
+            % active CSV), so the active-locs pointer is left unchanged.
+            try
+                mf  = CellDatasetManifest.forCsv(char(resolvedPath));
+                key = CellDatasetManifest.keyForCsv(char(resolvedPath));
+                mf.recordResolve(key, struct('tool', 'CellNeighborResolution', 'rows', nOut));
+                mf.save();
+            catch
+            end
+
             app.Dirty = false;
             app.markActiveFileReviewed();
             app.updateStatus(sprintf('Saved %d rows → %s', nOut, ...
@@ -2961,7 +3099,7 @@ classdef CellNeighborResolverApp < handle
                 if strcmp(choice, 'Save')
                     app.saveResolved();
                 elseif strcmp(choice, 'Cancel')
-                    error('CellNeighborResolverApp:Cancelled', 'User cancelled transition.');
+                    error('CellNeighborResolution:Cancelled', 'User cancelled transition.');
                 end
             end
         end
@@ -3061,7 +3199,7 @@ classdef CellNeighborResolverApp < handle
             try
                 app.saveIfDirty();
             catch ME
-                if ~strcmp(ME.identifier, 'CellNeighborResolverApp:Cancelled')
+                if ~strcmp(ME.identifier, 'CellNeighborResolution:Cancelled')
                     % Unexpected error — log but don't block close
                 end
             end
@@ -3085,14 +3223,14 @@ classdef CellNeighborResolverApp < handle
         % RESCORING (Stage 2)
         % --------------------------------------------------------------
         %
-        % After curation, run a Stage-2 scoring model (rescore.py) in the
+        % After curation, run a Stage-2 scoring model (score.py) in the
         % countpnn conda env over the curated detections of one or more
         % datasets. Only live points (CURATED_X/Y not blanked, or X/Y when a
         % CSV has no curation columns) are scored; the model's [0-1] quality
         % estimate is written back to each CSV's 'rescore' column.
 
         function discoverScoringModels(app)
-            % Stage-2 scoring models rescore.py can load: run folders under the
+            % Stage-2 scoring models score.py can load: run folders under the
             % repo root that contain best.pth and are not detection models.
             [~, app.ScoringModels] = CellToolkit.discoverModels(char(app.RepoRoot));
         end
@@ -3124,78 +3262,115 @@ classdef CellNeighborResolverApp < handle
             S = app.Settings;
 
             dlg = uifigure('Name', 'Rescore Curated Detections', ...
-                'Position', [100 100 470 330], 'WindowStyle', 'modal');
+                'Position', [100 100 520 470], 'WindowStyle', 'modal');
             try
                 mp = app.UIFigure.Position;
-                dlg.Position(1:2) = [mp(1) + (mp(3)-470)/2, mp(2) + (mp(4)-330)/2];
+                dlg.Position(1:2) = [mp(1) + (mp(3)-520)/2, mp(2) + (mp(4)-470)/2];
             catch
             end
 
-            g = uigridlayout(dlg, [8 3]);
-            g.RowHeight   = {26, 26, 26, 26, 26, 26, '1x', 32};
+            % Per-page scoring-model choices: "(none)" + every discovered model.
+            modelChoices = [{app.SCORE_NONE_LABEL}, app.ScoringModels];
+
+            g = uigridlayout(dlg, [9 3]);
+            g.RowHeight   = {24, 130, 26, 26, 26, 26, 26, '1x', 32};
             g.ColumnWidth = {105, '1x', 70};
             g.Padding     = [12 12 12 12];
             g.RowSpacing  = 6;
             g.ColumnSpacing = 6;
 
-            % Row 1: scoring model
-            lblM = uilabel(g, 'Text', 'Scoring model:', 'HorizontalAlignment', 'right');
-            lblM.Layout.Row = 1; lblM.Layout.Column = 1;
-            ddModel = uidropdown(g, 'Items', app.ScoringModels);
-            ddModel.Layout.Row = 1; ddModel.Layout.Column = [2 3];
-            if any(strcmp(app.ScoringModels, char(S.LastScoringModel)))
-                ddModel.Value = char(S.LastScoringModel);
-            end
+            % Row 1: page-map header + Add / Remove buttons
+            hdrGrid = uigridlayout(g, [1 3]);
+            hdrGrid.Layout.Row = 1; hdrGrid.Layout.Column = [1 3];
+            hdrGrid.ColumnWidth = {'1x', 90, 90};
+            hdrGrid.Padding = [0 0 0 0];
+            hdrGrid.ColumnSpacing = 4;
+            lblM = uilabel(hdrGrid, 'Text', 'Scoring model per TIFF page:', ...
+                'HorizontalAlignment', 'left', 'FontWeight', 'bold');
+            lblM.Layout.Column = 1;
+            btnAddPage = uibutton(hdrGrid, 'push', 'Text', 'Add page', ...
+                'Tooltip', 'Add a page-mapping row.', ...
+                'ButtonPushedFcn', @(s,e) onAddPage());
+            btnAddPage.Layout.Column = 2;
+            btnDelPage = uibutton(hdrGrid, 'push', 'Text', 'Remove page', ...
+                'Tooltip', 'Remove the selected row (or the last row if none selected).', ...
+                'ButtonPushedFcn', @(s,e) onDelPage());
+            btnDelPage.Layout.Column = 3;
 
-            % Row 2: scope
+            % Row 2: page -> scoring-model table. A CSV's page is taken from its
+            % name/imgName encoding (e.g. *_PNN1 -> page 1); single-page or
+            % non-encoded CSVs use page 1's row. A page mapped to "(none)" (or
+            % with no row) is skipped.
+            if isempty(S.RescorePageMap)
+                defModel = char(S.LastScoringModel);
+                if ~any(strcmp(modelChoices, defModel))
+                    defModel = modelChoices{min(2, numel(modelChoices))};
+                end
+                pageMap = {1, defModel};
+            else
+                pageMap = app.sanitizeScorePageMap(S.RescorePageMap, modelChoices);
+            end
+            selRow = [];   % last-selected page-table row (for Remove)
+            tblPages = uitable(g, ...
+                'Data',          pageMap, ...
+                'ColumnName',    {'Page', 'Scoring Model'}, ...
+                'ColumnFormat',  {'numeric', modelChoices}, ...
+                'ColumnEditable', [true true], ...
+                'ColumnWidth',   {60, 'auto'}, ...
+                'RowName',       {}, ...
+                'CellSelectionCallback', @(s,e) onPageSelect(e));
+            tblPages.Layout.Row = 2; tblPages.Layout.Column = [1 3];
+
+            % Row 3: scope
             lblS = uilabel(g, 'Text', 'Apply to:', 'HorizontalAlignment', 'right');
-            lblS.Layout.Row = 2; lblS.Layout.Column = 1;
+            lblS.Layout.Row = 3; lblS.Layout.Column = 1;
             ddScope = uidropdown(g, 'Items', ...
                 {'Included files', 'Active file only', 'All scanned files'});
-            ddScope.Layout.Row = 2; ddScope.Layout.Column = [2 3];
+            ddScope.Layout.Row = 3; ddScope.Layout.Column = [2 3];
             CellToolkit.setDropDownValue(ddScope, char(S.RescoreScope));
 
-            % Row 3: device
+            % Row 4: device
             lblD = uilabel(g, 'Text', 'Device:', 'HorizontalAlignment', 'right');
-            lblD.Layout.Row = 3; lblD.Layout.Column = 1;
+            lblD.Layout.Row = 4; lblD.Layout.Column = 1;
             edDevice = uieditfield(g, 'text', 'Value', char(S.RescoreDevice));
-            edDevice.Layout.Row = 3; edDevice.Layout.Column = [2 3];
+            edDevice.Layout.Row = 4; edDevice.Layout.Column = [2 3];
             edDevice.Tooltip = "Torch device, e.g. cpu, cuda:0";
 
-            % Row 4: batch size
+            % Row 5: batch size
             lblB = uilabel(g, 'Text', 'Batch size:', 'HorizontalAlignment', 'right');
-            lblB.Layout.Row = 4; lblB.Layout.Column = 1;
+            lblB.Layout.Row = 5; lblB.Layout.Column = 1;
             spBatch = uispinner(g, 'Limits', [1 4096], 'RoundFractionalValues', 'on', ...
                 'Value', max(1, double(S.RescoreBatchSize)));
-            spBatch.Layout.Row = 4; spBatch.Layout.Column = [2 3];
+            spBatch.Layout.Row = 5; spBatch.Layout.Column = [2 3];
 
-            % Row 5: conda env
+            % Row 6: conda env
             lblE = uilabel(g, 'Text', 'Conda env:', 'HorizontalAlignment', 'right');
-            lblE.Layout.Row = 5; lblE.Layout.Column = 1;
+            lblE.Layout.Row = 6; lblE.Layout.Column = 1;
             edEnv = uieditfield(g, 'text', 'Value', char(S.CondaEnv));
-            edEnv.Layout.Row = 5; edEnv.Layout.Column = [2 3];
-            edEnv.Tooltip = "Conda environment to run rescore.py in. Leave blank to call Python directly.";
+            edEnv.Layout.Row = 6; edEnv.Layout.Column = [2 3];
+            edEnv.Tooltip = "Conda environment to run score.py in. Leave blank to call Python directly.";
 
-            % Row 6: conda exe + browse
+            % Row 7: conda exe + browse
             lblC = uilabel(g, 'Text', 'conda.exe:', 'HorizontalAlignment', 'right');
-            lblC.Layout.Row = 6; lblC.Layout.Column = 1;
+            lblC.Layout.Row = 7; lblC.Layout.Column = 1;
             edConda = uieditfield(g, 'text', 'Value', char(S.CondaExe));
-            edConda.Layout.Row = 6; edConda.Layout.Column = 2;
+            edConda.Layout.Row = 7; edConda.Layout.Column = 2;
             edConda.Tooltip = "Full path to conda.exe / conda.bat (auto-detected). Used only when a conda env is set.";
             btnBrowse = uibutton(g, 'push', 'Text', 'Browse', ...
                 'ButtonPushedFcn', @(s,e) onBrowseConda());
-            btnBrowse.Layout.Row = 6; btnBrowse.Layout.Column = 3;
+            btnBrowse.Layout.Row = 7; btnBrowse.Layout.Column = 3;
 
-            % Row 7: info
-            info = uilabel(g, 'Text', sprintf(['Runs rescore.py per dataset in the conda env. ' ...
-                'Only curated live points are scored; results are written to each ' ...
-                'CSV''s "rescore" column. Repo: %s'], char(app.RepoRoot)), ...
+            % Row 8: info
+            info = uilabel(g, 'Text', sprintf(['Runs score.py per dataset in the conda env, ' ...
+                'using the scoring model mapped to each CSV''s page. Only curated live ' ...
+                'points are scored; results are written to each CSV''s "rescore" column. ' ...
+                'Repo: %s'], char(app.RepoRoot)), ...
                 'WordWrap', 'on', 'FontColor', [0.4 0.4 0.4], 'VerticalAlignment', 'top');
-            info.Layout.Row = 7; info.Layout.Column = [1 3];
+            info.Layout.Row = 8; info.Layout.Column = [1 3];
 
-            % Row 8: Run / Cancel
+            % Row 9: Run / Cancel
             btnGrid = uigridlayout(g, [1 3]);
-            btnGrid.Layout.Row = 8; btnGrid.Layout.Column = [1 3];
+            btnGrid.Layout.Row = 9; btnGrid.Layout.Column = [1 3];
             btnGrid.ColumnWidth = {'1x', 100, 100};
             btnGrid.Padding = [0 0 0 0];
             uilabel(btnGrid, 'Text', '');
@@ -3218,9 +3393,39 @@ classdef CellNeighborResolverApp < handle
                 figure(dlg);   % restore modal focus
             end
 
+            function onPageSelect(evt)
+                if ~isempty(evt.Indices)
+                    selRow = evt.Indices(1, 1);
+                end
+            end
+
+            function onAddPage()
+                d = tblPages.Data;
+                if isempty(d)
+                    nextPage = 1;
+                else
+                    pages = cellfun(@(x) CellToolkit.parseNum(x, 0), d(:,1));
+                    nextPage = max(pages) + 1;
+                end
+                defModel = modelChoices{min(2, numel(modelChoices))};   % first real model
+                tblPages.Data = [d; {nextPage, defModel}];
+            end
+
+            function onDelPage()
+                d = tblPages.Data;
+                if isempty(d), return; end
+                if ~isempty(selRow) && selRow >= 1 && selRow <= size(d, 1)
+                    d(selRow, :) = [];
+                else
+                    d(end, :) = [];   % no selection -> drop last row
+                end
+                selRow = [];
+                tblPages.Data = d;
+            end
+
             function onRun()
                 cfg = struct();
-                cfg.model      = string(ddModel.Value);
+                cfg.pageMap    = app.sanitizeScorePageMap(tblPages.Data, modelChoices);
                 cfg.scope      = string(ddScope.Value);
                 cfg.device     = string(strtrim(edDevice.Value));
                 cfg.batchSize  = spBatch.Value;
@@ -3230,7 +3435,7 @@ classdef CellNeighborResolverApp < handle
                 if strlength(cfg.pythonExe) == 0, cfg.pythonExe = "python"; end
 
                 % Persist choices
-                app.Settings.LastScoringModel = cfg.model;
+                app.Settings.RescorePageMap   = cfg.pageMap;
                 app.Settings.RescoreScope     = cfg.scope;
                 app.Settings.RescoreDevice    = cfg.device;
                 app.Settings.RescoreBatchSize = cfg.batchSize;
@@ -3386,8 +3591,21 @@ classdef CellNeighborResolverApp < handle
                 if isnan(pg), pg = 1; end
             end
 
-            % Locate the companion image and extract the relevant page.
-            imgPath = CellToolkit.inferImagePath(csvPath);
+            % Resolve the scoring model mapped to this CSV's (logical) page.
+            % A page with no row, or one mapped to "(none)", is skipped. Done
+            % before reading the image so unmapped pages cost nothing.
+            modelName = app.scoreModelForPage(cfg.pageMap, pg);
+            if isempty(modelName)
+                st = "skip: page " + string(pg) + " not mapped to a scoring model";
+                return
+            end
+
+            % Locate the companion image (manifest first, then convention) and
+            % extract the relevant page.
+            imgPath = string(CellDatasetManifest.forCsv(csvPath).imageForLocs(csvPath));
+            if strlength(imgPath) == 0
+                imgPath = CellToolkit.inferImagePath(csvPath);
+            end
             if strlength(imgPath) == 0 || ~isfile(imgPath)
                 st = "skip: no companion image";
                 return
@@ -3413,18 +3631,26 @@ classdef CellNeighborResolverApp < handle
                 return
             end
 
-            % Write the rescore input: live X/Y plus a stable key for merge-back.
+            % Write the score.py input. score.py consumes the first column as
+            % the DataFrame index, derives integer crop centres Yi/Xi from the
+            % Yp/Xp float coordinates, and resolves each imgName against --root.
+            % rescore_key rides through as an ordinary column so the model's
+            % score can be merged back onto the right rows afterwards.
+            [~, imgStem, imgExt] = fileparts(tmpImg);
+            nLive = numel(keys);
             inTbl = table();
-            inTbl.X           = double(ex(live));
-            inTbl.Y           = double(ey(live));
+            inTbl.idx         = (0:nLive-1)';
+            inTbl.imgName     = repmat(string([imgStem imgExt]), nLive, 1);
+            inTbl.Xp          = double(ex(live));
+            inTbl.Yp          = double(ey(live));
             inTbl.rescore_key = keys;
             writetable(inTbl, tmpInCsv);
 
-            % Build and run the rescore.py command in the configured env.
-            [status, out] = app.runRescoreProcess(cfg, tmpInCsv, tmpImg, tmpOut);
+            % Build and run the score.py command in the configured env.
+            [status, out] = app.runRescoreProcess(cfg, modelName, tmpInCsv, tmpImg, tmpOut);
             if status ~= 0 || ~isfile(tmpOut)
-                fprintf(2, '[RESCORE] rescore.py output:\n%s\n', out);
-                st = "error: rescore.py failed (exit " + string(status) + ")";
+                fprintf(2, '[RESCORE] score.py output:\n%s\n', out);
+                st = "error: score.py failed (exit " + string(status) + ")";
                 return
             end
 
@@ -3458,16 +3684,28 @@ classdef CellNeighborResolverApp < handle
             if isfile(char(csvPath)), delete(char(csvPath)); end
             movefile(tmpWrite, char(csvPath), 'f');
 
+            % Record the rescore stage in the dataset manifest (best effort).
+            try
+                mf  = CellDatasetManifest.forCsv(char(csvPath));
+                key = CellDatasetManifest.keyForCsv(char(csvPath));
+                mf.recordRescore(key, struct('tool', 'CellNeighborResolution', ...
+                    'model', char(modelName)));
+                mf.save();
+            catch
+            end
+
             st = "ok: " + string(numel(keys)) + " point(s)";
         end
 
-        function [status, out] = runRescoreProcess(app, cfg, tmpInCsv, tmpImg, tmpOut)
-            % Assemble and run the rescore.py command (optionally wrapped in
+        function [status, out] = runRescoreProcess(app, cfg, modelName, tmpInCsv, tmpImg, tmpOut)
+            % Assemble and run the score.py command (optionally wrapped in
             % 'conda run'), with the repo root as the working directory so the
-            % script and model-folder name resolve relative to it.
+            % script and model-folder name resolve relative to it. The temp
+            % image lives in a temp dir; score.py joins each imgName onto --root.
+            % modelName is the scoring-model run folder mapped to this page.
             pcfg = app.pythonConfigFromRescoreCfg(cfg);
-            args = CellToolkit.rescoreArgs(char(cfg.model), tmpInCsv, struct( ...
-                'image',     tmpImg, ...
+            args = CellToolkit.scoreArgs(char(modelName), tmpInCsv, struct( ...
+                'root',      fileparts(tmpImg), ...
                 'device',    char(cfg.device), ...
                 'batchSize', cfg.batchSize, ...
                 'output',    tmpOut));
@@ -3495,6 +3733,48 @@ classdef CellNeighborResolverApp < handle
         function closeProgress(~, dlg)
             if ~isempty(dlg) && isvalid(dlg)
                 close(dlg);
+            end
+        end
+
+        function data = sanitizeScorePageMap(app, data, modelChoices)
+            % Validate/repair a saved per-page scoring map against the current
+            % model list, so a stale or malformed pref never breaks the uitable
+            % (whose dropdown column requires valid members). Each row is
+            % {pageIndex, modelName}; an unknown model is reset to "(none)".
+            fallback = app.SCORE_NONE_LABEL;
+            if isempty(data) || ~iscell(data) || size(data, 2) ~= 2
+                if numel(modelChoices) >= 2
+                    fallback = modelChoices{2};   % first real model, if any
+                end
+                data = {1, fallback};
+                return
+            end
+            for r = 1:size(data, 1)
+                p = CellToolkit.parseNum(data{r,1}, 1);
+                if p < 1, p = 1; end
+                data{r,1} = round(p);
+                v = data{r,2};
+                if ~ischar(v) || ~ismember(v, modelChoices)
+                    data{r,2} = app.SCORE_NONE_LABEL;
+                end
+            end
+        end
+
+        function modelName = scoreModelForPage(app, pageMap, pg)
+            % Return the scoring-model run folder mapped to TIFF page pg, or ''
+            % when the page has no row or is mapped to "(none)" (i.e. skipped).
+            modelName = '';
+            if isempty(pageMap) || ~iscell(pageMap) || size(pageMap, 2) < 2
+                return
+            end
+            for r = 1:size(pageMap, 1)
+                if CellToolkit.parseNum(pageMap{r,1}, 0) == pg
+                    v = pageMap{r,2};
+                    if ischar(v) && ~strcmp(v, app.SCORE_NONE_LABEL)
+                        modelName = v;
+                    end
+                    return
+                end
             end
         end
 

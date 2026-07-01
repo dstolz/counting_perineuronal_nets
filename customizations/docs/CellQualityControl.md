@@ -1,4 +1,4 @@
-# Cell Localization QC — Manual Quality Control Review
+﻿# Cell Localization QC — Manual Quality Control Review
 
 [← Back to the User Guide home](Home.md)
 
@@ -12,7 +12,7 @@ final tool in the workflow.
 Open it from the MATLAB Command Window:
 
 ```matlab
-CellLocalizationQCApp
+CellQualityControl
 ```
 
 ---
@@ -210,11 +210,11 @@ The **Settings** dialog holds options that persist across sessions:
 Also reachable from Settings:
 
 - **Use resized CSVs** — Review the resized-coordinate detections
-  (`*_locs_resized.csv`) paired with the preprocessed image
-  (`*_preprocessed.tif`) instead of the standard `*_locs.csv` + projection
+  (`*_locs_resized.csv`) paired with the resized image
+  (`*_resized.tif`) instead of the standard `*_locs.csv` + projection
   image. Use this when you detected with resizing enabled in Cell Discovery.
 - **Location source** — Choose **Original** (the detector's X/Y) or **Modified**
-  (the [Cell Neighbor Resolver](CellNeighborResolverApp.md)'s curated X/Y,
+  (the [Cell Neighbor Resolver](CellNeighborResolution.md)'s curated X/Y,
   hiding cells the resolver deleted or merged away). Sources that were never
   curated fall back to the original X/Y with a warning. Your QC labels stay tied
   to the original CSV row, so they remain consistent whichever mode you use.
@@ -242,9 +242,9 @@ Also reachable from Settings:
 | **Crops look too dark/bright** | Change the **Contrast** mode (this is display-only and doesn't change data). |
 | **"Modified" source shows a warning** | That source was never curated by the Neighbor Resolver; it falls back to original X/Y. |
 | **Freehand region tool unavailable** | The full-image map's freehand classification needs the Image Processing Toolbox. |
-| **Buttons stopped responding after a code update** | Run `clear classes; CellLocalizationQCApp` in MATLAB. |
+| **Buttons stopped responding after a code update** | Run `clear classes; CellQualityControl` in MATLAB. |
 
 ---
 
-[← Cell Neighbor Resolver](CellNeighborResolverApp.md) ·
+[← Cell Neighbor Resolver](CellNeighborResolution.md) ·
 [Back to the User Guide home](Home.md)

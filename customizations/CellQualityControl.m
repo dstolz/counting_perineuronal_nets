@@ -1,14 +1,14 @@
-classdef CellLocalizationQCApp < handle
-% CellLocalizationQCApp Manual QC GUI for cell localization CSV files.
-%   app = CellLocalizationQCApp launches a programmatic MATLAB GUI for
+﻿classdef CellQualityControl < handle
+% CellQualityControl Manual QC GUI for cell localization CSV files.
+%   app = CellQualityControl launches a programmatic MATLAB GUI for
 %   reviewing localized cell detections from multipage TIFF images and
 %   associated *_locs.csv files. Review labels are saved to separate *_QC.csv
 %   files and are merged back by QCSourceRow when a source is reloaded.
 %
 %   Settings > Project options:
 %     "Use resized CSVs"  scans for resized-coordinate localizations
-%       (*_locs_resized.csv) paired with the preprocessed/resized image
-%       (*_preprocessed.tif) instead of the standard *_locs.csv + *_proj.tif.
+%       (*_locs_resized.csv) paired with the resized/resized image
+%       (*_resized.tif) instead of the standard *_locs.csv + *_proj.tif.
 %     "Location source"   chooses Original (detected X/Y) or Modified
 %       (the Cell Neighbor Resolver's CURATED_X/CURATED_Y, hiding cells the
 %       resolver deleted/merged away). Uncurated sources fall back to the
@@ -16,9 +16,9 @@ classdef CellLocalizationQCApp < handle
 %       row, so they remain consistent across Original/Modified modes.
 
     properties (Constant, Access = private)
-        SettingsGroup = 'CellLocalizationQCApp'
+        SettingsGroup = 'CellQualityControl'
         SettingsPrefKey = 'Settings'
-        SettingsAppDataKey = 'CellLocalizationQCAppSettings'
+        SettingsAppDataKey = 'CellQualityControlSettings'
         QCVersion = '1.0'
     end
 
@@ -106,13 +106,17 @@ classdef CellLocalizationQCApp < handle
         TissueClassPointRows double = []
         TissueSelectionHandle = []
         TissueContextMenu = []
+        TissueHomeXLim double = []
+        TissueHomeYLim double = []
+        PanActive logical = false
+        PanStartData double = [NaN NaN]
         NotesEdit
         MetadataTable
         StatusLabel
     end
 
     methods
-        function app = CellLocalizationQCApp()
+        function app = CellQualityControl()
             app.DatasetList = app.emptyDatasetTable();
             app.ActiveLocalizationTable = table();
             app.ActiveReviewTable = table();
@@ -128,6 +132,38 @@ classdef CellLocalizationQCApp < handle
                 app.scanParentDirectory(true);
             else
                 app.updateStatus("Select a parent directory and press Scan.");
+            end
+        end
+
+        function openParent(app, parentDir, datasetId)
+            % Point the QC app at a folder, scan it, and optionally select a
+            % dataset by its DatasetID. Used by CellDatasetManager to open a
+            % chosen dataset directly.
+            if nargin >= 2 && ~isempty(parentDir)
+                app.ParentDirectory = string(parentDir);
+                app.ParentDirEdit.Value = char(parentDir);
+            end
+            app.scanParentDirectory(false);
+            if nargin >= 3 && ~isempty(datasetId) && ~isempty(app.DatasetList) ...
+                    && height(app.DatasetList) > 0
+                idx = find(app.DatasetList.DatasetID == string(datasetId), 1);
+                if ~isempty(idx)
+                    app.loadDataset(idx);
+                end
+            end
+            if ~isempty(app.UIFigure) && isvalid(app.UIFigure)
+                figure(app.UIFigure);
+            end
+        end
+
+        function addCloseListener(app, fcn)
+            % Register a callback to fire when this app's window is
+            % destroyed. Used by CellDatasetManager to re-scan its dashboard
+            % once QC review is done, without coupling to the private figure
+            % handle.
+            if ~isempty(app.UIFigure) && isvalid(app.UIFigure)
+                addlistener(app.UIFigure, 'ObjectBeingDestroyed', ...
+                    @(~,~) fcn());
             end
         end
     end
@@ -395,17 +431,9 @@ classdef CellLocalizationQCApp < handle
                 component
                 tooltipText (1,1) string
             end
-
-            if isempty(component)
-                return
-            end
-
-            component = component(:);
-            for k = 1:numel(component)
-                if isvalid(component(k)) && isprop(component(k), 'Tooltip')
-                    component(k).Tooltip = char(tooltipText);
-                end
-            end
+            % Delegate to the shared CellToolkit helper so the three Cell* GUIs
+            % share one tested tooltip implementation.
+            CellToolkit.setTooltip(component, tooltipText);
         end
 
         function applyMainTooltips(app)
@@ -470,14 +498,8 @@ classdef CellLocalizationQCApp < handle
                 dropDown
                 value
             end
-
-            items = string(dropDown.Items);
-            value = string(value);
-            if any(items == value)
-                dropDown.Value = char(value);
-            elseif ~isempty(items)
-                dropDown.Value = char(items(1));
-            end
+            % Delegate to the shared CellToolkit helper.
+            CellToolkit.setDropDownValue(dropDown, value);
         end
 
         function rebuildCategoryButtons(app)
@@ -520,7 +542,8 @@ classdef CellLocalizationQCApp < handle
 
             app.TissueFigure = figure('Name', 'Cell QC map', 'NumberTitle', 'off', ...
                 'WindowKeyPressFcn', @(src, event) app.handleKeyPress(src, event), ...
-                'WindowKeyReleaseFcn', @(src, event) app.handleKeyRelease(src, event));
+                'WindowKeyReleaseFcn', @(src, event) app.handleKeyRelease(src, event), ...
+                'WindowScrollWheelFcn', @(src, event) app.onTissueScrollWheel(src, event));
             app.TissueAxes = axes('Parent', app.TissueFigure);
             app.TissueAxes.ButtonDownFcn = @(src, event) app.onTissuePlotClicked(src, event);
             app.installTissuePlotContextMenu();
@@ -561,6 +584,11 @@ classdef CellLocalizationQCApp < handle
             app.updateTissuePlotSelection();
             hold(app.TissueAxes, 'off')
             axis(app.TissueAxes, 'image')
+
+            % Snapshot full-image extent for zoom/pan clamping.
+            app.TissueHomeXLim = app.TissueAxes.XLim;
+            app.TissueHomeYLim = app.TissueAxes.YLim;
+
             title(app.TissueAxes, sprintf('%s | %s page %d', ...
                 char(app.DatasetList.Name(app.ActiveDatasetIndex)), ...
                 char(app.safeText(app.ActiveSource.ChannelName, "")), ...
@@ -582,6 +610,10 @@ classdef CellLocalizationQCApp < handle
                 uimenu(classMenu, 'Text', label, ...
                     'Callback', @(src, event) app.classifyTissueFreehandROI(k));
             end
+
+            uimenu(cm, 'Text', 'Reset view (fit image)  [f]', ...
+                'Separator', 'on', ...
+                'Callback', @(src, event) app.resetTissueView());
 
             app.TissueContextMenu = cm;
             app.attachContextMenu(app.TissueFigure, cm);
@@ -608,6 +640,154 @@ classdef CellLocalizationQCApp < handle
                 graphicsObject.ContextMenu = contextMenu;
             elseif isprop(graphicsObject, 'UIContextMenu')
                 graphicsObject.UIContextMenu = contextMenu;
+            end
+        end
+
+        % --------------------------------------------------------------
+        % TISSUE PLOT ZOOM / PAN
+        % --------------------------------------------------------------
+
+        function onTissueScrollWheel(app, ~, event)
+            % Zoom in/out keeping the point under the cursor fixed.
+            if ~app.pointerOverTissueAxes()
+                return
+            end
+            ax = app.TissueAxes;
+            if isempty(ax) || ~isvalid(ax)
+                return
+            end
+            cp = ax.CurrentPoint;
+            cx = cp(1, 1);
+            cy = cp(1, 2);
+            if ~isfinite(cx) || ~isfinite(cy)
+                return
+            end
+            if event.VerticalScrollCount < 0
+                factor = 1 / 1.25;
+            elseif event.VerticalScrollCount > 0
+                factor = 1.25;
+            else
+                return
+            end
+            xl = ax.XLim;
+            yl = ax.YLim;
+            newXl = cx + (xl - cx) * factor;
+            newYl = cy + (yl - cy) * factor;
+            minSpan = 8;
+            if factor > 1
+                if isempty(app.TissueHomeXLim) || diff(newXl) >= diff(app.TissueHomeXLim)
+                    app.resetTissueView();
+                    return
+                end
+            elseif diff(newXl) < minSpan
+                return
+            end
+            [newXl, newYl] = app.clampToHome(newXl, newYl);
+            if newXl(2) > newXl(1) && newYl(2) > newYl(1)
+                ax.XLim = newXl;
+                ax.YLim = newYl;
+            end
+        end
+
+        function beginTissuePan(app)
+            ax = app.TissueAxes;
+            if isempty(ax) || ~isvalid(ax)
+                return
+            end
+            app.PanActive = true;
+            cp = ax.CurrentPoint;
+            app.PanStartData = cp(1, 1:2);
+            app.TissueFigure.WindowButtonMotionFcn = @(s,e) app.doTissuePanMotion();
+            app.TissueFigure.WindowButtonUpFcn     = @(s,e) app.endTissuePan();
+            try
+                app.TissueFigure.Pointer = 'hand';
+            catch
+            end
+        end
+
+        function doTissuePanMotion(app)
+            if ~app.PanActive || isempty(app.TissueAxes) || ~isvalid(app.TissueAxes)
+                return
+            end
+            ax = app.TissueAxes;
+            cp = ax.CurrentPoint;
+            delta = cp(1, 1:2) - app.PanStartData;
+            if any(~isfinite(delta))
+                return
+            end
+            xl = ax.XLim - delta(1);
+            yl = ax.YLim - delta(2);
+            [xl, yl] = app.clampToHome(xl, yl);
+            ax.XLim = xl;
+            ax.YLim = yl;
+        end
+
+        function endTissuePan(app)
+            app.PanActive = false;
+            if ~isempty(app.TissueFigure) && isvalid(app.TissueFigure)
+                app.TissueFigure.WindowButtonMotionFcn = '';
+                app.TissueFigure.WindowButtonUpFcn     = '';
+                try
+                    app.TissueFigure.Pointer = 'arrow';
+                catch
+                end
+            end
+        end
+
+        function resetTissueView(app)
+            if isempty(app.TissueAxes) || ~isvalid(app.TissueAxes)
+                return
+            end
+            if ~isempty(app.TissueHomeXLim) && ~isempty(app.TissueHomeYLim)
+                app.TissueAxes.XLim = app.TissueHomeXLim;
+                app.TissueAxes.YLim = app.TissueHomeYLim;
+                app.updateStatus("Tissue plot view reset to full image.");
+            end
+        end
+
+        function [xl, yl] = clampToHome(app, xl, yl)
+            if ~isempty(app.TissueHomeXLim) && numel(app.TissueHomeXLim) == 2
+                xl = app.clampOneAxis(xl, app.TissueHomeXLim);
+            end
+            if ~isempty(app.TissueHomeYLim) && numel(app.TissueHomeYLim) == 2
+                yl = app.clampOneAxis(yl, app.TissueHomeYLim);
+            end
+        end
+
+        function lim = clampOneAxis(~, lim, home)
+            span = diff(lim);
+            if span >= diff(home)
+                lim = home;
+            elseif lim(1) < home(1)
+                lim = home(1) + [0, span];
+            elseif lim(2) > home(2)
+                lim = home(2) - [span, 0];
+            end
+        end
+
+        function tf = pointerOverTissueAxes(app)
+            tf = false;
+            if isempty(app.TissueAxes) || ~isvalid(app.TissueAxes) || ...
+                    isempty(app.TissueFigure) || ~isvalid(app.TissueFigure)
+                return
+            end
+            try
+                p  = app.TissueFigure.CurrentPoint;
+                ap = getpixelposition(app.TissueAxes, true);
+            catch
+                return
+            end
+            tf = p(1) >= ap(1) && p(1) <= ap(1) + ap(3) && ...
+                 p(2) >= ap(2) && p(2) <= ap(2) + ap(4);
+        end
+
+        function selType = tissueFigureSelectionType(app)
+            selType = 'normal';
+            if ~isempty(app.TissueFigure) && isvalid(app.TissueFigure)
+                try
+                    selType = app.TissueFigure.SelectionType;
+                catch
+                end
             end
         end
 
@@ -828,6 +1008,12 @@ classdef CellLocalizationQCApp < handle
                 app
                 src = []
                 event = []
+            end
+
+            % Middle-button or Shift+click starts a pan drag.
+            if strcmp(app.tissueFigureSelectionType(), 'extend')
+                app.beginTissuePan();
+                return
             end
 
             if isempty(app.ActiveReviewTable) || isempty(app.TissueAxes) || ~isvalid(app.TissueAxes)
@@ -1654,7 +1840,7 @@ classdef CellLocalizationQCApp < handle
         end
 
         function pattern = effectiveImagePattern(app)
-            % Image glob used by the scan: the preprocessed/resized image when
+            % Image glob used by the scan: the resized/resized image when
             % Resized mode is on (its coordinate space matches *_locs_resized.csv),
             % otherwise the standard projection image.
             if app.Settings.UseResizedCsv
@@ -1676,9 +1862,9 @@ classdef CellLocalizationQCApp < handle
 
         function base = csvMatchBase(app, imageBase)
             % Stem used to associate CSV files with a scanned image. CellDiscovery
-            % names the resized image "<stem>_preprocessed.tif" but the resized
+            % names the resized image "<stem>_resized.tif" but the resized
             % CSVs "<stem>_..._locs_resized.csv", so in Resized mode we strip the
-            % preprocessed-image suffix to recover the shared stem. Standard mode
+            % resized-image suffix to recover the shared stem. Standard mode
             % keeps the image base verbatim (unchanged legacy behavior).
             base = string(imageBase);
             if ~app.Settings.UseResizedCsv
@@ -1692,7 +1878,7 @@ classdef CellLocalizationQCApp < handle
 
         function suffix = patternStemSuffix(~, pattern)
             % Literal text after the wildcard in an image glob, e.g.
-            % "*_preprocessed.tif" -> "_preprocessed". Returns "" if no wildcard.
+            % "*_resized.tif" -> "_preprocessed". Returns "" if no wildcard.
             [~, name, ~] = fileparts(char(string(pattern)));
             star = find(name == '*', 1, 'last');
             if isempty(star)
@@ -3107,7 +3293,7 @@ classdef CellLocalizationQCApp < handle
             end
 
             [folder, stem, ~] = fileparts(char(imagePath));
-            preprocessedPath = string(fullfile(folder, [stem '_preprocessed.tif']));
+            preprocessedPath = string(fullfile(folder, [stem '_resized.tif']));
         end
 
         function [cropImage, marker, isValid, message] = extractCropFromImage(app, imagePage, x, y, width, height)
@@ -4436,7 +4622,7 @@ classdef CellLocalizationQCApp < handle
             try
                 writetable(app.ActiveReviewTable, char(tempPath));
                 if ~isfile(tempPath)
-                    error('CellLocalizationQCApp:SaveFailed', 'Temporary QC file was not created.');
+                    error('CellQualityControl:SaveFailed', 'Temporary QC file was not created.');
                 end
                 if isfile(qcPath)
                     delete(qcPath);
@@ -4451,6 +4637,31 @@ classdef CellLocalizationQCApp < handle
                 uialert(app.UIFigure, ME.message, 'QC save failed');
                 app.updateStatus("Save failed: " + string(ME.message));
                 return
+            end
+
+            % Record the QC stage (with review counts) in the dataset manifest.
+            try
+                counts = struct('reviewed', 0, 'good', 0, 'bad', 0, 'uncertain', 0);
+                rt = app.ActiveReviewTable;
+                vn = string(rt.Properties.VariableNames);
+                if ismember("QCLabel", vn)
+                    labels = string(rt.QCLabel);
+                    counts.good      = sum(labels == "Good");
+                    counts.bad       = sum(labels == "Bad");
+                    counts.uncertain = sum(labels == "Uncertain");
+                    counts.reviewed  = sum(strlength(labels) > 0);
+                end
+                if ismember("QCReviewed", vn)
+                    v = rt.QCReviewed;
+                    if ~islogical(v), v = (double(v) ~= 0); end
+                    counts.reviewed = sum(v);
+                end
+                counts.tool = 'CellQualityControl';
+                mf  = CellDatasetManifest.forCsv(char(app.ActiveSource.CsvPath));
+                key = CellDatasetManifest.keyForCsv(char(app.ActiveSource.CsvPath));
+                mf.recordQc(key, char(qcPath), counts);
+                mf.save();
+            catch
             end
 
             app.Dirty = false;
@@ -4549,7 +4760,7 @@ classdef CellLocalizationQCApp < handle
             controls.LocalizationPatternEdit = uieditfield(projectGrid, "text", "Value", char(string(app.Settings.LocalizationPattern)));
             uilabel(projectGrid, "Text", "Use resized CSVs", "HorizontalAlignment", "right");
             controls.UseResizedCheckBox = uicheckbox(projectGrid, "Text", "", "Value", logical(app.Settings.UseResizedCsv));
-            uilabel(projectGrid, "Text", "Preprocessed image pattern", "HorizontalAlignment", "right");
+            uilabel(projectGrid, "Text", "Resized image pattern", "HorizontalAlignment", "right");
             controls.PreprocessedImagePatternEdit = uieditfield(projectGrid, "text", "Value", char(string(app.Settings.PreprocessedImagePattern)));
             uilabel(projectGrid, "Text", "Resized localization pattern", "HorizontalAlignment", "right");
             controls.ResizedLocalizationPatternEdit = uieditfield(projectGrid, "text", "Value", char(string(app.Settings.ResizedLocalizationPattern)));
@@ -4608,8 +4819,8 @@ classdef CellLocalizationQCApp < handle
 
             app.setTooltip(controls.ImagePatternEdit, "Image filename pattern for recursive scan. Default: *_proj.tif.");
             app.setTooltip(controls.LocalizationPatternEdit, "Localization CSV pattern for recursive scan. Default: *_locs.csv.");
-            app.setTooltip(controls.UseResizedCheckBox, "Scan for resized-coordinate CSVs (*_locs_resized.csv) paired with the preprocessed/resized image instead of the standard CSV + projection image. Default: off.");
-            app.setTooltip(controls.PreprocessedImagePatternEdit, "Image pattern used when Resized is on; its coordinate space must match the resized CSVs. Default: *_preprocessed.tif.");
+            app.setTooltip(controls.UseResizedCheckBox, "Scan for resized-coordinate CSVs (*_locs_resized.csv) paired with the resized/resized image instead of the standard CSV + projection image. Default: off.");
+            app.setTooltip(controls.PreprocessedImagePatternEdit, "Image pattern used when Resized is on; its coordinate space must match the resized CSVs. Default: *_resized.tif.");
             app.setTooltip(controls.ResizedLocalizationPatternEdit, "Localization CSV pattern used when Resized is on. Default: *_locs_resized.csv.");
             app.setTooltip(controls.LocationSourceDropDown, "Original = detected X/Y. Modified = Cell Neighbor Resolver's CURATED_X/CURATED_Y, hiding resolver-deleted cells. Falls back to original X/Y (with a warning) for uncurated sources. Default: Original.");
             app.setTooltip(controls.ReviewerEdit, "Reviewer name stored in QCReviewer when cells are classified.");
@@ -5033,7 +5244,11 @@ classdef CellLocalizationQCApp < handle
                 case "a"
                     app.selectAllVisibleCells();
                 case "f"
-                    app.showSelectedCropFigure();
+                    if ~isempty(app.TissueFigure) && isvalid(app.TissueFigure) && isequal(src, app.TissueFigure)
+                        app.resetTissueView();
+                    else
+                        app.showSelectedCropFigure();
+                    end;
             end
         end
 
@@ -5117,6 +5332,12 @@ classdef CellLocalizationQCApp < handle
                 "Click tile = select cell"
                 "Shift+click tile = toggle multi-selection"
                 "Click Cell QC map point = select cell and jump main GUI to its block"
+                ""
+                "Full image QC map (tissue plot)"
+                "Scroll wheel = zoom in/out centred on cursor"
+                "Middle-drag or Shift-drag = pan"
+                "f (in tissue window) = reset view to full image"
+                "Right-click > Reset view = reset view to full image"
                 ];
 
             uialert(app.UIFigure, strjoin(msg, newline), "Keyboard Shortcuts", "Icon", "info");
@@ -5367,13 +5588,13 @@ classdef CellLocalizationQCApp < handle
             try
                 save(app.settingsMatPath(), 'settings');
             catch ME
-                warning('CellLocalizationQCApp:SettingsMatSaveFailed', 'Settings MAT file was not saved: %s', ME.message);
+                warning('CellQualityControl:SettingsMatSaveFailed', 'Settings MAT file was not saved: %s', ME.message);
             end
 
             try
                 setpref(app.SettingsGroup, app.SettingsPrefKey, app.Settings);
             catch ME
-                warning('CellLocalizationQCApp:SettingsPrefSaveFailed', 'MAT settings were saved, but MATLAB preferences were not saved: %s', ME.message);
+                warning('CellQualityControl:SettingsPrefSaveFailed', 'MAT settings were saved, but MATLAB preferences were not saved: %s', ME.message);
             end
         end
 
@@ -5432,7 +5653,7 @@ classdef CellLocalizationQCApp < handle
             defaults.ImagePattern = "*_proj.tif";
             defaults.LocalizationPattern = "*_locs.csv";
             defaults.UseResizedCsv = false;
-            defaults.PreprocessedImagePattern = "*_preprocessed.tif";
+            defaults.PreprocessedImagePattern = "*_resized.tif";
             defaults.ResizedLocalizationPattern = "*_locs_resized.csv";
             defaults.LocationSource = "Original";
             defaults.ChannelMap = struct('Channel', {'ECM', 'PV'}, 'PageIndex', {1, 2});
@@ -5483,19 +5704,10 @@ classdef CellLocalizationQCApp < handle
                 defaults struct
                 stored struct
             end
-
-            settings = defaults;
-            fields = fieldnames(stored);
-            for k = 1:numel(fields)
-                field = fields{k};
-                if isfield(defaults, field)
-                    if isstruct(defaults.(field)) && isstruct(stored.(field)) && isscalar(defaults.(field)) && isscalar(stored.(field))
-                        settings.(field) = app.mergeSettings(defaults.(field), stored.(field));
-                    else
-                        settings.(field) = stored.(field);
-                    end
-                end
-            end
+            % Delegate to the shared CellToolkit helper (same overlay semantics:
+            % copy stored fields that exist in defaults, recurse into scalar
+            % sub-structs, drop unknown fields).
+            settings = CellToolkit.mergeSettings(defaults, stored);
         end
 
         function categories = sanitizeCategories(app, categories)
@@ -5643,7 +5855,7 @@ classdef CellLocalizationQCApp < handle
                 app
             end
 
-            matPath = fullfile(prefdir, 'CellLocalizationQCApp_Settings.mat');
+            matPath = fullfile(prefdir, 'CellQualityControl_Settings.mat');
         end
 
         function names = datasetVariableNames(app)
@@ -5787,20 +5999,13 @@ classdef CellLocalizationQCApp < handle
                 fullPath
                 parentDir
             end
-
-            fullPath = string(fullPath);
-            parentDir = string(parentDir);
-            rel = fullPath;
-            if strlength(parentDir) == 0
-                return
-            end
-            parentWithSep = parentDir;
-            if ~endsWith(parentWithSep, filesep)
-                parentWithSep = parentWithSep + filesep;
-            end
-            if startsWith(fullPath, parentWithSep, 'IgnoreCase', true)
-                rel = extractAfter(fullPath, strlength(parentWithSep));
-            end
+            % Relative path of fullPath under parentDir. Delegates the matching
+            % to CellToolkit (shared, case-insensitive, separator-agnostic),
+            % then restores native separators so the DatasetID / source-identity
+            % strings persisted in QC CSVs keep this app's path convention.
+            rel = string(strrep( ...
+                CellToolkit.makeRelativePath(char(fullPath), char(parentDir)), ...
+                '/', filesep));
         end
 
         function id = sourceIdentity(app, source)

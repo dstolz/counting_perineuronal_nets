@@ -1,4 +1,4 @@
-# Cell Discovery — Batch Cell Detection
+﻿# Cell Discovery — Batch Cell Detection
 
 [← Back to the User Guide home](Home.md)
 
@@ -99,8 +99,8 @@ to pre-process the image first. See
   cells.
 - **Save annotated PNG…** — Also saves a `*_locs.png` preview image next to each
   CSV.
-- **Save final preprocessed image as TIF…** — Saves the exact (pre-processed)
-  image the model actually saw, as `*_preprocessed.tif`. Useful with the QC
+- **Save final resized image as TIF…** — Saves the exact (pre-processed)
+  image the model actually saw, as `*_resized.tif`. Useful with the QC
   tool's "Use resized CSVs" mode.
 
 ### Run Controls
@@ -155,6 +155,7 @@ Columns:
 | **Correct LSM** | Tick to apply bidirectional-scanner artifact correction first. |
 | **Bg radius** | Background-subtraction disk radius in pixels (`0` = off). |
 | **Resize x** | Resize factor applied before detection (`1` = no resize). |
+| **Snap** | Tick to refine detected locations with `snapToCellCentroid` after detection (post-processing). |
 
 - **Single-page images** only ever use the row for **page 1**.
 - Use **Add page** / **Remove page** to manage rows for multi-page TIFFs.
@@ -181,9 +182,46 @@ in the mapping table:
   (~0.645 µm/pixel). When resizing is used, a **second** CSV is written in the
   resized coordinate system (`*_locs_resized.csv`).
 
-**Show preprocessed image in results** — When ticked, the preview shows the
+**Show resized image in results** — When ticked, the preview shows the
 processed image the model actually saw; when unticked, it shows the original raw
 page with detections overlaid.
+
+---
+
+## Post-processing: snap to centroid (optional)
+
+Post-processing runs **after** detection, on the original-image coordinates,
+configured per page via the **Snap** column:
+
+- **Snap** — Tick to run
+  [`snapToCellCentroid`](../snapToCellCentroid.m) on the page's detections.
+  This *localization-refinement* step pulls each detected point to the refined
+  cell centre, recovering a consistent, reproducible centre for downstream
+  cropping, rescoring, and neighbour resolution. How the centre is found
+  depends on the **Method**:
+  - `radial-symmetry` — the default for ring-like PNNs (`oval` preset). Votes
+    each bright ring-wall pixel toward the **centre of the ring**, so the snap
+    lands in the dark hole even when the net is an open/broken arc. Use this for
+    nets, where a brightness-based method would settle on the wall instead.
+  - `weighted-centroid` — intensity-weighted centroid of the segmented local
+    blob; best for solid, round somata (PV, `round` preset).
+  - `mean-shift` — threshold-free climb to the brightest mode (lands on the
+    wall, not the hole — not recommended for rings).
+  - `auto` (default) — picks `radial-symmetry` for `oval`, `weighted-centroid`
+    otherwise.
+- **Snap options…** — Enabled once at least one page has **Snap** ticked. Opens
+  a dialog with a **page selector** so every page can carry its **own** snap
+  parameters — e.g. a PNN page using the `oval` preset while a PV page uses
+  `round`. Tune the cell-shape preset, method, pixel size, cell diameter, the
+  ring radius / dark-centre options (for `radial-symmetry`), threshold (for
+  `weighted-centroid`), search radius, and more (with a *Reset page* button).
+- **Apply to X/Y** (in the Snap options dialog) — When ticked, the snapped
+  coordinates overwrite the detector's `X`/`Y`. Either way the snap is recorded
+  non-destructively in extra columns (see below), so the original detection is
+  preserved when this is left off.
+
+Snapping needs the Image Processing Toolbox; if it fails for a page, a warning
+is logged and the detection CSV is still written.
 
 ---
 
@@ -194,14 +232,14 @@ image**:
 
 | File | When | Contents |
 |------|------|----------|
-| `<name>[_page<k>]_locs.csv` | Always | One row per detected cell: `X`, `Y`, `class`, `score`, and more. |
+| `<name>[_page<k>]_locs.csv` | Always | One row per detected cell: `X`, `Y`, `class`, `score`, and more. When **Snap** is on, also `SNAP_X`, `SNAP_Y`, `SNAP_Shift`, `SNAP_Snapped`. |
 | `<name>[_page<k>]_locs_resized.csv` | When resizing is used | Same detections, but in resized-image coordinates. |
 | `<name>[_page<k>]_locs.png` | When *Save annotated PNG* is on | Preview image with detections overlaid. |
-| `<name>[_page<k>]_preprocessed.tif` | When *Save preprocessed TIF* is on | The exact image the model received. |
+| `<name>[_page<k>]_resized.tif` | When *Save resized TIF* is on | The exact image the model received. |
 
 These `*_locs.csv` files are the input to the
-**[Cell Neighbor Resolver](CellNeighborResolverApp.md)** and
-**[Cell Localization QC](CellLocalizationQCApp.md)** tools.
+**[Cell Neighbor Resolver](CellNeighborResolution.md)** and
+**[Cell Localization QC](CellQualityControl.md)** tools.
 
 ---
 
@@ -230,4 +268,4 @@ These `*_locs.csv` files are the input to the
 ---
 
 [← Back to the User Guide home](Home.md) ·
-Next: [Cell Neighbor Resolver →](CellNeighborResolverApp.md)
+Next: [Cell Neighbor Resolver →](CellNeighborResolution.md)

@@ -1,7 +1,7 @@
-classdef CellToolkit
+﻿classdef CellToolkit
 % CELLTOOLKIT  Shared helpers for the Cell* MATLAB GUIs.
 %   A stateless utility class collecting functionality common to
-%   CellDiscovery, CellNeighborResolverApp, and CellLocalizationQCApp so the
+%   CellDiscovery, CellNeighborResolution, and CellQualityControl so the
 %   three GUIs share one tested implementation instead of three copies.
 %
 %   Every method is Static — call them on the class, no instance needed:
@@ -23,9 +23,9 @@ classdef CellToolkit
 %       % Pre-flight: are hydra + torch importable?
 %       [ok, msg] = CellToolkit.testPythonEnv(cfg);
 %
-%       % Synchronous (e.g. rescore.py) — blocks, returns exit code + output:
-%       args = CellToolkit.rescoreArgs(model, locsCsv, ...
-%                  struct('image', imgPath, 'device', 'cuda:0', 'output', outCsv));
+%       % Synchronous (e.g. score.py) — blocks, returns exit code + output:
+%       args = CellToolkit.scoreArgs(model, locsCsv, ...
+%                  struct('root', imgDir, 'device', 'cuda:0', 'output', outCsv));
 %       [status, output] = CellToolkit.runPython(cfg, args);
 %
 %       % Asynchronous (e.g. predict.py) — returns a live process you poll:
@@ -73,16 +73,16 @@ classdef CellToolkit
 
         function root = detectRepoRoot(sentinelFiles, startDir)
             % Locate the repo root: the directory containing a known sentinel
-            % script (predict.py / rescore.py). Searches startDir and its
+            % script (predict.py / score.py). Searches startDir and its
             % parent, so callers work whether they live at the repo root or
             % in a subfolder such as customizations/.
             %
             %   sentinelFiles : char/cellstr of filenames marking the root.
-            %                   Default {'predict.py','rescore.py'}.
+            %                   Default {'predict.py','score.py'}.
             %   startDir      : directory to begin the search.
             %                   Default: this class file's own folder.
             if nargin < 1 || isempty(sentinelFiles)
-                sentinelFiles = {'predict.py', 'rescore.py'};
+                sentinelFiles = {'predict.py', 'score.py'};
             end
             if ischar(sentinelFiles) || isstring(sentinelFiles)
                 sentinelFiles = cellstr(sentinelFiles);
@@ -275,7 +275,7 @@ classdef CellToolkit
         function [ok, msg, output] = testPythonEnv(cfg, importModules)
             % Quick synchronous check that the configured environment can
             % import the required modules. Defaults to {'hydra','torch'} —
-            % the imports predict.py / rescore.py need. Returns ok (logical),
+            % the imports predict.py / score.py need. Returns ok (logical),
             % a human-readable msg ('' on success), and the raw command output.
             if nargin < 2 || isempty(importModules)
                 importModules = {'hydra', 'torch'};
@@ -346,20 +346,35 @@ classdef CellToolkit
             end
         end
 
-        function args = rescoreArgs(model, locsCsv, opts)
-            % Assemble a rescore.py argument list (excluding the interpreter).
+        function args = scoreArgs(model, locsCsv, opts)
+            % Assemble a score.py argument list (excluding the interpreter).
+            % score.py is the Stage-2 rescoring script: it crops a patch around
+            % each localization and runs a scoring model to estimate inter-rater
+            % agreement quality [0-1], written to a 'rescore' column.
+            %
+            %   model   : scoring-model run directory (score.py's 'run' arg)
+            %   locsCsv : localizations CSV to rescore (score.py's 'locs' arg).
+            %             Must carry imgName, Xp and Yp columns; the first
+            %             column is consumed as the pandas index.
             % opts is an optional struct; recognised fields:
-            %   image, device, batchSize, output
+            %   root      : directory the imgName paths are resolved against
+            %   device, batchSize, metric, patchSize, output
             if nargin < 3, opts = struct(); end
-            args = {'rescore.py', char(string(model)), char(string(locsCsv))};
-            if CellToolkit.hasField(opts, 'image')
-                args = [args, {'--image', char(string(opts.image))}];
+            args = {'score.py', char(string(model)), char(string(locsCsv))};
+            if CellToolkit.hasField(opts, 'root')
+                args = [args, {'--root', char(string(opts.root))}];
             end
             if CellToolkit.hasField(opts, 'device')
                 args = [args, {'--device', char(string(opts.device))}];
             end
             if CellToolkit.hasField(opts, 'batchSize')
                 args = [args, {'--batch-size', CellToolkit.numToStr(opts.batchSize)}];
+            end
+            if CellToolkit.hasField(opts, 'metric')
+                args = [args, {'--metric', char(string(opts.metric))}];
+            end
+            if CellToolkit.hasField(opts, 'patchSize')
+                args = [args, {'--patch-size', CellToolkit.numToStr(opts.patchSize)}];
             end
             if CellToolkit.hasField(opts, 'output')
                 args = [args, {'--output', char(string(opts.output))}];
@@ -547,24 +562,34 @@ classdef CellToolkit
         function imagePath = inferImagePath(csvPath, suffixes, exts)
             % Find the companion TIFF for a localization CSV, following the
             % CellDiscovery naming convention:
-            %   "img_PNN1_locs.csv"      -> "img.tif"
-            %   "img_locs.csv"           -> "img.tif"
-            %   "img_locs_resized.csv"   -> "img.tif"
+            %   "img_PNN1_locs.csv"         -> "img.tif"
+            %   "img_locs.csv"              -> "img.tif"
+            %   "img_PNN1_locs_resized.csv" -> "img_resized.tif"
+            %   "img_locs_resized.csv"      -> "img_resized.tif"
             % Stems are tried most- to least-specific; for each, the given
-            % image suffixes are tried in order, preferring the preprocessed
-            % variant. Returns '' when nothing matches.
+            % image suffixes are tried in order. A "*_locs_resized.csv" holds
+            % coordinates in the resized image's space, so it is matched
+            % ONLY against the resized image ("<stem>_resized.tif") — never the
+            % full-resolution page, whose coordinate space differs. Returns ''
+            % when nothing matches.
             %
-            %   suffixes : image-stem suffixes to try
-            %              (default {'_preprocessed','_proj',''})
+            %   suffixes : image-stem suffixes to try. Default depends on the
+            %              CSV: {'_resized'} for a resized CSV, otherwise
+            %              {'_preprocessed','_proj',''}.
             %   exts     : file extensions to try (default {'.tif','.tiff'})
+            [folder, name, ~] = fileparts(char(csvPath));
+            isResized = ~isempty(regexpi(name, '_locs_resized$', 'once'));
             if nargin < 2 || isempty(suffixes)
-                suffixes = {'_preprocessed', '_proj', ''};
+                if isResized
+                    suffixes = {'_resized'};
+                else
+                    suffixes = {'_preprocessed', '_proj', ''};
+                end
             end
             if nargin < 3 || isempty(exts)
                 exts = {'.tif', '.tiff'};
             end
             imagePath = '';
-            [folder, name, ~] = fileparts(char(csvPath));
 
             % Candidate stems, most- to least-specific.
             stems = {};
@@ -665,6 +690,19 @@ classdef CellToolkit
                 setpref(group, key, settings);
             catch
             end
+        end
+
+        function s = getSettings(group, defaults)
+            % Simple key-value settings load using the group name as both
+            % the pref group and key. Used by classes that don't need the
+            % full loadSettingsStruct path (no MAT-file fallback).
+            if nargin < 2, defaults = struct(); end
+            s = CellToolkit.loadSettingsStruct(group, 'Settings', defaults, '');
+        end
+
+        function setSettings(group, settings)
+            % Persist settings written via getSettings.
+            CellToolkit.saveSettingsStruct(group, 'Settings', settings, '');
         end
 
         function merged = mergeSettings(defaults, stored)

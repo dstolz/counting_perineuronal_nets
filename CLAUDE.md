@@ -1,4 +1,4 @@
-# CLAUDE.md
+﻿# CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -55,10 +55,15 @@ Methods are loaded dynamically via Hydra: `hydra.utils.get_method(f'methods.{cfg
 
 ### MATLAB Customizations (`customizations/`)
 
-- **`CellDiscovery.m`** — Batch processing GUI with recursive directory search, per-page model mapping for multi-page TIFFs, optional preprocessing (morphological background subtraction, LSM artifact correction), and real-time subprocess streaming
-- **`CellLocalizationQCApp.m`** — Interactive QC GUI for marking detections as Good/Bad
+- **`CellDatasetManifest.m`** — Authoritative per-dataset record and the single source of truth for file resolution (schema `celldataset/2.0`, sidecar `<base>.celldataset.json`). One instance == one dataset (a source TIFF + everything derived from it). Records the analyzed image/pages and, per `(channel,page)` **source**, the **active analysis CSV** (`activeLocs`), its resized companion, QC file, and stage provenance. All Cell* tools resolve files through it (`forImage`/`forCsv`/`activeLocs`/`imageForLocs`/`qcPath`/`channelPage`) and record through it (`recordDetection`/`recordResized`/`recordResolve`/`recordRescore`/`recordQc`/`setActiveLocs`); naming conventions (via `CellToolkit`) only bootstrap a missing manifest. `discover(parentDir)` returns all datasets below a folder. Clean break: non-`2.0` manifests are rebuilt from files (no migration)
+- **`CellDatasetManager.m`** — Dataset discovery + status dashboard. `scan(parentDir)` / `statusTable(parentDir)` are headless APIs returning each dataset with per-source pipeline status (detected/resolved/rescored/QC'd); `scan` now delegates discovery to `CellDatasetManifest.discover` and projects each manifest onto the dashboard's dataset struct (with the live manifest attached as `.ManifestObj`). The GUI lists all datasets, launches the other Cell* GUIs pre-pointed at a selected dataset, and via the **Set active locs…** button re-points a source's active analysis file (`CellDatasetManifest.setActiveLocs`)
+- **`CellToolkit.m`** — Stateless shared helpers (Python/conda exec, filesystem scan, TIFF/locs naming conventions, settings persistence, UI helpers) used by all Cell* GUIs
+- **`CellDiscovery.m`** — Batch processing GUI with recursive directory search, per-page model mapping for multi-page TIFFs, optional preprocessing (morphological background subtraction, LSM artifact correction), optional `snapToCellCentroid` post-processing (per-page enable + per-page parameter dialog; adds non-destructive `SNAP_X/Y/Shift/Snapped` columns and can overwrite `X/Y`), and real-time subprocess streaming
+- **`CellNeighborResolution.m`** — GUI to review/resolve duplicate nearby detections; edits `*_locs.csv` in place (adds `CURATED_X/Y`) and can run Stage-2 rescoring (`score.py`)
+- **`CellQualityControl.m`** — Interactive QC GUI for marking detections as Good/Bad
 - **`BinaryCellCropDataset.m`** — Builds training dataset from QC classifications
 - **`correctBidirectionalLSMArtifact.m`** — Preprocesses bidirectional LSM scanner artifacts
+- **`snapToCellCentroid.m`** — Pulls detected `X/Y` locations to the refined cell centre (localization refinement). Takes an image + `[X Y]` (or a *_locs table) and snaps each point, with cell-type presets (`round` for PV somata, `oval` for ring-like PNNs) and a `Method` that defaults to `auto` (resolved from the preset). Methods: `weighted-centroid` (intensity-weighted centroid of the segmented local blob — best for solid somata), `radial-symmetry` (a localized Fast Radial Symmetry Transform that votes each bright ring-wall pixel's gradient back to the **centre of the ring**, recovering the dark hole of an open/reticular PNN where a centroid would sit on the bright arc — the default for `oval`), and `mean-shift` (threshold-free climb to the brightest mode; note it lands on the wall, not the hole). Shared: targeted preprocessing (median/top-hat/Gaussian background, smoothing), bounded search radius, and a `MaxShift` cap so isolated points are never dragged onto a neighbour. Non-destructive on tables (adds `SNAP_X/Y/Shift/Snapped`)
 
 ## Commands
 
