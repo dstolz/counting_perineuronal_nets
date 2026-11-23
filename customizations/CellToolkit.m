@@ -538,6 +538,99 @@
             end
         end
 
+        function um = tiffPixelSizeUm(file, page)
+            % Micrometres per pixel of a TIFF page from its calibration, or NaN
+            % when the file carries no usable physical scale.
+            %
+            % Two conventions are understood:
+            %   * ImageJ/Fiji: XResolution is pixels per <unit>, where the unit
+            %     is named in the ImageDescription ("unit=micron"); the TIFF
+            %     ResolutionUnit tag is then typically "None".
+            %   * Plain TIFF: XResolution is pixels per ResolutionUnit
+            %     (Centimeter or Inch).
+            % Implausible results (outside 0.01-100 um/px, e.g. the 72 dpi many
+            % programs write by default) are reported as NaN rather than
+            % trusted, so callers can fall back explicitly.
+            um = NaN;
+            if nargin < 2 || isempty(page), page = 1; end
+            try
+                info = imfinfo(char(file));
+            catch
+                return;
+            end
+            if isempty(info) || ~isfield(info, 'XResolution'), return; end
+            pg = info(min(max(1, round(page)), numel(info)));
+            if isempty(pg.XResolution), return; end
+            xr = double(pg.XResolution(1));
+            if ~isfinite(xr) || xr <= 0, return; end
+
+            unitUm = NaN;   % micrometres per resolution unit
+            if isfield(info, 'ImageDescription')
+                desc = pg.ImageDescription;
+                if isempty(desc), desc = info(1).ImageDescription; end   % ImageJ: first page only
+                if ischar(desc) && contains(desc, 'ImageJ')
+                    tok = regexp(desc, 'unit=(\S+)', 'tokens', 'once');
+                    if ~isempty(tok)
+                        switch lower(tok{1})
+                            case {'micron', 'microns', 'um', [char(181) 'm'], 'µm'}
+                                unitUm = 1;
+                            case 'nm',   unitUm = 1e-3;
+                            case 'mm',   unitUm = 1e3;
+                            case 'cm',   unitUm = 1e4;
+                            case 'inch', unitUm = 25400;
+                        end
+                    end
+                end
+            end
+            if isnan(unitUm) && isfield(pg, 'ResolutionUnit')
+                switch lower(char(string(pg.ResolutionUnit)))
+                    case 'centimeter', unitUm = 1e4;
+                    case 'inch',       unitUm = 25400;
+                end
+            end
+
+            um = unitUm / xr;
+            if ~(um >= 0.01 && um <= 100), um = NaN; end
+        end
+
+        function [out, lims] = normalizeIntensity(img, pct, target)
+            % Linearly stretch an image so that its pct(1)-th percentile maps to
+            % 0 and its pct(2)-th percentile to target, clipping outside.
+            %   [out, lims] = CellToolkit.normalizeIntensity(img)            % [1 99.9] -> [0 255]
+            %   [out, lims] = CellToolkit.normalizeIntensity(img, pct, target)
+            %
+            % The detection models were trained on 8-bit images and predict.py
+            % divides pixel values by 255, so an image on any other scale
+            % (16-bit, float projections, ...) reaches the model outside the
+            % intensity range it learned and the number of detections follows
+            % the image brightness. This puts every image on the same scale.
+            %
+            % out is single; lims = [lo hi] are the source intensities mapped to
+            % 0 and target ([NaN NaN], with out = single(img), when the image
+            % has no intensity spread to stretch). Multi-channel images are
+            % stretched per channel (lims then has one row per channel).
+            % Percentiles are taken over a regular subsample (<= ~4 M pixels)
+            % of the finite pixels, so no toolbox is needed.
+            if nargin < 2 || isempty(pct),    pct    = [1 99.9]; end
+            if nargin < 3 || isempty(target), target = 255;      end
+            out  = single(img);
+            nCh  = size(out, 3);
+            lims = nan(nCh, 2);
+            step = max(1, floor(sqrt(size(out, 1) * size(out, 2) / 4e6)));
+            for c = 1:nCh
+                v = out(1:step:end, 1:step:end, c);
+                v = sort(double(v(isfinite(v))));
+                n = numel(v);
+                if n == 0, continue; end
+                lo = v(max(1, min(n, round(pct(1) / 100 * (n - 1)) + 1)));
+                hi = v(max(1, min(n, round(pct(2) / 100 * (n - 1)) + 1)));
+                if ~(hi > lo), continue; end
+                ch = (out(:, :, c) - single(lo)) * single(target / (hi - lo));
+                out(:, :, c) = min(max(ch, 0), single(target));
+                lims(c, :)   = [lo hi];
+            end
+        end
+
         function pg = pageFromIdentity(identity)
             % Page index encoded in a per-page identity string of the form
             % "<stem>_<suffix><page>", where <suffix> is alphabetic (e.g.

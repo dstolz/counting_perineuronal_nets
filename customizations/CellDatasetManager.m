@@ -1500,23 +1500,10 @@
         function um = pixelSizeUm(imgPath)
             % Micrometres-per-pixel from a TIFF's resolution tags, falling back
             % to DEFAULT_UM_PER_PIXEL when the file carries no physical scale.
-            um = CellDatasetManager.DEFAULT_UM_PER_PIXEL;
-            try
-                info = imfinfo(char(imgPath));
-                info = info(1);
-                if isfield(info, 'XResolution') && ~isempty(info.XResolution) ...
-                        && isfield(info, 'ResolutionUnit')
-                    xr = double(info.XResolution);
-                    if xr > 0
-                        switch lower(char(string(info.ResolutionUnit)))
-                            case 'centimeter'
-                                um = 10000 / xr;   % 1e4 um per cm
-                            case 'inch'
-                                um = 25400 / xr;   % 25400 um per inch
-                        end
-                    end
-                end
-            catch
+            % Reads ImageJ ("unit=micron") as well as plain TIFF calibration.
+            um = CellToolkit.tiffPixelSizeUm(imgPath, 1);
+            if ~isfinite(um)
+                um = CellDatasetManager.DEFAULT_UM_PER_PIXEL;
             end
         end
 

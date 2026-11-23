@@ -498,7 +498,9 @@ classdef CellDatasetManifest < handle
         function recordDetection(obj, key, info)
             % Record a detection: seed the image, page, plain locs + active
             % pointer, and the detection stage provenance/count.
-            %   info fields (all optional): image, page, locs, tool, model, count
+            %   info fields (all optional): image, page, locs, tool, model, count,
+            %   and the preprocessing the detector input went through: resize,
+            %   bgRadius, normalized, normLimits
             if nargin < 3 || ~isstruct(info), info = struct(); end
             [channel, page] = CellDatasetManifest.splitKey(key);
             if CellDatasetManifest.has(info, 'page'), page = double(info.page); end
@@ -523,7 +525,8 @@ classdef CellDatasetManifest < handle
             end
             obj.Data.sources.(key) = s;
 
-            facts = CellDatasetManifest.pickFacts(info, {'tool', 'model', 'count'});
+            facts = CellDatasetManifest.pickFacts(info, {'tool', 'model', 'count', ...
+                'resize', 'bgRadius', 'normalized', 'normLimits'});
             obj.markStage(key, 'detection', facts);
         end
 
@@ -1173,21 +1176,10 @@ classdef CellDatasetManifest < handle
 
         function um = pixelSizeUm(imgPath)
             % Micrometres-per-pixel from a TIFF's resolution tags, else default.
-            um = CellDatasetManifest.DEFAULT_UM_PER_PIXEL;
-            try
-                info = imfinfo(char(imgPath));
-                info = info(1);
-                if isfield(info, 'XResolution') && ~isempty(info.XResolution) ...
-                        && isfield(info, 'ResolutionUnit')
-                    xr = double(info.XResolution);
-                    if xr > 0
-                        switch lower(char(string(info.ResolutionUnit)))
-                            case 'centimeter', um = 10000 / xr;
-                            case 'inch',       um = 25400 / xr;
-                        end
-                    end
-                end
-            catch
+            % Reads ImageJ ("unit=micron") as well as plain TIFF calibration.
+            um = CellToolkit.tiffPixelSizeUm(imgPath, 1);
+            if ~isfinite(um)
+                um = CellDatasetManifest.DEFAULT_UM_PER_PIXEL;
             end
         end
     end

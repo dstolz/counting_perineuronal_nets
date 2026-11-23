@@ -14,6 +14,14 @@ classdef CellDiscovery < handle
     %       morphological background subtraction (disk radius) and resize;
     %       optional bidirectional LSM artifact correction can also be run
     %       before detection, configured per page.
+    %     - Pixel size: "Resize x" = 0 (the default) computes the factor from
+    %       the TIFF pixel-size calibration so the detector sees the training
+    %       pixel size (0.645 um/px); a manual factor that leaves the input
+    %       more than 15% off it is reported with a [WARN] line.
+    %     - Intensity: the "Normalize" column (on by default) stretches the
+    %       detector input so its 1st-99.9th percentiles span the 8-bit range
+    %       the models were trained on. It affects only what the detector and
+    %       scoring models see, never the source image or the saved TIF.
     %     - Optional post-processing applied after detection: snapToCellCentroid
     %       localization refinement, enabled per page (Snap column) with its own
     %       per-page parameters (Snap options... dialog). Adds non-destructive
@@ -60,6 +68,20 @@ classdef CellDiscovery < handle
         PREF_GROUP = 'PNNBatchGUI'
         SKIP_LABEL = '(skip)'    % page-map detection model sentinel: do not process page
         NONE_LABEL = '(none)'    % page-map rescore model sentinel: no rescoring
+
+        % Pixel size the pretrained models were trained at. "Resize x" = 0
+        % (auto) rescales each page to it from the TIFF calibration; a manual
+        % factor that leaves the detector input further than PIXEL_SIZE_TOL
+        % (fractional) from it raises a warning.
+        TRAIN_UM_PER_PIXEL = 0.645
+        PIXEL_SIZE_TOL     = 0.15
+
+        % Intensity normalisation of the detector input ("Normalize" column):
+        % these percentiles of the preprocessed page map to [0 NORM_TARGET].
+        % predict.py divides by 255, so 255 puts the page on the 8-bit scale
+        % the models were trained on.
+        NORM_PERCENTILES = [1 99.9]
+        NORM_TARGET      = 255
     end
 
     %% ---- Instance properties ---------------------------------------------
@@ -477,12 +499,17 @@ classdef CellDiscovery < handle
 
             obj.hPageTable = uitable(gMP, ...
                 'Data',          tableData, ...
-                'ColumnName',    {'Page','Suffix', 'Detection Model', 'Rescore Model', 'LSM', 'Bg radius', 'Resize x', 'Snap'}, ...
-                'ColumnFormat',  {'numeric', 'char', detChoices, rescoreChoices, 'logical', 'numeric', 'numeric', 'logical'}, ...
-                'ColumnEditable', [true true true true true true true true], ...
-                'ColumnWidth',   {50, 70, 220, 300, 80, 80, 70, 60}, ...
+                'ColumnName',    {'Page','Suffix', 'Detection Model', 'Rescore Model', 'LSM', 'Bg radius', 'Resize x (0=auto)', 'Snap', 'Normalize'}, ...
+                'ColumnFormat',  {'numeric', 'char', detChoices, rescoreChoices, 'logical', 'numeric', 'numeric', 'logical', 'logical'}, ...
+                'ColumnEditable', [true true true true true true true true true], ...
+                'ColumnWidth',   {50, 70, 220, 280, 60, 80, 130, 60, 80}, ...
                 'RowName',       {}, ...
                 'Tag',           'pageTable', ...
+                'Tooltip',       sprintf(['Resize x: factor applied to the page before detection. 0 = auto: computed from the ' ...
+                'TIFF pixel-size calibration so the detector sees %g um/px (the training pixel size).\n' ...
+                'Normalize: stretch the detector input so its %g-%g percentiles span the 8-bit range the models ' ...
+                'were trained on (does not alter the saved resized TIF or the source image).'], ...
+                obj.TRAIN_UM_PER_PIXEL, obj.NORM_PERCENTILES(1), obj.NORM_PERCENTILES(2)), ...
                 'CellEditCallback',      @obj.onPageTableEdit, ...
                 'CellSelectionCallback', @obj.onPageTableSelect);
             obj.hPageTable.Layout.Row = 3; obj.hPageTable.Layout.Column = [1 8];
@@ -605,7 +632,8 @@ classdef CellDiscovery < handle
                 'Value', logical(obj.P.saveLsmTif), 'Tag', 'saveLsmTif', ...
                 'Tooltip', ['Exports  <stem>_resized.tif  in the image subdirectory. ' ...
                 'Saves the image after LSM correction, background subtraction, and resize — ' ...
-                'the exact image the detection model received.'], ...
+                'the image the detection model received, before any intensity normalisation ' ...
+                '(source intensities are kept for downstream measurements).'], ...
                 'ValueChangedFcn', @obj.onSaveLsmTifChange);
             obj.hSaveLsmTif.Layout.Row = 3; obj.hSaveLsmTif.Layout.Column = [1 8];
 
@@ -905,7 +933,7 @@ classdef CellDiscovery < handle
                 nextPage = max(pages) + 1;
             end
             defDet = detChoices{min(2, numel(detChoices))};   % first real model if any, else (skip)
-            newRow = {nextPage, sprintf('page%d',nextPage), defDet, obj.NONE_LABEL, false, 0, 1, false};
+            newRow = {nextPage, sprintf('page%d',nextPage), defDet, obj.NONE_LABEL, false, 0, 0, false, true};
             obj.hPageTable.Data = [data; newRow];
             obj.P.pageMapData   = obj.hPageTable.Data;
             obj.updateLSMOptionsButton();
@@ -1457,15 +1485,29 @@ classdef CellDiscovery < handle
 
                     correctLSM = CellToolkit.parseLogical(mapData{r,5}, false);
                     bg = CellToolkit.parseNum(mapData{r,6}, 0);
-                    rz = CellToolkit.parseNum(mapData{r,7}, 1);
-                    if rz <= 0, rz = 1; end
+                    [rz, srcUm, rzMode] = CellDiscovery.resolveResize( ...
+                        f, pg, CellToolkit.parseNum(mapData{r,7}, 1));
                     snapOn = false;
                     if size(mapData, 2) >= 8
                         snapOn = CellToolkit.parseLogical(mapData{r,8}, false);
                     end
+                    normOn = true;
+                    if size(mapData, 2) >= 9
+                        normOn = CellToolkit.parseLogical(mapData{r,9}, true);
+                    end
                     snapOpts = obj.resolveSnapOptionsForPage(pg);
                     job = CellDiscovery.makeJob( ...
                         f, fdir, stem, ext, mapData{r,2}, pg, nPages, true, detM, rescM, correctLSM, bg, rz, obj.P.lsmOptions, snapOn, snapOpts);
+                    job.normalize = normOn;
+                    job.calibratedUm = srcUm;   % NaN when the TIFF has no usable calibration
+                    if isfinite(srcUm)
+                        job.srcPixelSize = srcUm;
+                    else
+                        % No calibration: the resize factor is the user's
+                        % statement of the source pixel size.
+                        job.srcPixelSize = CellDiscovery.TRAIN_UM_PER_PIXEL * rz;
+                    end
+                    CellDiscovery.reportScale(job, rzMode);
                     job.firstPage = firstPageForFile;
                     jobs{end+1} = job; %#ok<AGROW>
                     firstPageForFile = false;
@@ -1561,9 +1603,25 @@ classdef CellDiscovery < handle
             % Preprocessing is centralised: the entire channel stack is corrected
             % together (so LSM registration uses every channel) and cached, then
             % reused for every page's detection and for the output TIF.
+            %
+            % Intensity normalisation is applied here, to the detector-input
+            % scratch image only (which Stage-2 rescoring also crops from). The
+            % cached pages — and so the saved resized TIF and the snap input —
+            % keep their source intensities for downstream measurements.
             try
                 obj.ensurePreprocCache(job.imgFile, job.nPages);
                 img = obj.preprocCache.pages{job.page};
+                if job.normalize
+                    [img, job.normLimits] = CellToolkit.normalizeIntensity( ...
+                        img, obj.NORM_PERCENTILES, obj.NORM_TARGET);
+                    if any(isnan(job.normLimits(:)))
+                        fprintf(2, '[WARN] %s: no intensity spread to normalise; page used as is.\n', job.label);
+                    else
+                        fprintf('[NORM] %s: p%g = %.4g -> 0, p%g = %.4g -> %g\n', job.label, ...
+                            obj.NORM_PERCENTILES(1), job.normLimits(1,1), ...
+                            obj.NORM_PERCENTILES(2), job.normLimits(1,2), obj.NORM_TARGET);
+                    end
+                end
             catch ME
                 fprintf(2,'[ERROR] (%d/%d) could not read/preprocess %s: %s\n', ...
                     obj.fileIdx, total, job.label, ME.message);
@@ -1732,7 +1790,9 @@ classdef CellDiscovery < handle
                 key = CellDatasetManifest.keyForCsv(job.outCsvOrig);
                 mf.recordDetection(key, struct('image', job.imgFile, ...
                     'page', job.page, 'locs', job.outCsvOrig, ...
-                    'tool', 'CellDiscovery', 'model', job.detModel, 'count', nDets));
+                    'tool', 'CellDiscovery', 'model', job.detModel, 'count', nDets, ...
+                    'resize', job.resize, 'bgRadius', job.bgRadius, ...
+                    'normalized', job.normalize, 'normLimits', job.normLimits));
                 if f ~= 1 && ~isempty(job.outCsvResized)
                     mf.recordResized(key, job.outCsvResized, job.outTif);
                 end
@@ -1936,8 +1996,13 @@ classdef CellDiscovery < handle
             raw = [];
             try raw = CellToolkit.readPage(job.imgFile, job.page, job.nPages); catch, end
 
+            % A normalised detector input exists only as the scratch image; the
+            % cached page is the same image before intensity normalisation.
             detImg = [];
-            if ~isempty(obj.preprocCache) && isfield(obj.preprocCache, 'pages') ...
+            if isfield(job, 'normalize') && job.normalize
+                try detImg = imread(job.tmpImg); catch, end
+            end
+            if isempty(detImg) && ~isempty(obj.preprocCache) && isfield(obj.preprocCache, 'pages') ...
                     && job.page >= 1 && job.page <= numel(obj.preprocCache.pages)
                 detImg = obj.preprocCache.pages{job.page};
             end
@@ -2073,6 +2138,20 @@ classdef CellDiscovery < handle
             args    = CellDiscovery.snapOptionsToNameValue(opts);
             applyXY = CellToolkit.parseLogical(opts.ApplyToXY, false);
 
+            % Snap sizes its windows as CellDiameter / PixelSize on the
+            % source-resolution page, so PixelSize must be the SOURCE pixel
+            % size, not the training one. 'auto' (the default) supplies it from
+            % the TIFF calibration (or, without one, from the resize factor).
+            iPx = find(strcmp(args(1:2:end), 'PixelSize'), 1);
+            if isempty(iPx)
+                args = [args, {'PixelSize', job.srcPixelSize}];
+            elseif isnumeric(args{2*iPx}) && isscalar(args{2*iPx}) ...
+                    && abs(args{2*iPx} / job.srcPixelSize - 1) > CellDiscovery.PIXEL_SIZE_TOL
+                fprintf(2, ['[WARN] %s: Snap PixelSize is set to %g um/px but the page snap runs on is ' ...
+                    '%.4g um/px; set PixelSize to ''auto'' in Snap options unless this is intended.\n'], ...
+                    job.label, args{2*iPx}, job.srcPixelSize);
+            end
+
             % Pull the preprocessed source-resolution page from the per-file
             % cache (recomputed only if the cache is not for this file). Fall
             % back to the raw page if, for any reason, the cache lacks it.
@@ -2188,8 +2267,10 @@ classdef CellDiscovery < handle
             % Preprocess every page of imgFile exactly once and cache the result
             % on obj.preprocCache, keyed by file path. Both the per-page
             % detection scratch images and the optional output TIF draw from this
-            % single cache, so the model and the saved TIF always see identical
-            % pixels, and the expensive joint-channel LSM correction runs once.
+            % single cache, so the model and the saved TIF share the same
+            % geometry and preprocessing (the scratch image alone is then
+            % intensity-normalised when the page's Normalize box is ticked), and
+            % the expensive joint-channel LSM correction runs once.
             if ~isempty(obj.preprocCache) && isfield(obj.preprocCache, 'imgFile') ...
                     && strcmp(obj.preprocCache.imgFile, imgFile)
                 return;   % cache already valid for this file
@@ -2203,7 +2284,8 @@ classdef CellDiscovery < handle
         function writeFullPreprocTif(obj, job)
             % Write a multi-page resized TIF whose page count matches the
             % source file, using the already-computed per-file cache so the saved
-            % image is byte-identical to what the detection model received.
+            % image is what the detection model received, before the optional
+            % intensity normalisation of the detector input.
             obj.ensurePreprocCache(job.imgFile, job.nPages);
             pages  = obj.preprocCache.pages;
             rzArr  = obj.preprocCache.rzArr;
@@ -2372,7 +2454,11 @@ classdef CellDiscovery < handle
             job.snapEnable   = logical(snapEnable);  % true = run snapToCellCentroid post-processing
             job.snapOptions  = CellDiscovery.sanitizeSnapOptions(snapOptions);
             job.bgRadius     = bg;        % 0 = no background subtraction
-            job.resize       = rz;        % 1 = no resizing
+            job.resize       = rz;        % 1 = no resizing (resolved factor; see resolveResize)
+            job.normalize    = false;     % set by buildJobs: normalise detector-input intensity
+            job.normLimits   = [];        % [lo hi] source intensities mapped to [0 NORM_TARGET] (set at launch)
+            job.calibratedUm = NaN;       % set by buildJobs: source um/px from the TIFF calibration (NaN = none)
+            job.srcPixelSize = CellDiscovery.TRAIN_UM_PER_PIXEL * rz;   % best estimate of the source um/px
             job.outCsvOrig   = fullfile(fdir, [base '_locs.csv']);
             job.outTif       = fullfile(fdir, [stem '_resized.tif']);   % shared across pages
             if rz ~= 1
@@ -2384,6 +2470,57 @@ classdef CellDiscovery < handle
             job.tmpCsv    = '';   % predict.py raw output (set at launch)
             job.label     = label;
             job.firstPage = false;   % set by buildJobs: true for the first page of each source file
+        end
+
+        function [rz, srcUm, mode] = resolveResize(imgFile, page, tableRz)
+            % Resolve a page's resize factor from its page-map "Resize x" value.
+            %   tableRz > 0 : manual factor, used as given        (mode 'manual')
+            %   otherwise   : auto — the factor that brings the page to the
+            %                 training pixel size, from the TIFF calibration
+            %                 (mode 'auto'); x1 if the file has no usable
+            %                 calibration                          (mode 'uncalibrated')
+            % srcUm is the calibrated source pixel size in um (NaN if none).
+            % Both buildJobs and preprocessAllPages resolve through here, so the
+            % job's factor always matches the pixels the detector receives.
+            srcUm = CellToolkit.tiffPixelSizeUm(imgFile, page);
+            if tableRz > 0
+                rz = tableRz;  mode = 'manual';
+            elseif isfinite(srcUm)
+                rz = round(srcUm / CellDiscovery.TRAIN_UM_PER_PIXEL, 4);
+                if abs(rz - 1) < 0.01, rz = 1; end   % already at the training pixel size
+                mode = 'auto';
+            else
+                rz = 1;  mode = 'uncalibrated';
+            end
+        end
+
+        function reportScale(job, mode)
+            % Log a job's pixel-size handling and warn when the detector input
+            % will be off the training pixel size.
+            train = CellDiscovery.TRAIN_UM_PER_PIXEL;
+            switch mode
+                case 'auto'
+                    fprintf('[SCALE] %s: %.4g um/px (TIFF calibration) -> resize x%.4g (auto) -> %.3g um/px\n', ...
+                        job.label, job.calibratedUm, job.resize, job.calibratedUm / job.resize);
+                case 'uncalibrated'
+                    fprintf(2, ['[WARN] %s: no usable pixel-size calibration in the TIFF, so auto resize cannot be ' ...
+                        'computed and the page is used unresized. If it is not %g um/px, enter Resize x = ' ...
+                        '(source um/px) / %g.\n'], job.label, train, train);
+                otherwise   % manual
+                    if isfinite(job.calibratedUm)
+                        eff = job.calibratedUm / job.resize;
+                        fprintf('[SCALE] %s: %.4g um/px (TIFF calibration) -> resize x%.4g (manual) -> %.3g um/px\n', ...
+                            job.label, job.calibratedUm, job.resize, eff);
+                        if abs(eff / train - 1) > CellDiscovery.PIXEL_SIZE_TOL
+                            fprintf(2, ['[WARN] %s: the detector will see %.3g um/px but the models were trained at ' ...
+                                '%g um/px. Set Resize x to 0 (auto = x%.4g) unless this is intended.\n'], ...
+                                job.label, eff, train, job.calibratedUm / train);
+                        end
+                    else
+                        fprintf('[SCALE] %s: resize x%.4g (manual; TIFF has no pixel-size calibration)\n', ...
+                            job.label, job.resize);
+                    end
+            end
         end
 
         function img = applyPreprocess(img, correctLSM, lsmOptions, bgRadius, resizeFactor)
@@ -2558,7 +2695,9 @@ classdef CellDiscovery < handle
         function data = defaultPageMap()
             % One default page-map row. The empty detection-model cell is coerced
             % to the first real model by sanitizePageMap once models are known.
-            data = {1, '', '(none)', '(none)', false, 0, 1, false};
+            % Columns: Page, Suffix, Detection model, Rescore model, LSM,
+            % Bg radius, Resize x (0 = auto from TIFF calibration), Snap, Normalize.
+            data = {1, '', '(none)', '(none)', false, 0, 0, false, true};
         end
 
         function data = sanitizePageMap(data, detChoices, rescoreChoices)
@@ -2575,8 +2714,12 @@ classdef CellDiscovery < handle
             elseif size(data, 2) == 7
                 % Pre-Snap layout: append the Snap column.
                 data = [data, repmat({false}, size(data,1), 1)];
-            elseif size(data, 2) ~= 8
+            elseif size(data, 2) ~= 8 && size(data, 2) ~= 9
                 data = CellDiscovery.defaultPageMap();
+            end
+            if size(data, 2) == 8
+                % Pre-Normalize layout: append the Normalize column (on).
+                data = [data, repmat({true}, size(data,1), 1)];
             end
             detFallback = detChoices{min(2, numel(detChoices))};   % first real model if any
             for r = 1:size(data, 1)
@@ -2601,12 +2744,14 @@ classdef CellDiscovery < handle
                 b = CellToolkit.parseNum(data{r,6}, 0);
                 if b < 0, b = 0; end
                 data{r,6} = b;
-                % Resize factor (> 0)
+                % Resize factor (> 0), or 0 = auto from the TIFF calibration
                 z = CellToolkit.parseNum(data{r,7}, 1);
-                if z <= 0, z = 1; end
+                if ~(z > 0), z = 0; end
                 data{r,7} = z;
                 % Snap (snapToCellCentroid post-processing)
                 data{r,8} = CellToolkit.parseLogical(data{r,8}, false);
+                % Normalize (intensity normalisation of the detector input)
+                data{r,9} = CellToolkit.parseLogical(data{r,9}, true);
             end
         end
 
@@ -2620,7 +2765,7 @@ classdef CellDiscovery < handle
             spec = {
                 'CellType',              'enum', {'auto','round','oval'},                                  'auto',   'Cell-shape preset: round (PV somata), oval (ring-like PNNs), or auto (balanced).'
                 'Method',                'enum', {'auto','weighted-centroid','mean-shift','radial-symmetry'}, 'auto', 'auto picks from CellType (oval => radial-symmetry). radial-symmetry finds the centre of an open/ring-like net; weighted-centroid suits solid somata; mean-shift is threshold-free but lands on the bright wall.'
-                'PixelSize',             'num',  {},                                                       '0.645',  'Microns per pixel (training resolution is 0.645).'
+                'PixelSize',             'num',  {},                                                       'auto',   'Microns per pixel of the SOURCE page snap runs on. auto = from the TIFF calibration (or 0.645 x the resize factor when the file has none).'
                 'CellDiameter',          'num',  {},                                                       '18',     'Expected cell diameter in microns.'
                 'BackgroundSubtraction', 'enum', {'tophat','gaussian','none'},                             'tophat', 'Global background removal before snapping.'
                 'ThresholdMethod',       'enum', {'otsu','adaptive','relative'},                           'otsu',   'Per-window foreground threshold (weighted-centroid only).'
@@ -2764,9 +2909,8 @@ classdef CellDiscovery < handle
                     r           = pageToRow(int32(pg));
                     wantLSM(pg) = CellToolkit.parseLogical(mapData{r,5}, false);
                     bgArr(pg)   = CellToolkit.parseNum(mapData{r,6}, 0);
-                    rz          = CellToolkit.parseNum(mapData{r,7}, 1);
-                    if rz <= 0, rz = 1; end
-                    rzArr(pg)   = rz;
+                    rzArr(pg)   = CellDiscovery.resolveResize( ...
+                        imgFile, pg, CellToolkit.parseNum(mapData{r,7}, 1));
                 end
             end
 
@@ -3040,6 +3184,9 @@ classdef CellDiscovery < handle
             end
             if isfield(job, 'resize') && job.resize ~= 1
                 parts{end+1} = sprintf('resize=%g', job.resize);
+            end
+            if isfield(job, 'normalize') && job.normalize
+                parts{end+1} = 'normalised';
             end
             if isempty(parts)
                 s = 'no preprocessing';

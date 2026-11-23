@@ -9,6 +9,35 @@ from tqdm import tqdm
 
 from datasets.patched_datasets import PatchedMultiImageDataset, RandomAccessMultiImageDataset
 
+def resolve_tile_overlap(cfg, overlap=None):
+    """ Resolves the overlap (px) between adjacent patches used when tiling a big image.
+
+    Cells cut by a patch edge are detected badly (clipped, displaced and duplicated boxes),
+    so patches are overlapped and each one only contributes the detections centered in the
+    region it owns (see methods.detection.train_fn._collate_fn).
+
+    Args:
+        cfg (DictConfig): config of the localization run.
+        overlap (int, optional): requested overlap; None picks the one the model was
+            validated with (data.validation.overlap in the run config), 0 disables it.
+
+    Returns:
+        int: the overlap to use (0 = adjacent, non-overlapped patches).
+        dict: extra keyword arguments for the method's predict_points().
+    """
+    patch_size = cfg.data.validation.get('patch_size', None)
+    if cfg.method != 'detection' or not patch_size:
+        return 0, {}
+
+    if overlap is None:
+        overlap = cfg.data.validation.get('overlap', 0) or 0
+    overlap = int(overlap)
+    if not 0 <= overlap < patch_size:
+        raise ValueError(f'overlap must be in [0, {patch_size}), got {overlap}')
+
+    return overlap, ({'tile_margin': overlap / 2} if overlap else {})
+
+
 @torch.no_grad()
 def score_patches(loader, model, device, cfg):
     compute_loss_and_scores = hydra.utils.get_method(f'methods.rank.methods.{cfg.optim.method}')
@@ -35,8 +64,12 @@ def main(args):
         patch_size=cfg.data.validation.get('patch_size', None),
         transforms=hydra.utils.instantiate(cfg.data.validation.transforms),
     )
+    overlap, predict_kwargs = resolve_tile_overlap(cfg, args.overlap)
+    if overlap:
+        dataset_params['stride'] = dataset_params['patch_size'] - overlap
     dataset = PatchedMultiImageDataset.from_paths(args.data, **dataset_params)
     print(f'[  DATA] {dataset}')
+    print(f'[ TILES] overlap = {overlap} px')
 
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=0)
 
@@ -60,7 +93,7 @@ def main(args):
     print(f'[PARAMS] thr = {threshold:.2f}')
 
     predict_points = hydra.utils.get_method(f'methods.{cfg.method}.train_fn.predict_points')
-    localizations = predict_points(loader, model, device, threshold, cfg)
+    localizations = predict_points(loader, model, device, threshold, cfg, **predict_kwargs)
     localizations = localizations.sort_values(['imgName', 'Y', 'X'])
 
     print(f'[OUTPUT] {args.output}')
@@ -121,6 +154,7 @@ if __name__ == "__main__":
     parser.add_argument('-b', '--batch-size', type=int, default=1, help="Batch size (number of patches processed in parallel by the model)")
     parser.add_argument('-r', '--rescore', type=str, default=None, help="Pretrain run directory of rescoring model")
     parser.add_argument('-t', '--threshold', type=float, default=None, help="Threshold (good values may vary depending on the model)")
+    parser.add_argument('--overlap', type=int, default=None, help="Overlap in pixels between adjacent patches; by default, the one the localization model was validated with (0 = no overlap)")
     parser.add_argument('-o', '--output', default='localizations.csv', help="Output file")
 
     args = parser.parse_args()

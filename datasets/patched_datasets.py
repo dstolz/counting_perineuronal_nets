@@ -171,7 +171,9 @@ class PatchedImageDataset(Dataset):
         self.split_annot[['Y', 'X']] -= self.origin_yx
 
         # the number of patches in a row and a column
+        # (at least one: with stride < patch size, a region much smaller than a patch would give zero patches)
         self.num_patches = np.ceil(1 + ((self.region_hw - self.patch_hw) / self.stride_hw)).astype(np.int64)
+        self.num_patches = np.maximum(self.num_patches, 1)
 
     def __len__(self):
         # total number of patches

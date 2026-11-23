@@ -7,6 +7,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from datasets.patched_datasets import PatchedMultiImageDataset, RandomAccessMultiImageDataset
+from predict import resolve_tile_overlap
 
 
 class CellDetector:
@@ -26,14 +27,19 @@ class CellDetector:
     rescorer_path : str or Path or None
         Folder of the rescoring model. If None, rescoring is skipped and the
         returned DataFrame will not have a ``rescore`` column.
+    overlap : int or None
+        Overlap in pixels between adjacent patches. If None, the value the
+        detection model was validated with is used; 0 disables overlapping.
     """
 
-    def __init__(self, run_path, device='cpu', threshold=None, rescorer_path=None):
+    def __init__(self, run_path, device='cpu', threshold=None, rescorer_path=None, overlap=None):
         self.run_path = Path(run_path)
         self.device = torch.device(device)
         self.rescorer_path = Path(rescorer_path) if rescorer_path else None
 
         self._det_cfg, self._det_model, self.threshold = self._load_detection_model(threshold)
+        self.overlap, self._predict_kwargs = resolve_tile_overlap(self._det_cfg, overlap)
+        print(f'[ TILES] overlap = {self.overlap} px')
 
         if self.rescorer_path is not None:
             self._res_cfg, self._res_model = self._load_rescoring_model()
@@ -66,6 +72,8 @@ class CellDetector:
             patch_size=self._det_cfg.data.validation.get('patch_size', None),
             transforms=hydra.utils.instantiate(self._det_cfg.data.validation.transforms),
         )
+        if self.overlap:
+            dataset_params['stride'] = dataset_params['patch_size'] - self.overlap
         dataset = PatchedMultiImageDataset.from_paths([str(image_path)], **dataset_params)
         print(f'[  DATA] {dataset}')
         loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=0)
@@ -73,7 +81,9 @@ class CellDetector:
         predict_points = hydra.utils.get_method(
             f'methods.{self._det_cfg.method}.train_fn.predict_points'
         )
-        localizations = predict_points(loader, self._det_model, self.device, self.threshold, self._det_cfg)
+        localizations = predict_points(
+            loader, self._det_model, self.device, self.threshold, self._det_cfg, **self._predict_kwargs
+        )
         localizations = localizations.sort_values(['imgName', 'Y', 'X'])
 
         if self._res_model is not None:

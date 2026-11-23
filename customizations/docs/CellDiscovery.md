@@ -99,9 +99,11 @@ to pre-process the image first. See
   cells.
 - **Save annotated PNG…** — Also saves a `*_locs.png` preview image next to each
   CSV.
-- **Save final resized image as TIF…** — Saves the exact (pre-processed)
-  image the model actually saw, as `*_resized.tif`. Useful with the QC
-  tool's "Use resized CSVs" mode.
+- **Save final resized image as TIF…** — Saves the pre-processed image the
+  model saw (LSM correction, background subtraction, resize) as
+  `*_resized.tif`, **before** intensity normalisation so its intensities stay
+  comparable with the source. Useful with the QC tool's "Use resized CSVs"
+  mode.
 
 ### Run Controls
 
@@ -154,8 +156,9 @@ Columns:
 | **Rescore Model** | Optional Stage-2 model that adds a quality score. `(none)` = no rescoring. |
 | **Correct LSM** | Tick to apply bidirectional-scanner artifact correction first. |
 | **Bg radius** | Background-subtraction disk radius in pixels (`0` = off). |
-| **Resize x** | Resize factor applied before detection (`1` = no resize). |
+| **Resize x (0=auto)** | Resize factor applied before detection. `0` = computed from the TIFF's pixel-size calibration so the model sees 0.645 µm/pixel; `1` = no resize. |
 | **Snap** | Tick to refine detected locations with `snapToCellCentroid` after detection (post-processing). |
+| **Normalize** | Tick (default) to put the image on the intensity scale the models were trained on before detection. |
 
 - **Single-page images** only ever use the row for **page 1**.
 - Use **Add page** / **Remove page** to manage rows for multi-page TIFFs.
@@ -177,10 +180,32 @@ in the mapping table:
   parameters (with sensible defaults and a *Reset defaults* button).
 - **Bg radius** — Morphological background subtraction; removes slowly-varying
   background using a disk of the given radius (in pixels). `0` disables it.
-- **Resize x** — Rescales the image before detection. Use this if your images
-  have a very different resolution from the training data
-  (~0.645 µm/pixel). When resizing is used, a **second** CSV is written in the
-  resized coordinate system (`*_locs_resized.csv`).
+- **Resize x (0=auto)** — Rescales the image before detection so the cells
+  have the size the models were trained on (0.645 µm/pixel). Leave it at `0`
+  and the factor is computed for every file from its TIFF pixel-size
+  calibration (ImageJ `unit=micron` or standard resolution tags); the Command
+  Window shows a `[SCALE]` line with the pixel size read and the factor used.
+  Enter a factor yourself only to override that, or when the file has no
+  calibration (a `[WARN]` line says so and the page is used unresized). A
+  manual factor that leaves the image more than 15% away from 0.645 µm/pixel
+  is also reported with a `[WARN]` line. The number of detections drops
+  quickly outside that range. When resizing is used, a **second** CSV is
+  written in the resized coordinate system (`*_locs_resized.csv`).
+- **Normalize** — The models were trained on 8-bit images, and the number of
+  detections follows the image brightness when an image is on another scale
+  (16-bit, floating-point projections, a dim or bright acquisition). With this
+  ticked, the page's 1st–99.9th intensity percentiles (after background
+  subtraction and resize) are stretched to the 8-bit range before detection
+  and rescoring; a `[NORM]` line reports the two intensities used. Only what
+  the models see is changed: the source image, the saved `*_resized.tif` and
+  the snap input keep their original intensities. Counts from normalised and
+  un-normalised runs are **not comparable**, so use one setting for all the
+  images of a study. Whether a page was normalised is recorded in the
+  dataset manifest.
+
+Large images are processed as overlapping 640×640 tiles (120-pixel overlap);
+each tile contributes only the cells centred away from its edges, so a cell cut
+by a tile edge is reported once, at its true centre.
 
 **Show resized image in results** — When ticked, the preview shows the
 processed image the model actually saw; when unticked, it shows the original raw
@@ -212,7 +237,8 @@ configured per page via the **Snap** column:
 - **Snap options…** — Enabled once at least one page has **Snap** ticked. Opens
   a dialog with a **page selector** so every page can carry its **own** snap
   parameters — e.g. a PNN page using the `oval` preset while a PV page uses
-  `round`. Tune the cell-shape preset, method, pixel size, cell diameter, the
+  `round`. Tune the cell-shape preset, method, pixel size (`auto` = the source
+  image's own pixel size, from its calibration), cell diameter, the
   ring radius / dark-centre options (for `radial-symmetry`), threshold (for
   `weighted-centroid`), search radius, and more (with a *Reset page* button).
 - **Apply to X/Y** (in the Snap options dialog) — When ticked, the snapped
@@ -235,7 +261,7 @@ image**:
 | `<name>[_page<k>]_locs.csv` | Always | One row per detected cell: `X`, `Y`, `class`, `score`, and more. When **Snap** is on, also `SNAP_X`, `SNAP_Y`, `SNAP_Shift`, `SNAP_Snapped`. |
 | `<name>[_page<k>]_locs_resized.csv` | When resizing is used | Same detections, but in resized-image coordinates. |
 | `<name>[_page<k>]_locs.png` | When *Save annotated PNG* is on | Preview image with detections overlaid. |
-| `<name>[_page<k>]_resized.tif` | When *Save resized TIF* is on | The exact image the model received. |
+| `<name>[_page<k>]_resized.tif` | When *Save resized TIF* is on | The pre-processed image the model received, before intensity normalisation. |
 
 These `*_locs.csv` files are the input to the
 **[Cell Neighbor Resolver](CellNeighborResolution.md)** and

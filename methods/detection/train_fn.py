@@ -142,10 +142,50 @@ def _process_fn(batch, model, device, has_target=True, return_input=True):
     return boxes, labels, scores
 
 
+def _owned_by_tile(boxes, start_yx, patch_hw, image_hw, margin, slack=2.0):
+    """ Selects the boxes (in patch coordinates) whose center lies in the region a tile owns.
+
+    With overlapped tiling, a cell near a tile edge is cut by that tile (which then
+    predicts a clipped, displaced and low-scored box, or misses it) but is seen whole
+    by the neighboring tile. Each tile therefore keeps only the detections centered
+    at least `margin` px away from its interior edges; edges lying on the image border
+    have no neighbor and keep everything. With margin = overlap / 2 the owned regions
+    of adjacent tiles meet exactly, so every image location belongs to one tile.
+
+    `slack` widens the owned region by a few px so that a detection centered on the
+    boundary is never dropped by both tiles; the resulting duplicates are identical
+    boxes and are removed by the NMS that follows in _collate_fn.
+    """
+    (y, x), (h, w), (ih, iw) = (int(v) for v in start_yx), (int(v) for v in patch_hw), image_hw
+    cx = (boxes[:, 0] + boxes[:, 2]) / 2
+    cy = (boxes[:, 1] + boxes[:, 3]) / 2
+
+    keep = torch.ones_like(cx, dtype=torch.bool)
+    if x > 0:  # there is a tile on the left
+        keep &= cx >= margin - slack
+    if x + w < iw:  # there is a tile on the right
+        keep &= cx < w - margin + slack
+    if y > 0:  # there is a tile above
+        keep &= cy >= margin - slack
+    if y + h < ih:  # there is a tile below
+        keep &= cy < h - margin + slack
+
+    return keep
+
+
 @torch.no_grad()
-def _collate_fn(image_info, image_patches, device, cfg, return_input=True):
+def _collate_fn(image_info, image_patches, device, cfg, return_input=True, tile_margin=None):
+    """ Rebuilds full-image predictions from per-patch predictions.
+
+    If `tile_margin` is None, boxes falling in the areas covered by more than one patch
+    are deduplicated with NMS (the procedure used for validation during training).
+    If `tile_margin` is given (px), each patch only contributes the boxes centered in
+    the region it owns (see _owned_by_tile); this also discards the clipped boxes that
+    patches produce for cells cut by their edges, which NMS alone does not remove.
+    """
     image_id, image_hw = image_info
-    
+    owned_tiles = tile_margin is not None and tile_margin > 0
+
     image = None
     normalization_map = None
     boxes = []
@@ -160,12 +200,12 @@ def _collate_fn(image_info, image_patches, device, cfg, return_input=True):
 
         patch_boxes, patch_labels, patch_scores = datum[-3:]
 
-        if normalization_map is None:
-            if return_input:
-                in_channels = patch.shape[-1]
-                in_hwc = image_hw + (in_channels,)
-                image = torch.empty(in_hwc, dtype=torch.float32, device=device)
+        if return_input and image is None:
+            in_channels = patch.shape[-1]
+            in_hwc = image_hw + (in_channels,)
+            image = torch.empty(in_hwc, dtype=torch.float32, device=device)
 
+        if normalization_map is None and not owned_tiles:
             normalization_map = torch.zeros(image_hw, dtype=torch.float32, device=device)
 
         (y, x), (h, w) = start_yx, patch_hw
@@ -173,7 +213,12 @@ def _collate_fn(image_info, image_patches, device, cfg, return_input=True):
         if return_input:
             image[y:y+h, x:x+w] = patch[:h, :w]
 
-        normalization_map[y:y+h, x:x+w] += 1.0
+        if owned_tiles:
+            if patch_boxes.nelement() != 0:
+                keep = _owned_by_tile(patch_boxes, start_yx, patch_hw, image_hw, tile_margin)
+                patch_boxes, patch_labels, patch_scores = patch_boxes[keep], patch_labels[keep], patch_scores[keep]
+        else:
+            normalization_map[y:y+h, x:x+w] += 1.0
 
         if patch_boxes.nelement() != 0:
             patch_boxes += torch.as_tensor([x, y, x, y], device=device)
@@ -203,19 +248,29 @@ def _collate_fn(image_info, image_patches, device, cfg, return_input=True):
     u = torch.tensor([[iw, ih, iw, ih]], device=device)
     boxes = torch.max(l, torch.min(boxes, u))
 
-    # filter boxes in the overlapped areas using nms
-    xc, yc = boxes_center.T
-    in_overlap_zone = normalization_map[yc, xc] != 1.0
+    if owned_tiles:
+        # each box comes from the single tile owning its center; the model already ran NMS
+        # inside every tile, so this only removes the duplicates of boxes centered within
+        # the slack of an ownership boundary (claimed by both adjacent tiles)
+        keep = box_ops.batched_nms(boxes, scores, labels, iou_threshold=cfg.model.module.nms)
 
-    boxes_in_overlap = boxes[in_overlap_zone]
-    labels_in_overlap = labels[in_overlap_zone]
-    scores_in_overlap = scores[in_overlap_zone]
-    # keep = box_ops.nms(boxes_in_overlap, scores_in_overlap, iou_threshold=cfg.model.module.nms)  # TODO check equivalence of batched_nms() and nms()
-    keep = box_ops.batched_nms(boxes_in_overlap, scores_in_overlap, labels_in_overlap, iou_threshold=cfg.model.module.nms)
+        boxes = boxes[keep]
+        labels = labels[keep]
+        scores = scores[keep]
+    else:
+        # filter boxes in the overlapped areas using nms
+        xc, yc = boxes_center.T
+        in_overlap_zone = normalization_map[yc, xc] != 1.0
 
-    boxes = torch.cat((boxes[~in_overlap_zone], boxes_in_overlap[keep]))
-    labels = torch.cat((labels[~in_overlap_zone], labels_in_overlap[keep]))
-    scores = torch.cat((scores[~in_overlap_zone], scores_in_overlap[keep]))
+        boxes_in_overlap = boxes[in_overlap_zone]
+        labels_in_overlap = labels[in_overlap_zone]
+        scores_in_overlap = scores[in_overlap_zone]
+        # keep = box_ops.nms(boxes_in_overlap, scores_in_overlap, iou_threshold=cfg.model.module.nms)  # TODO check equivalence of batched_nms() and nms()
+        keep = box_ops.batched_nms(boxes_in_overlap, scores_in_overlap, labels_in_overlap, iou_threshold=cfg.model.module.nms)
+
+        boxes = torch.cat((boxes[~in_overlap_zone], boxes_in_overlap[keep]))
+        labels = torch.cat((labels[~in_overlap_zone], labels_in_overlap[keep]))
+        scores = torch.cat((scores[~in_overlap_zone], scores_in_overlap[keep]))
 
     if return_input:
         image = image.cpu().numpy()
@@ -435,12 +490,16 @@ def predict(dataloader, model, device, cfg, outdir, debug=0):
 
 
 @torch.no_grad()
-def predict_points(dataloader, model, device, threshold, cfg):
-    """ Predict and find points. """
+def predict_points(dataloader, model, device, threshold, cfg, tile_margin=None):
+    """ Predict and find points.
+
+    When the dataloader yields overlapped patches, pass tile_margin = overlap / 2 so
+    that each patch only contributes the detections it owns (see _collate_fn).
+    """
     model.eval()
 
     process_fn = partial(_process_fn, model=model, device=device, has_target=False, return_input=False)
-    collate_fn = partial(_collate_fn, device=device, cfg=cfg, return_input=False)
+    collate_fn = partial(_collate_fn, device=device, cfg=cfg, return_input=False, tile_margin=tile_margin)
 
     all_localizations = []
 

@@ -28,9 +28,9 @@ The pipeline has two stages:
 ┌──────────────────────────────────────────────────────────────┐
 │  Stage 1 — Detection (FasterRCNN)                            │
 │  Input: large TIFF/HDF5 image                                │
-│  → patch into 640×640 tiles                                  │
+│  → patch into overlapping 640×640 tiles                      │
 │  → detect cell centres per tile                              │
-│  → stitch results back with NMS                              │
+│  → keep each tile's interior detections, stitch back         │
 │  Output: DataFrame with (X, Y, score, imgName, thr)          │
 └──────────────────────────────────────────────────────────────┘
                             │
@@ -173,6 +173,7 @@ python predict.py <model_folder> <image(s)> [options]
 | `-b`, `--batch-size` | `1`                 | Number of image patches processed per forward pass               |
 | `-t`, `--threshold`  | *(from checkpoint)* | Detection threshold; lower = more detections, higher = fewer     |
 | `-r`, `--rescore`    | `None`              | Scoring model folder; omit to skip rescoring                     |
+| `--overlap`          | *(from model config, 120)* | Overlap in pixels between adjacent tiles; `0` = adjacent tiles (pre-overlap behaviour) |
 | `-o`, `--output`     | `localizations.csv` | Output CSV path                                                  |
 
 ### Examples
@@ -205,8 +206,14 @@ python predict.py pv_v2_fasterrcnn_640 slice_C2.tif \
 
 - **TIFF / PNG / JPEG**: A single 2-D (H×W) or 3-D (1×H×W) grayscale image.
 - **HDF5**: Image stored in the `/data` dataset.
-- Large images are automatically split into overlapping 640×640 patches; results are
-  stitched back with NMS to avoid duplicates at tile boundaries.
+- Large images are automatically split into overlapping 640×640 patches (120 px overlap
+  by default, `--overlap`). Each patch only contributes the detections centred at least
+  half the overlap away from its interior edges, so a cell cut by a patch edge is reported
+  once, by the neighbouring patch that sees it whole. Overlapping costs about 40% more
+  patches than adjacent tiling.
+- Pixel values are divided by 255 before detection: the models expect images on an 8-bit
+  intensity scale. Rescale 16-bit or floating-point images accordingly first (the
+  CellDiscovery GUI does this with its *Normalize* option).
 
 ---
 
@@ -230,6 +237,7 @@ detector = CellDetector(
     device='cpu',       # str — e.g. 'cuda:0'
     threshold=None,     # float or None — None = use value from checkpoint
     rescorer_path=None, # str or Path or None — None = skip rescoring
+    overlap=None,       # int or None — tile overlap in px; None = from model config, 0 = none
 )
 ```
 
