@@ -6,18 +6,11 @@ Instructions: Review the following tasks and implement them in the most efficien
 
 When a task is completed, mark it as done by replacing the `[ ]` with `[x]`. If a task is not applicable or cannot be completed, mark it as not applicable by replacing the `[ ]` with `[-]`. Move the completed task to the "Completed tasks" section below. Always include a brief description of the changes made in the "Completed tasks" section with a completion timestamp.
 
-- [ ] `CellQualityControl` gui: There is something off when modifying a cell. When I select the second page ofa  file, changes are applied to the next cell in the list. Discover why this is happening and fix it.
-- [ ] `CellQualityControl` gui: Add keyboard shortcuts for the following actions and update button text to reflect the shortcut: 
-  - [ ] classify by score/rescore threshold
-  - [ ] Plot score/rescore histogram
-  - [ ] plot full image qc map
-  - [ ] update coordinate by click
-- [ ] `CellQualityControl` gui: reuse open plots for histogram and full image qc map instead of opening a new plot each time. If using a modifier key (`ctrl+action`), then open a new plot instead of reusing the existing one.
-- [ ] `CellQualityControl` gui: Replace the "Source" dropdown with a tabbed interface to select the source file. This will allow for easier navigation between different sources and improve the user experience. The tab should encapsulate the "Current block" panel only.
-
-
-
 ## Completed tasks
 
 - [x] Add option to tif viewer in `CellDatasetManager` gui to plot scatter points at locations by cell class.
 - [x] Add option to tif viewer in `CellDatasetManager` gui to plot scatter points at locations with just a single color per page.
+- [x] `CellQualityControl` gui: Fixed a cell-classification bug where, under certain filter modes (e.g. "Show unreviewed only"), classifying a cell could silently reselect a different row than the one visually highlighted, causing a subsequent action to land on "the next cell in the list". Root cause was two compounding defects in the classify-then-reselect pipeline: `classifySelectedCell` read `app.SelectedGlobalRow` *after* `applyFilter` had already reset it to `NaN` (now captures the row before calling `applyFilter`), and `selectPositionInFilteredOrder`'s same-block fast path skipped re-rendering the montage even when filtering had changed which rows belonged in that block (now compares the cached visible rows against the freshly filtered set and forces a full re-render when they differ). (2026-07-01)
+- [x] `CellQualityControl` gui: Added keyboard shortcuts `t` (classify by score/rescore threshold), `h` (plot score/rescore histogram), `v` (plot full image QC map), and `r` (update coordinate by click), plus `Ctrl+h`/`Ctrl+v` to force a new plot window (see next item). Button text now shows each shortcut, e.g. "Plot score/rescore histogram... [h]". (2026-07-01)
+- [x] `CellQualityControl` gui: Histogram and full-image QC map plots now reuse their existing figure window instead of opening a new one each time; holding `Ctrl` while pressing `h`/`v` opens a new window instead (button clicks always reuse, since App Designer button callbacks can't see modifier-key state). (2026-07-01)
+- [x] `CellQualityControl` gui: Replaced the "Source" dropdown with a tab strip (one tab per channel/page source) that wraps only the "Current block" panel; switching tabs loads that source the same way the dropdown used to. Dataset/Datasets and Selected-detection panels are unaffected. (2026-07-01)
