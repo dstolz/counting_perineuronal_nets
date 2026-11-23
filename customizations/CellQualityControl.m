@@ -103,6 +103,8 @@
         TissueFigure = []
         TissueAxes = []
         TissueImage = []
+        HistogramFigure = []
+        HistogramAxes = []
         TissueClassPointHandle = []
         TissueClassPointRows double = []
         TissueSelectionHandle = []
@@ -529,7 +531,12 @@
         end
 
 
-        function openTissuePlot(app)
+        function openTissuePlot(app, forceNew)
+            arguments
+                app
+                forceNew (1,1) logical = false
+            end
+
             if isempty(app.ActiveReviewTable) || height(app.ActiveReviewTable) == 0
                 uialert(app.UIFigure, 'No active localization source is loaded.', 'No data');
                 return
@@ -538,6 +545,13 @@
             imagePage = app.getImagePage(double(app.ActiveSource.PageIndex));
             if isempty(imagePage)
                 uialert(app.UIFigure, 'Could not load the active TIFF page.', 'Image unavailable');
+                return
+            end
+
+            if ~forceNew && ~isempty(app.TissueFigure) && isvalid(app.TissueFigure) ...
+                    && ~isempty(app.TissueAxes) && isvalid(app.TissueAxes)
+                figure(app.TissueFigure);
+                app.renderTissuePlot(imagePage);
                 return
             end
 
@@ -1089,7 +1103,12 @@
             app.showCurrentBlock();
         end
 
-        function openHistogramDialog(app)
+        function openHistogramDialog(app, forceNew)
+            arguments
+                app
+                forceNew (1,1) logical = false
+            end
+
             if isempty(app.ActiveReviewTable) || height(app.ActiveReviewTable) == 0
                 uialert(app.UIFigure, 'Load a localization source before plotting a histogram.', 'No active source');
                 return
@@ -1103,7 +1122,7 @@
 
             defaultColumn = app.pickDefaultHistogramColumn(columns);
             if numel(columns) == 1
-                app.plotClassificationHistogram(defaultColumn);
+                app.plotClassificationHistogram(defaultColumn, forceNew);
                 return
             end
 
@@ -1134,6 +1153,7 @@
 
             controls = struct();
             controls.ColumnDropDown = columnDropDown;
+            controls.ForceNew = forceNew;
             dlg.UserData = controls;
         end
 
@@ -1144,14 +1164,15 @@
 
             controls = dlg.UserData;
             columnName = string(controls.ColumnDropDown.Value);
-            app.plotClassificationHistogram(columnName);
+            app.plotClassificationHistogram(columnName, controls.ForceNew);
             delete(dlg);
         end
 
-        function plotClassificationHistogram(app, columnName)
+        function plotClassificationHistogram(app, columnName, forceNew)
             arguments
                 app
                 columnName (1,1) string
+                forceNew (1,1) logical = false
             end
 
             if isempty(app.ActiveReviewTable) || height(app.ActiveReviewTable) == 0
@@ -1189,8 +1210,19 @@
             edges = linspace(lo, hi, 41);
 
             figName = char(columnName + " histogram by QC class");
-            fig = figure('Name', figName, 'NumberTitle', 'off');
-            ax = axes('Parent', fig);
+            if ~forceNew && ~isempty(app.HistogramFigure) && isvalid(app.HistogramFigure) ...
+                    && ~isempty(app.HistogramAxes) && isvalid(app.HistogramAxes)
+                fig = app.HistogramFigure;
+                ax = app.HistogramAxes;
+                figure(fig);
+                cla(ax);
+            else
+                fig = figure('Name', figName, 'NumberTitle', 'off');
+                ax = axes('Parent', fig);
+                app.HistogramFigure = fig;
+                app.HistogramAxes = ax;
+            end
+            fig.Name = figName;
             hold(ax, 'on')
 
             labels = app.reviewLabelsForHistogram();
