@@ -384,7 +384,10 @@
                  'tints).  By rescore: colour each cell by its latest Stage-2 ' ...
                  'rescore [0-1] on a turbo ramp (unscored cells in grey). Falls ' ...
                  'back to uniform for sources with no rescore column.  By class: ' ...
-                 'colour each cell by its integer class label; a legend shows each class.']);
+                 'colour each cell by its QC classification (Good/Bad/etc, read ' ...
+                 'from that source''s QC file; unreviewed cells in grey). Falls ' ...
+                 'back to uniform for sources with no QC file yet. A legend shows ' ...
+                 'each class.']);
 
             obj.PageContent = uipanel(pageGrid, 'BorderType', 'none');
             obj.PageContent.Layout.Row = 2;
@@ -919,7 +922,8 @@
             % displayed (subsampled) image: displayed = full * scale. Colour is
             % a single bright tint per source ('Uniform'), each cell's latest
             % Stage-2 rescore on a turbo ramp ('By rescore'), or each cell's
-            % integer class label ('By class'; legend shows each class).
+            % QC classification read from that source's QC file ('By class';
+            % legend shows each class, unreviewed cells in grey).
             if ~obj.ShowLocations
                 return;
             end
@@ -956,26 +960,36 @@
                 pageClrs = CellDatasetManager.pageColors(nPages);
             end
 
-            % For by-class: pre-read all sources to build a consistent class
-            % palette before drawing (same class -> same colour across sources).
+            % For by-class: pre-read every source's QC file (class labels
+            % live there, not in the detection/rescore CSV) to build a
+            % consistent label palette before drawing (same label -> same
+            % colour across sources). "Unreviewed" is always drawn grey and
+            % listed last, matching the neutral-grey convention used for
+            % unscored cells in 'By rescore'.
             allPts = cell(numel(srcs), 1);
             if byClass
-                allClassIdx = [];
+                allLabels = strings(0, 1);
                 for i = 1:numel(srcs)
-                    csv = CellDatasetManager.overlayCsvFor(d, srcs(i));
-                    allPts{i} = CellDatasetManager.readLocPoints(csv);
+                    allPts{i} = CellDatasetManager.readQcPoints(srcs(i).QcPath);
                     if allPts{i}.hasClass
-                        allClassIdx = [allClassIdx; allPts{i}.classIdx(:)]; %#ok<AGROW>
+                        allLabels = [allLabels; allPts{i}.label(:)]; %#ok<AGROW>
                     end
                 end
-                uniqueClasses = unique(allClassIdx);
-                classPalette  = CellDatasetManager.classColors(numel(uniqueClasses));
+                uniqueClasses = unique(allLabels);
+                uniqueClasses = [uniqueClasses(uniqueClasses ~= "Unreviewed"); ...
+                                  uniqueClasses(uniqueClasses == "Unreviewed")];
+                classPalette  = CellDatasetManager.classColors( ...
+                    sum(uniqueClasses ~= "Unreviewed"));
             end
 
             for i = 1:numel(srcs)
-                s   = srcs(i);
+                s     = srcs(i);
+                qcPts = struct('hasClass', false);
                 if byClass
-                    pts = allPts{i};
+                    qcPts = allPts{i};
+                end
+                if byClass && qcPts.hasClass
+                    pts = qcPts;
                 else
                     csv = CellDatasetManager.overlayCsvFor(d, s);
                     pts = CellDatasetManager.readLocPoints(csv);
@@ -985,22 +999,26 @@
                 end
                 x = pts.x * scale;
                 y = pts.y * scale;
-                if byClass && pts.hasClass
+                if byClass && qcPts.hasClass
                     for ci = 1:numel(uniqueClasses)
-                        cls  = uniqueClasses(ci);
-                        mask = pts.classIdx == cls;
+                        lbl  = uniqueClasses(ci);
+                        mask = pts.label == lbl;
                         if ~any(mask), continue; end
-                        c    = classPalette(ci, :);
-                        h    = scatter(ax, x(mask), y(mask), 16, c, '.', ...
+                        if lbl == "Unreviewed"
+                            c = [0.6 0.6 0.6];
+                        else
+                            c = classPalette(ci, :);
+                        end
+                        h = scatter(ax, x(mask), y(mask), 16, c, '.', ...
                             'HitTest', 'off', 'PickableParts', 'none');
-                        lbl  = sprintf('class %d', cls);
-                        if ~any(strcmp(legendLabels, lbl))
+                        lblChar = char(lbl);
+                        if ~any(strcmp(legendLabels, lblChar))
                             legendHandles(end + 1) = h; %#ok<AGROW>
-                            legendLabels{end + 1}  = lbl; %#ok<AGROW>
+                            legendLabels{end + 1}  = lblChar; %#ok<AGROW>
                         end
                     end
                 elseif byClass
-                    % CSV has no class column: fall back to uniform tint
+                    % No QC file yet for this source: fall back to uniform tint
                     c = palette(mod(i - 1, size(palette, 1)) + 1, :);
                     scatter(ax, x, y, 16, c, '.', ...
                         'HitTest', 'off', 'PickableParts', 'none');
@@ -1674,11 +1692,10 @@
 
         function pts = readLocPoints(csvPath)
             % Read cell centres from a localization CSV. Returns a struct with
-            % column vectors x, y (NaN rows dropped), the matching rescore (when
-            % present), hasRescore, the integer class index (when present), and
-            % hasClass. Accepts X/Y or the resized Xp/Yp naming.
-            pts = struct('x', [], 'y', [], 'rescore', [], 'hasRescore', false, ...
-                         'classIdx', [], 'hasClass', false);
+            % column vectors x, y (NaN rows dropped) and the matching rescore
+            % (when present) plus hasRescore. Accepts X/Y or the resized
+            % Xp/Yp naming.
+            pts = struct('x', [], 'y', [], 'rescore', [], 'hasRescore', false);
             csvPath = char(csvPath);
             if isempty(csvPath) || ~isfile(csvPath)
                 return;
@@ -1703,11 +1720,41 @@
                 pts.hasRescore = true;
                 pts.rescore    = r(keep);
             end
-            [cl, okcl] = CellDatasetManager.pickColumn(tbl, names, {'class'});
-            if okcl
-                pts.hasClass  = true;
-                pts.classIdx  = round(cl(keep));
+        end
+
+        function pts = readQcPoints(qcPath)
+            % Read cell centres and QC classification labels from a
+            % *_QC.csv (written by CellQualityControl). QC labels live in
+            % that separate file, not in the detection/rescore CSV that
+            % CsvPath points to, so this reads QcPath directly rather than
+            % going through readLocPoints/overlayCsvFor. Returns column
+            % vectors x, y (NaN rows dropped), label (string per point;
+            % unreviewed rows read as "Unreviewed"), and hasClass (true
+            % when the file exists and has a QCLabel column).
+            pts = struct('x', [], 'y', [], 'label', strings(0, 1), 'hasClass', false);
+            qcPath = char(qcPath);
+            if isempty(qcPath) || ~isfile(qcPath)
+                return;
             end
+            try
+                tbl = readtable(qcPath, 'TextType', 'string', ...
+                    'VariableNamingRule', 'preserve');
+            catch
+                return;
+            end
+            names = string(tbl.Properties.VariableNames);
+            [x, okx] = CellDatasetManager.pickColumn(tbl, names, {'X', 'Xp'});
+            [y, oky] = CellDatasetManager.pickColumn(tbl, names, {'Y', 'Yp'});
+            if ~okx || ~oky || ~ismember("QCLabel", names)
+                return;
+            end
+            keep  = isfinite(x) & isfinite(y);
+            label = string(tbl.QCLabel(keep));
+            label(ismissing(label) | strlength(label) == 0) = "Unreviewed";
+            pts.x        = x(keep);
+            pts.y        = y(keep);
+            pts.label    = label;
+            pts.hasClass = true;
         end
 
         function [v, ok] = pickColumn(tbl, names, candidates)
