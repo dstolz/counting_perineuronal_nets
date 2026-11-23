@@ -53,6 +53,7 @@
         MainGrid
         LeftPanel
         CenterPanel
+        CenterGrid
         RightPanel
         DatasetTable
         DatasetActiveRowStyle
@@ -60,7 +61,7 @@
         BrowseButton
         ScanButton
         OpenDatasetFolderButton
-        SourceDropDown
+        SourceTabGroup
         CellsPerBlockSpinner
         CropWidthSpinner
         CropHeightSpinner
@@ -223,11 +224,6 @@
             app.OpenDatasetFolderButton.Layout.Row = 1;
             app.OpenDatasetFolderButton.Layout.Column = 5;
 
-            app.addToolbarLabel("Source", 1, 6);
-            app.SourceDropDown = uidropdown(app.ToolbarGrid, "Items", ["No source"], "ValueChangedFcn", @(src, event) app.onSourceChanged(src, event));
-            app.SourceDropDown.Layout.Row = 1;
-            app.SourceDropDown.Layout.Column = [7 9];
-
             app.addToolbarLabel("Display", 1, 10);
             app.DisplayModeDropDown = uidropdown(app.ToolbarGrid, ...
                 "Items", ["Target channel only", "Companion channel only", "Side-by-side channel view", "False-color overlay"], ...
@@ -313,10 +309,15 @@
                 "FontWeight", "bold");
 
             app.CenterPanel = uipanel(app.MainGrid, "Title", "Current block");
-            centerGrid = uigridlayout(app.CenterPanel, [2 1]);
-            centerGrid.RowHeight = {28, '1x'};
-            centerGrid.ColumnWidth = {'1x'};
-            centerGrid.Padding = [4 4 4 4];
+            app.SourceTabGroup = uitabgroup(app.CenterPanel, ...
+                "SelectionChangedFcn", @(src, event) app.onSourceTabChanged(src, event));
+            placeholderTab = uitab(app.SourceTabGroup, "Title", "No source");
+
+            app.CenterGrid = uigridlayout(placeholderTab, [2 1]);
+            app.CenterGrid.RowHeight = {28, '1x'};
+            app.CenterGrid.ColumnWidth = {'1x'};
+            app.CenterGrid.Padding = [4 4 4 4];
+            centerGrid = app.CenterGrid;
 
             app.BlockNavigationGrid = uigridlayout(centerGrid, [1 4]);
             app.BlockNavigationGrid.RowHeight = {'1x'};
@@ -441,7 +442,7 @@
             app.setTooltip(app.BrowseButton, "Choose the parent folder containing nested datasets.");
             app.setTooltip(app.ScanButton, "Scan parent folder for *_proj.tif images and *_locs.csv localization files.");
             app.setTooltip(app.OpenDatasetFolderButton, "Open the folder containing the currently loaded dataset in the system file browser.");
-            app.setTooltip(app.SourceDropDown, "Select the active localization CSV/channel for review. Default: first valid source.");
+            app.setTooltip(app.SourceTabGroup, "Select the active localization CSV/channel for review via tabs. Default: first valid source.");
             app.setTooltip(app.DisplayModeDropDown, "Choose crop display channel mode. Default: Target channel only.");
             app.setTooltip(app.ContrastModeDropDown, "Choose display-only contrast scaling. Default: Auto per crop.");
             app.setTooltip(app.SettingsButton, "Open persistent app settings for file patterns, channels, categories, autosave, and markers.");
@@ -1724,7 +1725,7 @@
             end
 
             app.updateDatasetTable();
-            app.refreshSourceDropDown();
+            app.refreshSourceTabs();
 
             if height(app.DatasetList) == 0
                 app.updateStatus("No image files matched " + string(app.effectiveImagePattern()) + ".");
@@ -1981,7 +1982,7 @@
 
             app.Settings.LastActiveDataset = app.DatasetList.DatasetID(datasetIndex);
             app.saveSettings();
-            app.refreshSourceDropDown();
+            app.refreshSourceTabs();
 
             sources = app.SourceListByDataset{datasetIndex};
             if isempty(sources)
@@ -2002,36 +2003,51 @@
                 end
             end
 
-            app.SourceDropDown.Value = sourceIndex;
+            app.selectSourceTab(sourceIndex);
+        end
+
+        function refreshSourceTabs(app)
+            % Rebuild the source tab strip. Reparent CenterGrid onto the panel
+            % itself first so deleting the old tabs doesn't destroy it (a uitab's
+            % children are deleted along with it).
+            app.CenterGrid.Parent = app.CenterPanel;
+            delete(app.SourceTabGroup.Children);
+
+            sources = [];
+            if app.ActiveDatasetIndex >= 1 && app.ActiveDatasetIndex <= numel(app.SourceListByDataset)
+                sources = app.SourceListByDataset{app.ActiveDatasetIndex};
+            end
+
+            if isempty(sources)
+                placeholderTab = uitab(app.SourceTabGroup, "Title", "No source");
+                app.CenterGrid.Parent = placeholderTab;
+                return
+            end
+
+            for k = 1:numel(sources)
+                title = sprintf('%s page %d (%d rows)', char(string(sources(k).ChannelName)), sources(k).PageIndex, sources(k).NumRows);
+                uitab(app.SourceTabGroup, "Title", title);
+            end
+            app.CenterGrid.Parent = app.SourceTabGroup.Children(1);
+            app.SourceTabGroup.SelectedTab = app.SourceTabGroup.Children(1);
+        end
+
+        function selectSourceTab(app, sourceIndex)
+            arguments
+                app
+                sourceIndex (1,1) double {mustBeInteger, mustBePositive}
+            end
+
+            tabs = app.SourceTabGroup.Children;
+            if sourceIndex > numel(tabs)
+                return
+            end
+            app.SourceTabGroup.SelectedTab = tabs(sourceIndex);
+            app.CenterGrid.Parent = tabs(sourceIndex);
             app.loadLocalizationSource(sourceIndex);
         end
 
-        function refreshSourceDropDown(app)
-            if app.ActiveDatasetIndex < 1 || app.ActiveDatasetIndex > numel(app.SourceListByDataset)
-                app.SourceDropDown.Items = ["No source"];
-                app.SourceDropDown.ItemsData = 1;
-                app.SourceDropDown.Value = 1;
-                return
-            end
-
-            sources = app.SourceListByDataset{app.ActiveDatasetIndex};
-            if isempty(sources)
-                app.SourceDropDown.Items = ["No source"];
-                app.SourceDropDown.ItemsData = 1;
-                app.SourceDropDown.Value = 1;
-                return
-            end
-
-            items = cell(numel(sources), 1);
-            for k = 1:numel(sources)
-                items{k} = sprintf('%s page %d (%d rows)', char(string(sources(k).ChannelName)), sources(k).PageIndex, sources(k).NumRows);
-            end
-            app.SourceDropDown.Items = items;
-            app.SourceDropDown.ItemsData = 1:numel(sources);
-            app.SourceDropDown.Value = 1;
-        end
-
-        function onSourceChanged(app, src, event)
+        function onSourceTabChanged(app, src, event)
             arguments
                 app
                 src
@@ -2041,11 +2057,12 @@
             if app.ActiveDatasetIndex < 1 || isempty(app.SourceListByDataset)
                 return
             end
-            value = src.Value;
-            if isempty(value) || ~isnumeric(value)
+            idx = find(app.SourceTabGroup.Children == event.NewValue, 1, 'first');
+            if isempty(idx)
                 return
             end
-            app.loadLocalizationSource(double(value));
+            app.CenterGrid.Parent = event.NewValue;
+            app.loadLocalizationSource(idx);
         end
 
         function loadLocalizationSource(app, sourceIndex)
@@ -4313,8 +4330,7 @@
             end
             sources = app.SourceListByDataset{app.ActiveDatasetIndex};
             if app.ActiveSourceIndex < numel(sources)
-                app.SourceDropDown.Value = app.ActiveSourceIndex + 1;
-                app.loadLocalizationSource(app.ActiveSourceIndex + 1);
+                app.selectSourceTab(app.ActiveSourceIndex + 1);
             elseif app.ActiveDatasetIndex < height(app.DatasetList)
                 app.loadDataset(app.ActiveDatasetIndex + 1);
             end
@@ -4325,8 +4341,7 @@
                 return
             end
             if app.ActiveSourceIndex > 1
-                app.SourceDropDown.Value = app.ActiveSourceIndex - 1;
-                app.loadLocalizationSource(app.ActiveSourceIndex - 1);
+                app.selectSourceTab(app.ActiveSourceIndex - 1);
             elseif app.ActiveDatasetIndex > 1
                 app.loadDataset(app.ActiveDatasetIndex - 1);
             end
