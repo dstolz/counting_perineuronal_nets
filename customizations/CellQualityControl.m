@@ -3902,14 +3902,15 @@
             if isempty(app.ActiveReviewTable) || isnan(app.SelectedGlobalRow)
                 return
             end
+            classifiedRow = app.SelectedGlobalRow;
             oldPosition = app.BlockStartIndex + app.SelectedVisibleIndex - 1;
-            app.classifyRows(app.SelectedGlobalRow, categoryIndex);
+            app.classifyRows(classifiedRow, categoryIndex);
             app.buildDisplayOrder();
             app.applyFilter(false);
             if app.Settings.AutoAdvanceAfterClassification
                 app.selectNextUnreviewedFromPosition(oldPosition);
             else
-                app.selectRowIfVisible(app.SelectedGlobalRow, oldPosition);
+                app.selectRowIfVisible(classifiedRow, oldPosition);
             end
             app.updateProgress();
         end
@@ -4179,7 +4180,17 @@
             app.SelectedVisibleIndices = app.SelectedVisibleIndex;
             app.SelectedGlobalRow = app.FilteredOrder(pos);
 
-            if app.BlockStartIndex == oldBlockStart && ~isempty(app.MontageVisibleRows)
+            % The montage cache (MontageVisibleRows / rendered crop tiles) can go
+            % stale even when BlockStartIndex is unchanged: a classification can
+            % change FilteredOrder's membership within the same block window (e.g.
+            % a filtered-out reviewed row shifts later rows up). Only take the
+            % cheap annotation-only refresh when the cached rows still match what
+            % should be visible; otherwise force a full re-render so the displayed
+            % crops never disagree with SelectedGlobalRow.
+            blockEnd = min(app.BlockStartIndex + app.Settings.CellsPerBlock - 1, numel(app.FilteredOrder));
+            expectedVisible = app.FilteredOrder(app.BlockStartIndex:blockEnd);
+            sameContent = isequal(app.MontageVisibleRows, expectedVisible(:));
+            if app.BlockStartIndex == oldBlockStart && sameContent && ~isempty(app.MontageVisibleRows)
                 app.refreshMontageAnnotations();
                 app.updateSelectedCellDetail();
                 app.updateProgress();
