@@ -387,19 +387,19 @@
             app.CategoryButtonGrid.ColumnSpacing = 4;
 
             app.ThresholdClassifyButton = uibutton(rightGrid, "push", ...
-                "Text", "Classify by score/rescore threshold...", ...
+                "Text", "Classify by score/rescore threshold... [t]", ...
                 "ButtonPushedFcn", @(src, event) app.openThresholdClassificationDialog());
 
             app.HistogramButton = uibutton(rightGrid, "push", ...
-                "Text", "Plot score/rescore histogram...", ...
+                "Text", "Plot score/rescore histogram... [h]", ...
                 "ButtonPushedFcn", @(src, event) app.openHistogramDialog());
 
             app.TissuePlotButton = uibutton(rightGrid, "push", ...
-                "Text", "Plot full image QC map...", ...
+                "Text", "Plot full image QC map... [v]", ...
                 "ButtonPushedFcn", @(src, event) app.openTissuePlot());
 
             app.RecenterButton = uibutton(rightGrid, "push", ...
-                "Text", "Update coordinate by click...", ...
+                "Text", "Update coordinate by click... [r]", ...
                 "ButtonPushedFcn", @(src, event) app.armCoordinateUpdate());
 
             uilabel(rightGrid, "Text", "Notes");
@@ -467,10 +467,10 @@
             app.setTooltip(app.MontageAxes, "Click a crop to select it. Hold a class key while clicking to classify that cell.");
             app.setTooltip(app.DetailAxes, "Large crop view for the selected detection.");
             app.setTooltip(app.DetailLabel, "Selected detection identity, channel, coordinates, and current QC label.");
-            app.setTooltip(app.ThresholdClassifyButton, "Classify cells by score/rescore threshold using Above, Below, or Between.");
-            app.setTooltip(app.HistogramButton, "Plot score/rescore histograms overlaid by QC class colors.");
-            app.setTooltip(app.TissuePlotButton, "Open full-image QC map with class-colored points and ROI classification tools.");
-            app.setTooltip(app.RecenterButton, "Arm the selected detection crop so the next click replaces this observation's X/Y after confirmation.");
+            app.setTooltip(app.ThresholdClassifyButton, "Classify cells by score/rescore threshold using Above, Below, or Between. Shortcut: t.");
+            app.setTooltip(app.HistogramButton, "Plot score/rescore histograms overlaid by QC class colors. Reuses the open histogram window unless Ctrl+h is used. Shortcut: h.");
+            app.setTooltip(app.TissuePlotButton, "Open full-image QC map with class-colored points and ROI classification tools. Reuses the open map window unless Ctrl+v is used. Shortcut: v.");
+            app.setTooltip(app.RecenterButton, "Arm the selected detection crop so the next click replaces this observation's X/Y after confirmation. Shortcut: r.");
             app.setTooltip(app.NotesEdit, "Optional notes for the selected detection; saved in QCNotes.");
             app.setTooltip(app.MetadataTable, "Original localization metadata for the selected source row.");
             app.setTooltip(app.StatusLabel, "Current dataset/source progress, save state, and warnings.");
@@ -5244,6 +5244,12 @@
             elseif hasCtrl && key == "z"
                 app.undoLastClassification();
                 return
+            elseif hasCtrl && key == "h"
+                app.openHistogramDialog(true);
+                return
+            elseif hasCtrl && key == "v"
+                app.openTissuePlot(true);
+                return
             end
 
             if ~hasCtrl && ~hasShift && any(key == ["w", "n"])
@@ -5301,6 +5307,14 @@
                     app.cycleDisplayMode();
                 case "a"
                     app.selectAllVisibleCells();
+                case "t"
+                    app.openThresholdClassificationDialog();
+                case "h"
+                    app.openHistogramDialog();
+                case "v"
+                    app.openTissuePlot();
+                case "r"
+                    app.armCoordinateUpdate();
                 case "f"
                     if ~isempty(app.TissueFigure) && isvalid(app.TissueFigure) && isequal(src, app.TissueFigure)
                         app.resetTissueView();
