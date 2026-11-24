@@ -1,10 +1,9 @@
 ﻿# Cell Detection & QC Toolkit — User Guide
 
 Welcome to the user guide for the MATLAB graphical tools in the
-`customizations/` folder. These three GUIs wrap the project's Python deep
-learning pipeline so you can detect, clean up, and quality-check cells in
-fluorescence microscopy images **without writing any code or using the command
-line**.
+`customizations/` folder. These GUIs wrap the project's Python deep learning
+pipeline so you can detect, review and correct cells in fluorescence microscopy
+images **without writing any code or using the command line**.
 
 If you are new here, read this page first, then open the guide for whichever
 tool you need.
@@ -17,12 +16,14 @@ tool you need.
 |------|--------------|-----------------|
 | **[Cell Dataset Manager](CellDatasetManager.md)** | Finds every dataset under a folder, shows how far each has moved through the pipeline, and launches the other tools on a chosen dataset. | **Any time.** As your home base / status dashboard. |
 | **[Cell Discovery](CellDiscovery.md)** | Runs automatic cell detection on a whole folder of images and writes one results file (`*_locs.csv`) per image. | **First.** To find cells in new images. |
-| **[Cell Neighbor Resolver](CellNeighborResolution.md)** | Finds pairs of detections that sit too close together (likely duplicates of the same cell) and lets you keep one, keep both, or merge them. | **Second.** To clean up over-counting. |
-| **[Cell Localization QC](CellQualityControl.md)** | Shows every detection as a small image crop so you can mark each one Good / Bad / Uncertain and produce a reviewed dataset. | **Third.** To verify and grade the detections. |
+| **[Cell Curator](CellCurator.md)** | Shows the detections a screenful at a time so you can mark the wrong ones and confirm the rest; adds missed cells, moves, merges duplicates and excludes damaged regions; writes the final list of kept cells. | **Second.** To review, correct and finish each section. |
+| **[Cell Neighbor Resolver](CellNeighborResolution.md)** *(Legacy)* | Finds pairs of detections that sit too close together and lets you keep one, keep both, or merge them. Superseded by Cell Curator; kept for now. | Only if you need it. |
+| **[Cell Localization QC](CellQualityControl.md)** *(Legacy)* | Shows every detection as a small image crop so you can mark each one Good / Bad / Uncertain. Superseded by Cell Curator; kept for now. | Only if you need it. |
 
-The last three are normally used **in order**, but each one can also be used on
-its own. The **Cell Dataset Manager** sits above them: open it first to see what
-still needs doing, then launch the right tool from there.
+Cell Discovery and Cell Curator are normally used **in order**, but each one can
+also be used on its own. The **Cell Dataset Manager** sits above them: open it
+first to see what still needs doing, then launch the right tool from there (its
+**Curate…** button opens Cell Curator).
 
 ```
    Microscopy images (.tif)
@@ -34,17 +35,12 @@ still needs doing, then launch the right tool from there.
             │
             ▼
    ┌──────────────────────┐
-   │ Cell Neighbor        │   merge / remove duplicate detections
-   │ Resolver             │   (updates *_locs.csv in place)
+   │ Cell Curator         │   review, correct and finish each section;
+   │                      │   *_locs.csv is never modified
    └──────────────────────┘
             │
             ▼
-   ┌──────────────────────┐
-   │ Cell Localization QC │   review each cell, write *_QC.csv
-   └──────────────────────┘
-            │
-            ▼
-   Reviewed, graded cell counts
+   *_final.csv: the kept cells of each source
 ```
 
 ---
@@ -56,21 +52,24 @@ still needs doing, then launch the right tool from there.
    gets a companion `*_locs.csv` file listing the X/Y location and score of
    every detected cell.
 
-2. **Resolve duplicates** *(optional but recommended)* — Open the
-   **Cell Neighbor Resolver**, scan the same folder, and step through pairs of
-   detections that are very close together. Decide whether each pair is one cell
-   or two. Your decisions are written back into the `*_locs.csv` files.
+2. **Curate** — Select the dataset in the **Cell Dataset Manager** and press
+   **Curate…** (or run `CellCurator('<folder>')`). Review each page of
+   detections: mark the few that are wrong, press Enter to confirm the rest,
+   resolve close pairs, add missed cells, and mark each source complete. Your
+   decisions are saved in separate curation files and a final list
+   (`*_final.csv`) of kept cells is written; the detector's `*_locs.csv` is
+   never changed. See the **[Cell Curator guide](CellCurator.md)**.
 
-3. **Quality check** — Open **Cell Localization QC**, scan the folder, and grade
-   each detection (Good / Bad / Uncertain / Ignore) by looking at a montage of
-   image crops. Your labels are saved to separate `*_QC.csv` files so the
-   original detections are never overwritten.
+The older **Cell Neighbor Resolver** (duplicates) and **Cell Localization QC**
+(Good / Bad grading) are still present, marked *Legacy*, until Cell Curator
+covers everything they did. Cell Curator imports their results the first time it
+opens a source.
 
 ---
 
 ## Before you start: one-time setup
 
-All three tools call the project's Python code behind the scenes, so you need a
+The tools call the project's Python code behind the scenes, so you need a
 working Python environment with the project dependencies installed. This is set
 up once.
 
@@ -93,21 +92,27 @@ up once.
    confirm everything is found. See the
    [Cell Discovery guide](CellDiscovery.md#python-environment) for details.
 
-All three tools **remember your settings** between MATLAB sessions, so you only
+All the tools **remember your settings** between MATLAB sessions, so you only
 configure them once.
 
 ---
 
 ## Key concepts and shared vocabulary
 
-These terms come up across all three tools.
+These terms come up across the tools.
 
 - **Detection / localization** — A single cell the model found, recorded as an
   X/Y pixel coordinate plus a confidence **score**.
 
 - **`*_locs.csv`** — The localization file written by Cell Discovery, with one
-  row per detected cell (columns include `X`, `Y`, `class`, `score`). This is
-  the file the Neighbor Resolver edits and the QC tool reads.
+  row per detected cell (columns include `X`, `Y`, `class`, `score`). Cell
+  Curator reads it and never modifies it (the Legacy Neighbor Resolver edits it
+  in place).
+
+- **Curation files** — What Cell Curator writes for each source:
+  `<name>_curation.csv` (your decisions), a journal beside it,
+  `<base>.curation.json` (exclusion regions, counts) and, when a source is
+  complete, `<name>_final.csv` (the kept cells).
 
 - **Detection model** — The trained network that finds cells. Use the model that
   matches your stain:
@@ -115,8 +120,8 @@ These terms come up across all three tools.
   - **PV staining** → a `pv_*` model (often the second page, "C2").
 
 - **Rescore model (Stage 2)** — An optional second model that re-grades each
-  detection with a `0–1` quality estimate. Available in Cell Discovery and the
-  Neighbor Resolver.
+  detection with a `0–1` quality estimate. Available in Cell Discovery, Cell
+  Curator (for cells you add or move) and the Neighbor Resolver.
 
 - **Multi-page TIFF** — A single `.tif` file holding several channels as
   "pages" (e.g. page 1 = WFA, page 2 = PV). Cell Discovery can map a different
@@ -124,7 +129,8 @@ These terms come up across all three tools.
 
 - **Score vs. Rescore** — *Score* is the detector's raw confidence. *Rescore* is
   the optional Stage-2 quality estimate. Both can be used for sorting,
-  filtering, and threshold classification in the QC tool.
+  filtering, and threshold classification in the QC tool; Cell Curator uses the
+  rescore to propose a label for each page.
 
 - **Dataset manifest** — A small sidecar file (`<base>.celldataset.json`) each
   tool keeps next to your image. It is the toolkit's record of which image and
@@ -147,9 +153,10 @@ These terms come up across all three tools.
 - **The Command Window shows progress.** Detailed status and any error messages
   are printed to the MATLAB Command Window while a tool runs — keep it visible.
 
-- **Original data is preserved.** The QC tool writes to separate `*_QC.csv`
-  files. The Neighbor Resolver edits `*_locs.csv` in place but supports **Undo**
-  and only saves when you choose to.
+- **Original data is preserved.** Cell Curator never modifies `*_locs.csv`; its
+  decisions go to separate curation files and are saved as you work, with
+  **Undo** (`Ctrl+Z`). The Legacy QC tool writes separate `*_QC.csv` files; the
+  Legacy Neighbor Resolver edits `*_locs.csv` in place.
 
 ---
 
@@ -157,8 +164,10 @@ These terms come up across all three tools.
 
 - **[Cell Dataset Manager](CellDatasetManager.md)** — dataset discovery, status overview, and launcher
 - **[Cell Discovery](CellDiscovery.md)** — batch cell detection
-- **[Cell Neighbor Resolver](CellNeighborResolution.md)** — resolving duplicate detections
-- **[Cell Localization QC](CellQualityControl.md)** — manual quality control review
+- **[Cell Curator](CellCurator.md)** — review, correct and finish detections
+- **[Cell Curation Reference](CellCuration-Reference.md)** — for maintainers: files, schema, tests, limitations
+- **[Cell Neighbor Resolver](CellNeighborResolution.md)** *(Legacy)* — resolving duplicate detections
+- **[Cell Localization QC](CellQualityControl.md)** *(Legacy)* — manual quality control review
 - **[Cell Dataset Manifest](CellDatasetManifest.md)** — the per-dataset record behind the tools (schema + code API)
 
 ---

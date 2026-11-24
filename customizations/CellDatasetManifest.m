@@ -54,7 +54,8 @@ classdef CellDatasetManifest < handle
         MANIFEST_EXT  = '.celldataset.json'
         SCHEMA        = 'celldataset/2.0'
         IMAGE_EXTS    = {'.tif', '.tiff'}
-        STAGES        = {'detection', 'resized', 'resolve', 'rescore', 'qc'}
+        STAGES        = {'detection', 'resized', 'resolve', 'rescore', 'qc', 'curation'}
+        CURATION_EXT  = '.curation.json'   % dataset-level curation sidecar (curation.Store)
         % Scale-bar fallback when a TIFF carries no physical resolution tag.
         DEFAULT_UM_PER_PIXEL = 0.645
         % Filename suffix that marks a localization CSV. User-configurable via
@@ -234,6 +235,7 @@ classdef CellDatasetManifest < handle
             Detections = zeros(n, 1);
             Detected = strings(n, 1); Resolved = strings(n, 1);
             Rescored = strings(n, 1); Reviewed = strings(n, 1);
+            Curated = strings(n, 1);
             Status = strings(n, 1);
             for k = 1:n
                 d = mfs(k).toDatasetStruct(parentDir);
@@ -246,10 +248,11 @@ classdef CellDatasetManifest < handle
                 Resolved(k)  = CellDatasetManifest.frac(d.Sources, 'Resolved');
                 Rescored(k)  = CellDatasetManifest.frac(d.Sources, 'Rescored');
                 Reviewed(k)  = CellDatasetManifest.frac(d.Sources, 'Reviewed');
+                Curated(k)   = CellDatasetManifest.frac(d.Sources, 'CurComplete');
                 Status(k)    = string(d.Status);
             end
             T = table(DatasetID, Folder, Pages, Sources, Detections, ...
-                Detected, Resolved, Rescored, Reviewed, Status);
+                Detected, Resolved, Rescored, Reviewed, Curated, Status);
         end
 
         function tok = locsToken()
@@ -438,6 +441,54 @@ classdef CellDatasetManifest < handle
             end
         end
 
+        function p = curationJsonPath(obj)
+            % Dataset-level curation sidecar written by curation.Store
+            % ("<base>.curation.json"; shared by every source of the dataset).
+            p = fullfile(obj.Folder, [obj.Base CellDatasetManifest.CURATION_EXT]);
+        end
+
+        function p = curationPath(obj, key)
+            % Curation store snapshot ("<stem>_curation.csv") of a source, where
+            % <stem> is the DETECTOR locs name without its locs token. Trusts the
+            % recorded path, then the stem the store wrote into the curation
+            % JSON, then the naming convention. The file need not exist yet.
+            p = '';
+            s = obj.source(key);
+            if ~isempty(s)
+                p = obj.absPath(CellDatasetManifest.fieldChar(s, 'curation'));
+            end
+            if ~isempty(p), return; end
+            cj = CellDatasetManifest.readCurationJson(obj.curationJsonPath(), true);
+            rec = CellDatasetManifest.curationRecord(cj, key);
+            p = obj.curationCsvFor(key, CellDatasetManifest.fieldChar(rec, 'stem'));
+        end
+
+        function p = curationCsvFor(obj, key, stem)
+            % "<folder of the detector locs>/<stem>_curation.csv". The store
+            % writes its snapshot beside the locs file it curates, which need
+            % not be the dataset folder. STEM comes from the curation JSON when
+            % known, else from the locs name without its locs token. '' when the
+            % source has no locs file to anchor on.
+            p = '';
+            csv = '';
+            s = obj.source(key);
+            if ~isempty(s)
+                csv = obj.absPath(CellDatasetManifest.fieldChar(s, 'locs'));
+            end
+            if isempty(csv), csv = obj.activeLocs(key); end
+            folder = obj.Folder;
+            if ~isempty(csv)
+                [locsFolder, name] = fileparts(csv);
+                if ~isempty(locsFolder), folder = locsFolder; end
+                if isempty(stem)
+                    tok = regexptranslate('escape', CellDatasetManifest.locsToken());
+                    stem = regexprep(name, [tok '(_resized)?$'], '', 'ignorecase');
+                end
+            end
+            if isempty(stem), return; end
+            p = fullfile(folder, [stem '_curation.csv']);
+        end
+
         function sp = coordSpace(obj, key)
             % Coordinate space of the active locs: 'full' or 'resized'.
             sp = 'full';
@@ -500,7 +551,9 @@ classdef CellDatasetManifest < handle
             % pointer, and the detection stage provenance/count.
             %   info fields (all optional): image, page, locs, tool, model, count,
             %   and the preprocessing the detector input went through: resize,
-            %   bgRadius, normalized, normLimits
+            %   resizeMode, srcUmPerPixel, bgRadius, correctLSM, lsmPages,
+            %   lsmOptions, normalized, normPercentiles, normTarget, normLimits
+            %   (CellToolkit's "Model input" facts: enough to regenerate it)
             if nargin < 3 || ~isstruct(info), info = struct(); end
             [channel, page] = CellDatasetManifest.splitKey(key);
             if CellDatasetManifest.has(info, 'page'), page = double(info.page); end
@@ -526,7 +579,8 @@ classdef CellDatasetManifest < handle
             obj.Data.sources.(key) = s;
 
             facts = CellDatasetManifest.pickFacts(info, {'tool', 'model', 'count', ...
-                'resize', 'bgRadius', 'normalized', 'normLimits'});
+                'resize', 'resizeMode', 'srcUmPerPixel', 'bgRadius', 'correctLSM', 'lsmPages', ...
+                'lsmOptions', 'normalized', 'normPercentiles', 'normTarget', 'normLimits'});
             obj.markStage(key, 'detection', facts);
         end
 
@@ -572,6 +626,29 @@ classdef CellDatasetManifest < handle
             facts = CellDatasetManifest.pickFacts(counts, ...
                 {'reviewed', 'good', 'bad', 'uncertain', 'tool'});
             obj.markStage(key, 'qc', facts);
+        end
+
+        function recordCuration(obj, key, curationCsv, counts)
+            % Record a CellCurator session: the curation store path and its
+            % counts (curation.Store.counts() plus 'complete' and 'tool').
+            if nargin < 4 || ~isstruct(counts), counts = struct(); end
+            obj.ensureSource(key);
+            s = obj.Data.sources.(key);
+            if nargin >= 3 && ~isempty(curationCsv)
+                s.curation = obj.relName(char(curationCsv), obj.Folder);
+            end
+            obj.Data.sources.(key) = s;
+            facts = CellDatasetManifest.pickFacts(counts, {'reviewed', ...
+                'good', 'bad', 'uncertain', 'kept', 'autoRejected', 'complete', 'tool'});
+            % 'total' means ACTIVE candidates (merged duplicates and stale rows
+            % are not cells), the same number reconcileFromDisk derives from the
+            % curation JSON, so the two writers of this stage never disagree.
+            if isfield(counts, 'active') && ~isempty(counts.active)
+                facts.total = counts.active;
+            elseif isfield(counts, 'total') && ~isempty(counts.total)
+                facts.total = counts.total;
+            end
+            obj.markStage(key, 'curation', facts);
         end
 
         function setActiveLocs(obj, key, csvPath, coordSpace)
@@ -678,6 +755,16 @@ classdef CellDatasetManifest < handle
                 obj.markStageDerived(key, 'qc', s.Reviewed, struct( ...
                     'reviewed', s.QcReviewed, 'good', s.QcGood, ...
                     'bad', s.QcBad, 'uncertain', s.QcUncertain));
+                if s.CurFound
+                    obj.markStageDerived(key, 'curation', s.Curated, struct( ...
+                        'total', s.CurTotal, 'reviewed', s.CurReviewed, ...
+                        'good', s.CurGood, 'bad', s.CurBad, ...
+                        'uncertain', s.CurUncertain, 'kept', s.CurKept, ...
+                        'complete', s.CurComplete));
+                end
+                % No curation record found (never curated, or the sidecar is
+                % missing or unreadable right now): leave whatever was recorded
+                % untouched rather than zeroing a real curation's facts.
                 if s.Detected && ~isnan(s.Page)
                     pages(end+1) = s.Page; %#ok<AGROW>
                 end
@@ -753,6 +840,9 @@ classdef CellDatasetManifest < handle
             [~, ord] = sort(pg);
             keys = keys(ord);
 
+            % The curation sidecar is one small JSON per dataset: read it once.
+            curJson = CellDatasetManifest.readCurationJson(obj.curationJsonPath(), opts.Probe);
+
             sources = repmat(blank, numel(keys), 1);
             for i = 1:numel(keys)
                 key = keys{i};
@@ -793,6 +883,27 @@ classdef CellDatasetManifest < handle
                 s.ResolveInfo   = obj.provenanceStr(key, 'resolve');
                 s.RescoreInfo   = obj.provenanceStr(key, 'rescore');
                 s.QcInfo        = obj.provenanceStr(key, 'qc');
+
+                % CellCurator status, from the counts the store keeps in the
+                % curation JSON (no parsing of the curation CSV).
+                rec = CellDatasetManifest.curationRecord(curJson, key);
+                if ~isempty(rec)
+                    s.CurFound = true;
+                    s.CurationPath = obj.curationCsvFor(key, ...
+                        CellDatasetManifest.fieldChar(rec, 'stem'));
+                    cnt = struct();
+                    if isfield(rec, 'counts') && isstruct(rec.counts), cnt = rec.counts; end
+                    s.CurTotal     = CellDatasetManifest.numField(cnt, 'active');
+                    s.CurReviewed  = CellDatasetManifest.numField(cnt, 'reviewed');
+                    s.CurGood      = CellDatasetManifest.numField(cnt, 'good');
+                    s.CurBad       = CellDatasetManifest.numField(cnt, 'bad');
+                    s.CurUncertain = CellDatasetManifest.numField(cnt, 'uncertain');
+                    s.CurKept      = CellDatasetManifest.numField(cnt, 'kept');
+                    s.CurAutoRejected = CellDatasetManifest.numField(cnt, 'autoRejected');
+                    s.CurComplete  = isfield(rec, 'complete') && isequal(logical(rec.complete), true);
+                    s.Curated      = s.CurReviewed > 0 || s.CurComplete;
+                end
+                s.CurationInfo = obj.provenanceStr(key, 'curation');
 
                 sources(i) = s;
             end
@@ -988,9 +1099,10 @@ classdef CellDatasetManifest < handle
             blank = struct('done', false);
             s = struct('channel', char(channel), 'page', pageVal, ...
                 'activeLocs', '', 'coordSpace', 'full', ...
-                'locs', '', 'locsResized', '', 'qc', '', ...
+                'locs', '', 'locsResized', '', 'qc', '', 'curation', '', ...
                 'stages', struct('detection', blank, 'resized', blank, ...
-                    'resolve', blank, 'rescore', blank, 'qc', blank));
+                    'resolve', blank, 'rescore', blank, 'qc', blank, ...
+                    'curation', blank));
         end
 
         function s = emptyStatus()
@@ -1002,7 +1114,42 @@ classdef CellDatasetManifest < handle
                 'Resolved', false, 'ResolveInfo', '', ...
                 'Rescored', false, 'RescoreInfo', '', ...
                 'Reviewed', false, 'QcReviewed', 0, 'QcGood', 0, ...
-                'QcBad', 0, 'QcUncertain', 0, 'QcInfo', '');
+                'QcBad', 0, 'QcUncertain', 0, 'QcInfo', '', ...
+                'CurationPath', '', 'CurFound', false, 'Curated', false, 'CurComplete', false, ...
+                'CurTotal', 0, 'CurReviewed', 0, 'CurGood', 0, 'CurBad', 0, ...
+                'CurUncertain', 0, 'CurKept', 0, 'CurAutoRejected', 0, ...
+                'CurationInfo', '');
+        end
+
+        function cj = readCurationJson(jsonPath, probe)
+            % Decoded "<base>.curation.json" (curation.Store), or [] when absent,
+            % unreadable, or probing is off.
+            cj = [];
+            jsonPath = char(jsonPath);
+            if ~probe || isempty(jsonPath) || ~isfile(jsonPath), return; end
+            try
+                cj = jsondecode(fileread(jsonPath));
+            catch
+                cj = [];
+            end
+        end
+
+        function rec = curationRecord(cj, key)
+            % sources.<key> record of a decoded curation JSON, or [] if none.
+            rec = [];
+            if isstruct(cj) && isfield(cj, 'sources') && isstruct(cj.sources) ...
+                    && isfield(cj.sources, key) && isstruct(cj.sources.(key))
+                rec = cj.sources.(key);
+            end
+        end
+
+        function v = numField(s, name)
+            % Scalar numeric field of a struct, 0 when missing or non-numeric.
+            v = 0;
+            if isstruct(s) && isfield(s, name) && isnumeric(s.(name)) && isscalar(s.(name)) ...
+                    && isfinite(s.(name))
+                v = double(s.(name));
+            end
         end
 
         function m = readManifestFile(manifestPath)
@@ -1254,7 +1401,11 @@ classdef CellDatasetManifest < handle
             if ~any(det)
                 s = 'New (image only)'; return;
             end
-            if all([sources.Reviewed])
+            if all([sources.CurComplete])
+                s = 'Curated';
+            elseif any([sources.Curated])
+                s = 'Curating';
+            elseif all([sources.Reviewed])
                 s = 'Reviewed';
             elseif all([sources.Rescored])
                 s = 'Rescored';

@@ -3,8 +3,8 @@
 The **Cell Dataset Manager** is the overview tool for the whole toolkit. Point
 it at a parent folder and it finds **every dataset** underneath, shows how far
 each one has moved through the pipeline (Detected → Resolved → Rescored →
-Reviewed), and launches the other three tools pointed straight at whichever
-dataset you select.
+Reviewed, or Curating → Curated once Cell Curator has been used), and launches
+the other tools pointed straight at whichever dataset you select.
 
 It is also usable **from code** (no GUI) so other scripts can ask "what has been
 processed and what hasn't?"
@@ -21,7 +21,8 @@ every file the other tools derive from it, grouped by the image's base name:
 | `<base>.tif` / `<base>_proj.tif` / `<base>_resized.tif` | (your images) | the source image |
 | `<base>[_<channel><page>]_locs.csv` | Cell Discovery | detections |
 | `<base>[_<channel><page>]_locs_resized.csv` | Cell Discovery | detections in resized coordinates |
-| `<base>[_<channel><page>]_locs_QC.csv` | Cell Localization QC | manual review labels |
+| `<base>[_<channel><page>]_locs_QC.csv` | Cell Localization QC *(Legacy)* | manual review labels |
+| `<stem>_curation.csv`, `<stem>_curation.journal.csv`, `<stem>_final.csv`, `<base>.curation.json` | [Cell Curator](CellCurator.md) | your decisions on each detection, the log of changes, the final list of kept cells, and the exclusion regions and counts |
 
 Each distinct `(channel, page)` localization stream is a **source** within the
 dataset, so a two-page WFA/PV TIFF shows up as one dataset with two sources
@@ -40,9 +41,12 @@ CellDatasetManager('D:\HISTOLOGY') % open and scan a folder immediately
 The window has two tables:
 
 - **Datasets** (left) — one row per dataset with page count, number of sources,
-  total detections, and `k/n` progress for each stage, plus an overall
-  **Status** (`New (image only)`, `Detected`, `Resolved`, `Rescored`,
-  `Reviewed`, or `Partial`).
+  total detections, and `k/n` progress for each stage (the **Review** column
+  counts a source as reviewed if it has a Cell Curator record or a legacy QC
+  file), plus an overall **Status** (`New (image only)`, `Detected`, `Resolved`,
+  `Rescored`, `Reviewed`, `Curating`, `Curated`, or `Partial`). `Curating`
+  means some source has been reviewed in Cell Curator; `Curated` means every
+  source is marked complete there.
 - **Selected dataset** (right) — a per-source breakdown of the highlighted
   dataset, plus buttons to act on it.
 
@@ -51,14 +55,23 @@ The window has two tables:
 With a dataset (and optionally a source row) selected:
 
 - **Detect cells…** — opens **Cell Discovery** on this dataset's folder.
-- **Resolve neighbors…** — opens the **Cell Neighbor Resolver** on this folder
-  and loads the selected source's CSV.
-- **QC review…** — opens **Cell Localization QC** on this folder.
+- **Curate…** — opens **[Cell Curator](CellCurator.md)** on the parent folder
+  you scanned (so review can carry on from one dataset to the next), showing
+  the selected dataset and source. With no parent folder set it uses the
+  selected dataset's own folder. This replaces the two Legacy buttons below.
+- **Legacy: resolve…** — opens the **Cell Neighbor Resolver** on this folder
+  and loads the selected source's CSV. Superseded by Curate…; it edits the
+  `*_locs.csv` in place, and Cell Curator imports those edits the first time it
+  opens the source.
+- **Legacy: QC…** — opens **Cell Localization QC** on this folder. Superseded by
+  Curate…; Cell Curator imports its `*_QC.csv` labels the first time it opens
+  the source.
 - **Set active locs…** — choose which localization CSV is the **active analysis
   file** for the selected source. Every other tool then reads/writes the file
   you pick here. Offers the source's discovered variants (plain `_locs`, resized
   `_locs_resized`) plus a browse option for anything else. (See *Manifest files*
-  below.)
+  below.) Cell Curator is the exception: it always reads the detector's own
+  `_locs` file, not the active one.
 - **Open folder** / **Open manifest** — open the dataset's folder or its
   manifest file in your editor.
 
@@ -81,6 +94,11 @@ dropdown chooses how the markers are coloured:
   on a turbo ramp (blue = low, red = high), with a compact rescore key.
   Cells with no rescore yet are drawn grey, and sources lacking a `rescore`
   column fall back to the uniform tint.
+- **By class** — each cell is coloured by its label. The source's Cell Curator
+  record (`<stem>_curation.csv`) is read first, and the legacy `*_QC.csv` only
+  when there is none. Cells not yet reviewed are grey; merged duplicates and
+  stale rows are not drawn. Sources with neither fall back to the uniform
+  tint.
 
 ---
 
@@ -105,7 +123,7 @@ records two kinds of information:
   file** for each source, and when each stage ran / which tool/model produced
   it.
 
-The other three GUIs update the manifest as they save, so the status the manager
+The other GUIs update the manifest as they save, so the status the manager
 shows always reflects the latest work. If you add or delete files by hand, the
 next scan reconciles and rewrites the manifest. Use **Set active locs…** to
 re-point a source's active analysis file; every other tool then honors it.

@@ -6,8 +6,9 @@ plus everything the Cell\* tools derive from it — and answers, for every file
 operation, *which file is the correct one*.
 
 It is not a GUI. The [Cell Dataset Manager](CellDatasetManager.md) dashboard and
-the three working tools (Discovery, Neighbor Resolver, QC) all go through it
-instead of guessing filenames from naming conventions.
+the working tools (Discovery, [Cell Curator](CellCurator.md) and the Legacy
+Neighbor Resolver and QC) all go through it instead of guessing filenames from
+naming conventions.
 
 ---
 
@@ -65,17 +66,43 @@ Paths inside are stored relative to the dataset folder. Example:
       "locs":        "slice42_PNN1_locs.csv",
       "locsResized": "slice42_PNN1_locs_resized.csv",
       "qc":          "slice42_PNN1_locs_QC.csv",
+      "curation":    "slice42_PNN1_curation.csv",
       "stages": {
         "detection": {"done": true, "time": "...", "tool": "CellDiscovery", "model": "...", "count": 812},
         "resized":   {"done": true, "time": "..."},
         "resolve":   {"done": false},
         "rescore":   {"done": true, "time": "...", "model": "..."},
-        "qc":        {"done": false}
+        "qc":        {"done": false},
+        "curation":  {"done": true, "time": "...", "tool": "CellCurator", "total": 812,
+                      "reviewed": 812, "good": 590, "bad": 222, "kept": 590, "complete": true}
       }
     }
   }
 }
 ```
+
+### Curation (Cell Curator)
+
+Cell Curator keeps its own files (`<stem>_curation.csv`, a journal, and the
+dataset-level `<base>.curation.json`; see the [Cell Curator guide](CellCurator.md)
+and the [maintainer's reference](CellCuration-Reference.md)). The manifest holds
+only a pointer and the counts:
+
+- stage **`curation`**, alongside `detection`, `resized`, `resolve`, `rescore`
+  and `qc`; `sources.<key>.curation` is the snapshot's relative path.
+- `curationPath(key)` resolves the snapshot (recorded path, else the stem the
+  store wrote into the curation JSON); `curationJsonPath()` is the JSON.
+- `recordCuration(key, csv, counts)` records it, with `reviewed`, `good`, `bad`,
+  `uncertain`, `kept`, `autoRejected`, `complete`, `tool` and `total` (active
+  candidates; merged duplicates and stale rows are not cells).
+- On every scan the status fields are re-derived **from the counts in the
+  curation JSON** (the curation CSV is not parsed): `CurFound`, `Curated` (some
+  cell reviewed, or the source complete), `CurComplete`, `CurTotal`,
+  `CurReviewed`, `CurGood`, `CurBad`, `CurUncertain`, `CurKept`,
+  `CurAutoRejected`, `CurationPath`, `CurationInfo`. A missing or unreadable JSON
+  leaves the recorded facts untouched rather than zeroing them.
+- The dataset's overall status is `Curated` when every source is complete and
+  `Curating` when any source is curated.
 
 > **Greenfield format.** Nothing reads the previous `celldataset/1.1` files; a
 > non-`2.0` sidecar is treated as absent and a fresh one is built from the files
@@ -100,6 +127,8 @@ keys = mf.sourceKeys();            % e.g. {'PNN1','PV2'}
 csv  = mf.activeLocs('PNN1');      % THE analysis CSV for a source
 rcsv = mf.locsPath('PNN1','resized');
 qc   = mf.qcPath('PNN1');
+cur  = mf.curationPath('PNN1');    % <stem>_curation.csv (Cell Curator's snapshot)
+cj   = mf.curationJsonPath();      % <base>.curation.json (shared by all sources)
 img2 = mf.imageForLocs(csv);       % image matching a CSV's coord space
 [ch, pg] = mf.channelPage('PNN1');
 
@@ -111,6 +140,7 @@ mf.recordResized(key, rcsv, 'slice42_resized.tif');
 mf.recordResolve(key, struct('tool','CellNeighborResolution'));
 mf.recordRescore(key, struct('tool','CellNeighborResolution','model','m'));
 mf.recordQc(key, qc, struct('reviewed',r,'good',g,'bad',b,'uncertain',u));
+mf.recordCuration(key, curCsv, store.counts());   % counts plus .complete and .tool, as Cell Curator passes them
 mf.setActiveLocs(key, rcsv, 'resized');   % re-point the active file
 mf.save();
 ```
@@ -131,7 +161,8 @@ is shared via `CellDatasetManifest.locsToken()`.
 |------|-----------------------------|
 | **Cell Discovery** | `recordDetection` / `recordResized` / `recordRescore` — seeds the image, analyzed pages, the active locs CSV, and provenance. |
 | **Cell Neighbor Resolver** | resolves the companion image/page via `imageForLocs` / `channelPage`; records `recordResolve` / `recordRescore`. Curation is in place, so the active pointer is unchanged. |
-| **Cell Localization QC** | records `recordQc` (QC path + Good/Bad/Uncertain counts). |
+| **Cell Localization QC** *(Legacy)* | records `recordQc` (QC path + Good/Bad/Uncertain counts). |
+| **Cell Curator** | `recordCuration` whenever you leave a source, complete it or close the window (the curation CSV path and its counts). It reads the detector's `locs` file, **not** `activeLocs`. |
 | **Cell Dataset Manager** | `discover` for the dashboard; **Set active locs…** calls `setActiveLocs`. |
 
 Every write is best-effort and guarded, so a manifest problem can never break a

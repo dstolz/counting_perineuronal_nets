@@ -2,6 +2,8 @@
 
 [← Back to the User Guide home](Home.md)
 
+> **Legacy tool.** Cell Neighbor Resolver is superseded by **Cell Curator** and is kept for now. See the [Cell Curator guide](CellCurator.md).
+
 The automatic detector sometimes marks the **same cell twice**, or places two
 detections so close that they're really one cell. The **Cell Neighbor Resolver**
 finds these close pairs and lets you decide, one pair at a time, whether to keep

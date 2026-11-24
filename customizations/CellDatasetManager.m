@@ -76,6 +76,7 @@
         SourceTable
         DetailLabel
         DiscoveryButton
+        CuratorButton
         ResolverButton
         QCButton
         OpenFolderButton
@@ -207,7 +208,7 @@
                 case 'detection', flags = [sources.Detected];
                 case 'resolve',   flags = [sources.Resolved];
                 case 'rescore',   flags = [sources.Rescored];
-                case 'qc',        flags = [sources.Reviewed];
+                case 'qc',        flags = [sources.Reviewed] | [sources.Curated];
                 otherwise,        flags = false(1, n);
             end
             txt = sprintf('%d/%d', sum(flags), n);
@@ -238,14 +239,22 @@
             uilabel(tb, 'Text', 'Parent directory:', 'HorizontalAlignment', 'right');
             obj.ParentDirEdit = uieditfield(tb, 'text', ...
                 'ValueChangedFcn', @(s,e) obj.onScan());
+            CellToolkit.setTooltip(obj.ParentDirEdit, ...
+                ['Parent directory to search for datasets (every folder below it ' ...
+                 'is scanned). Press Enter to scan.']);
             obj.BrowseButton = uibutton(tb, 'Text', 'Browse...', ...
                 'ButtonPushedFcn', @(s,e) obj.onBrowse());
+            CellToolkit.setTooltip(obj.BrowseButton, ...
+                'Choose the parent directory to search for datasets.');
             obj.ScanButton = uibutton(tb, 'Text', 'Scan', ...
                 'ButtonPushedFcn', @(s,e) obj.onScan());
             CellToolkit.setTooltip(obj.ScanButton, ...
                 'Recursively find datasets and refresh their pipeline status.');
             obj.OpenFolderButton = uibutton(tb, 'Text', 'Open folder', ...
                 'ButtonPushedFcn', @(s,e) obj.onOpenFolder());
+            CellToolkit.setTooltip(obj.OpenFolderButton, ...
+                ['Show the selected dataset''s folder in the file browser, or the ' ...
+                 'parent directory when no dataset is selected.']);
 
             uilabel(tb, 'Text', 'Locs suffix:', 'HorizontalAlignment', 'right');
             obj.LocsTokenEdit = uieditfield(tb, 'text', ...
@@ -281,7 +290,7 @@
 
             obj.DatasetTable = uitable(lg, ...
                 'ColumnName', {'Name', 'Pages', 'Sources', 'Detections', ...
-                               'Detection', 'Nbr resolution', 'Rescoring', 'QC review', 'Status'}, ...
+                               'Detection', 'Nbr resolution', 'Rescoring', 'Review', 'Status'}, ...
                 'ColumnEditable', false(1, 9), ...
                 'ColumnSortable', true(1, 9), ...
                 'CellSelectionCallback', @(s,e) obj.onDatasetSelected(e));
@@ -301,7 +310,7 @@
 
             obj.SourceTable = uitable(rg, ...
                 'ColumnName', {'Source', 'Page', 'Detections', 'Resized', ...
-                               'Resolved', 'Rescored', 'QC', 'Good', 'Bad'}, ...
+                               'Resolved', 'Rescored', 'Reviewed', 'Good', 'Bad'}, ...
                 'ColumnEditable', false(1, 9), ...
                 'ColumnSortable', true(1, 9), ...
                 'CellSelectionCallback', @(s,e) obj.onSourceSelected(e));
@@ -311,23 +320,37 @@
             end
             obj.SourceTable.Layout.Row = 2;
 
-            launch = uigridlayout(rg, [1 6]);
+            launch = uigridlayout(rg, [1 7]);
             launch.Layout.Row = 3;
             obj.DiscoveryButton = uibutton(launch, 'Text', 'Detect cells...', ...
                 'ButtonPushedFcn', @(s,e) obj.onLaunchDiscovery());
             CellToolkit.setTooltip(obj.DiscoveryButton, ...
                 ['Open CellDiscovery pointed at the selected dataset''s folder, ' ...
                  'or the parent directory when none is selected.']);
-            obj.ResolverButton = uibutton(launch, 'Text', 'Resolve neighbors...', ...
+            obj.CuratorButton = uibutton(launch, 'Text', 'Curate...', ...
+                'FontWeight', 'bold', ...
+                'ButtonPushedFcn', @(s,e) obj.onLaunchCurator());
+            CellToolkit.setTooltip(obj.CuratorButton, ...
+                ['Open CellCurator to review detections: mark cells Good or Bad a ' ...
+                 'screenful at a time, merge duplicates, add missed cells and move ' ...
+                 'mis-centred ones. Opens on the selected dataset and source, and ' ...
+                 'can continue through every dataset below the parent directory. ' ...
+                 'Replaces the two Legacy tools.']);
+            obj.ResolverButton = uibutton(launch, 'Text', 'Legacy: resolve...', ...
                 'ButtonPushedFcn', @(s,e) obj.onLaunchResolver());
             CellToolkit.setTooltip(obj.ResolverButton, ...
-                ['Open CellNeighborResolution on the selected dataset''s folder ' ...
-                 '(loads the selected source), or the parent directory when none is selected.']);
-            obj.QCButton = uibutton(launch, 'Text', 'QC review...', ...
+                ['Legacy tool, superseded by Curate. Opens CellNeighborResolution ' ...
+                 'on the selected dataset''s folder (loads the selected source), or ' ...
+                 'the parent directory when none is selected. It edits the locs CSV ' ...
+                 'in place; CellCurator imports those edits the first time it opens ' ...
+                 'the source.']);
+            obj.QCButton = uibutton(launch, 'Text', 'Legacy: QC...', ...
                 'ButtonPushedFcn', @(s,e) obj.onLaunchQC());
             CellToolkit.setTooltip(obj.QCButton, ...
-                ['Open CellQualityControl on the selected dataset''s folder, ' ...
-                 'or the parent directory when none is selected.']);
+                ['Legacy tool, superseded by Curate. Opens CellQualityControl on ' ...
+                 'the selected dataset''s folder, or the parent directory when none ' ...
+                 'is selected. CellCurator imports its *_QC.csv labels the first ' ...
+                 'time it opens the source.']);
             obj.SetActiveLocsButton = uibutton(launch, 'Text', 'Set active locs...', ...
                 'ButtonPushedFcn', @(s,e) obj.onSetActiveLocs(), 'Enable', false);
             CellToolkit.setTooltip(obj.SetActiveLocsButton, ...
@@ -343,6 +366,10 @@
                  'Cell* tool opens the same image (CellDatasetManifest.activeImage).']);
             obj.OpenManifestButton = uibutton(launch, 'Text', 'Open manifest', ...
                 'ButtonPushedFcn', @(s,e) obj.onOpenManifest(), 'Enable', false);
+            CellToolkit.setTooltip(obj.OpenManifestButton, ...
+                ['Open the selected dataset''s manifest file (<base>.celldataset.json), ' ...
+                 'which records its files and which pipeline stages have run. ' ...
+                 'Needs a selected dataset.']);
 
             % --- Right column: TIFF page preview ---------------------------
             obj.PagePanel = uipanel(contentSplit, 'Title', 'TIFF pages');
@@ -384,10 +411,11 @@
                  'tints).  By rescore: colour each cell by its latest Stage-2 ' ...
                  'rescore [0-1] on a turbo ramp (unscored cells in grey). Falls ' ...
                  'back to uniform for sources with no rescore column.  By class: ' ...
-                 'colour each cell by its QC classification (Good/Bad/etc, read ' ...
-                 'from that source''s QC file; unreviewed cells in grey). Falls ' ...
-                 'back to uniform for sources with no QC file yet. A legend shows ' ...
-                 'each class.']);
+                 'colour each cell by its label (Good, Bad, Uncertain; unreviewed ' ...
+                 'cells in grey). Labels come from the source''s Cell Curator ' ...
+                 'store when it has one, otherwise from its legacy QC file. Falls ' ...
+                 'back to uniform for sources with neither. A legend shows each ' ...
+                 'class.']);
 
             obj.PageContent = uipanel(pageGrid, 'BorderType', 'none');
             obj.PageContent.Layout.Row = 2;
@@ -657,7 +685,7 @@
                     nDet  = nDet  + sum([s.Detected]);
                     nRes  = nRes  + sum([s.Resolved]);
                     nResc = nResc + sum([s.Rescored]);
-                    nRev  = nRev  + sum([s.Reviewed]);
+                    nRev  = nRev  + sum([s.Reviewed] | [s.Curated]);
                 end
             end
             obj.StatLabels.Datasets.Text   = sprintf('%d', nDatasets);
@@ -720,9 +748,16 @@
                 data{i, 4} = CellDatasetManager.yn(s.HasResized);
                 data{i, 5} = CellDatasetManager.yn(s.Resolved);
                 data{i, 6} = CellDatasetManager.yn(s.Rescored);
-                data{i, 7} = CellDatasetManager.ynCount(s.Reviewed, s.QcReviewed);
-                data{i, 8} = s.QcGood;
-                data{i, 9} = s.QcBad;
+                if s.Curated
+                    % CellCurator counts take precedence over a legacy QC file.
+                    data{i, 7} = CellDatasetManager.ynCount(true, s.CurReviewed);
+                    data{i, 8} = s.CurGood;
+                    data{i, 9} = s.CurBad;
+                else
+                    data{i, 7} = CellDatasetManager.ynCount(s.Reviewed, s.QcReviewed);
+                    data{i, 8} = s.QcGood;
+                    data{i, 9} = s.QcBad;
+                end
             end
             obj.SourceTable.Data = data;
         end
@@ -970,7 +1005,7 @@
             if byClass
                 allLabels = strings(0, 1);
                 for i = 1:numel(srcs)
-                    allPts{i} = CellDatasetManager.readQcPoints(srcs(i).QcPath);
+                    allPts{i} = CellDatasetManager.readClassPoints(srcs(i));
                     if allPts{i}.hasClass
                         allLabels = [allLabels; allPts{i}.label(:)]; %#ok<AGROW>
                     end
@@ -1275,11 +1310,41 @@
                 return;
             end
             try
-                app = CellDiscovery();
-                app.setSearchDir(folder, true);
+                app = CellDiscovery(folder);   % searches the folder once
                 obj.attachRefreshOnClose(app);
             catch ME
                 uialert(obj.UIFigure, ME.message, 'Could not open CellDiscovery');
+            end
+        end
+
+        function onLaunchCurator(obj)
+            % Open CellCurator on the scanned parent directory (so review can
+            % continue from one dataset to the next), focused on the selected
+            % dataset and source. Falls back to the dataset's own folder when no
+            % parent directory is set.
+            d = obj.selectedDataset();
+            folder = obj.ParentDirectory;
+            if isempty(folder) || ~isfolder(folder)
+                folder = obj.launchFolder();
+            end
+            if isempty(folder) || ~isfolder(folder)
+                obj.StatusLabel.Text = 'Select a dataset or set a parent directory first.';
+                return;
+            end
+            base = ''; key = '';
+            if ~isempty(d)
+                base = d.Base;
+                row = obj.SelectedSourceRow;
+                if ~isempty(row) && row >= 1 && row <= numel(d.Sources)
+                    key = d.Sources(row).Key;
+                end
+            end
+            try
+                app = CellCurator();
+                app.openParent(folder, base, key);
+                obj.attachRefreshOnClose(app);
+            catch ME
+                uialert(obj.UIFigure, ME.message, 'Could not open CellCurator');
             end
         end
 
@@ -1707,6 +1772,60 @@
                 pts.hasRescore = true;
                 pts.rescore    = r(keep);
             end
+        end
+
+        function pts = readClassPoints(src)
+            % Class-labelled points of a source for the "By class" overlay:
+            % the CellCurator curation store when the source has one, else the
+            % legacy *_QC.csv.
+            pts = struct('x', [], 'y', [], 'label', strings(0, 1), 'hasClass', false);
+            if isfield(src, 'CurationPath')
+                pts = CellDatasetManager.readCurationPoints(src.CurationPath);
+            end
+            if ~pts.hasClass
+                pts = CellDatasetManager.readQcPoints(src.QcPath);
+            end
+        end
+
+        function pts = readCurationPoints(curationCsv)
+            % Read cell centres and labels from a CellCurator store snapshot
+            % ("<stem>_curation.csv", written by curation.Store). Only active
+            % rows are returned (merged duplicates and stale rows are not
+            % cells). Unlabelled rows read as "Unreviewed"; rows the assist
+            % model rejected without review read as "Auto-rejected". Same
+            % output shape as readQcPoints.
+            pts = struct('x', [], 'y', [], 'label', strings(0, 1), 'hasClass', false);
+            curationCsv = char(curationCsv);
+            if isempty(curationCsv) || ~isfile(curationCsv)
+                return;
+            end
+            try
+                tbl = readtable(curationCsv, 'TextType', 'string', ...
+                    'VariableNamingRule', 'preserve');
+            catch
+                return;
+            end
+            names = string(tbl.Properties.VariableNames);
+            if ~all(ismember(["X", "Y", "Label"], names)) || height(tbl) == 0
+                return;
+            end
+            % An all-empty text column is read as NaN doubles: normalise.
+            txt = @(v) fillmissing(string(v), 'constant', "");
+            x = double(tbl.X);
+            y = double(tbl.Y);
+            label = txt(tbl.Label);
+            keep = isfinite(x) & isfinite(y);
+            if ismember("State", names)
+                keep = keep & txt(tbl.State) == "active";
+            end
+            if ismember("LabelSource", names)
+                label(label == "Bad" & txt(tbl.LabelSource) == "auto") = "Auto-rejected";
+            end
+            label(strlength(label) == 0) = "Unreviewed";
+            pts.x        = x(keep);
+            pts.y        = y(keep);
+            pts.label    = label(keep);
+            pts.hasClass = true;
         end
 
         function pts = readQcPoints(qcPath)

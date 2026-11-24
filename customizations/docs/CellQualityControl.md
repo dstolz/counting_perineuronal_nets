@@ -2,6 +2,8 @@
 
 [← Back to the User Guide home](Home.md)
 
+> **Legacy tool.** Cell Localization QC is superseded by **Cell Curator** and is kept for now. See the [Cell Curator guide](CellCurator.md).
+
 The detector finds candidate cells, but you usually want a human to confirm
 them. **Cell Localization QC** shows every detection as a small image crop in a
 montage so you can quickly grade each one — **Good, Bad, Uncertain, or Ignore** —
