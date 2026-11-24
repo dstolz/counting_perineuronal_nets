@@ -2,6 +2,8 @@
 
 model:
     name: ConvNet
+    # model.pretrained=<path to a best.pth>: start training from these weights (train_score.py)
+    pretrained: null
     base:
         _target_: models.ConvNet
         in_channels: 1

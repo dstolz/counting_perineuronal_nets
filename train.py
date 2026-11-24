@@ -67,13 +67,18 @@ def main(cfg):
     optimizer = hydra.utils.instantiate(cfg.optim.optimizer, model.parameters())
     scheduler = hydra.utils.instantiate(cfg.optim.lr_scheduler, optimizer)
 
-    # optionally load pre-trained weights
-    if cfg.model.pretrained and cfg.model.resume is not None:
+    # optionally load pre-trained weights (model.pretrained=<url or path to a best.pth>, e.g. a shipped
+    # detector to fine-tune). The condition used to read cfg.model.resume, a key no config defines, so
+    # any model.pretrained crashed with "ConfigAttributeError: Key 'resume' is not in struct" (unless
+    # +model.resume=... was added). When resuming (optim.resume) last.pth replaces these weights below.
+    if cfg.model.pretrained and not cfg.optim.resume:
         if cfg.model.pretrained.startswith('http://') or cfg.model.pretrained.startswith('https://'):
             pre_trained_model = torch.hub.load_state_dict_from_url(
                 cfg.model.pretrained, map_location=device, model_dir=cfg.model.cache_folder)
         else:
-            pre_trained_model = torch.load(cfg.model.pretrained, map_location=device)
+            # weights_only=False as in detector.py: torch >= 2.6 defaults to weights_only=True, which
+            # refuses non-allow-listed objects (the shipped best.pth files load either way)
+            pre_trained_model = torch.load(cfg.model.pretrained, map_location=device, weights_only=False)
         model.load_state_dict(pre_trained_model['model'])
         log.info(f"[PRETRAINED]: {cfg.model.pretrained}")
         
@@ -89,7 +94,10 @@ def main(cfg):
     # optionally resume from a saved checkpoint
     if cfg.optim.resume:
         assert Path('last.pth').exists(), 'Cannot find checkpoint for resuming.'
-        checkpoint = torch.load('last.pth', map_location=device)
+        # weights_only=False (as detector.py): torch >= 2.6 defaults to weights_only=True, which refuses
+        # a checkpoint holding any non-allow-listed object (e.g. a numpy scalar in a metric). The
+        # last.pth written today loads either way (checked with torch 2.11); this is defensive.
+        checkpoint = torch.load('last.pth', map_location=device, weights_only=False)
 
         model.load_state_dict(checkpoint['model'])
         optimizer.load_state_dict(checkpoint['optimizer'])
@@ -161,6 +169,7 @@ def main(cfg):
             valid_log = pd.concat([valid_log, valid_metrics])
             valid_log.to_csv(valid_log_path)
 
+    writer.close()  # flush TensorBoard before Hydra restores the original working directory
     log.info("Training ended. Exiting....")
 
 

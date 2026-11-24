@@ -1,0 +1,49 @@
+# @package _global_
+
+# Stage-2 data exported from curation (curation.Export.stage2, MATLAB):
+#   <export>/train/annotations.csv         imgName, X, Y (integers, model-input pixels), AV..VT (0/1)
+#   <export>/train/fullFramesH5/<stem>.h5  float32 /data, shape (H, W), the detector-input image (0-255)
+#   <export>/validation/...                the same for the validation animals
+# The exporter splits by animal, so both datasets use split=all: no random image split here (the
+# 'image' split needs >= 4 images and would put one animal's sections on both sides).
+#
+# Required overrides (absolute paths, forward slashes):
+#   python train_score.py data=curated method=ordinal_regression \
+#       data.train.root=<export>/train data.validation.root=<export>/validation \
+#       model.pretrained=<repo>/pnn_v2_scoring_ordinal_regression/best.pth ...
+# curation.Trainer.stage2Command builds the full command line.
+
+data:
+    train:
+        _target_: datasets.PerineuronalNetsRankDataset
+        root: ???
+        split: all
+        split_seed: ${seed}
+        split_type: image
+        patch_size: 64
+        mode: patches
+        random_offset: 5
+        neg_fraction: 0       # the dataset's negatives are drawn in a hard-coded 2000 x 2000 box; curated Bad cells are the negatives
+        max_cache_mem: 1_073_741_824  # 1 GiB HDF5 chunk cache per image
+        transforms:
+            _target_: torchvision.transforms.Compose
+            _args_:
+                - - _target_: torchvision.transforms.ToTensor
+                  - _target_: torchvision.transforms.RandomHorizontalFlip
+                  - _target_: torchvision.transforms.RandomVerticalFlip
+    validation:
+        _target_: datasets.PerineuronalNetsRankDataset
+        root: ???
+        split: all
+        split_seed: ${seed}
+        split_type: image
+        patch_size: 64
+        mode: patches
+        random_offset: 0
+        neg_fraction: 0
+        max_cache_mem: 1_073_741_824
+        transforms:
+            _target_: torchvision.transforms.ToTensor
+
+optim:
+    num_workers: 0            # DataLoader worker processes corrupt shared memory on Windows

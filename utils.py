@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import re
 import random
+import shutil
 
 import numpy as np
 import torch
@@ -38,7 +39,14 @@ class CheckpointManager:
         self.ckpt_dir = Path(ckpt_dir)
         self.ckpt_format = ckpt_format if ckpt_format else self._default_ckpt_format
         self.current_best = collections.defaultdict(lambda: None, current_best)
-        self.metric_modes = metric_modes if metric_modes else self._default_mertic_mode
+        if isinstance(metric_modes, dict) and metric_modes:
+            # train_score.py passes a {metric: 'min'|'max'} dict, but save() calls metric_modes(metric):
+            # "TypeError: 'dict' object is not callable" at the first validation. Accept a dict
+            # (metrics it does not name are ignored) as well as a callable.
+            modes = dict(metric_modes)
+            self.metric_modes = lambda metric: modes.get(metric, 'ignore')
+        else:
+            self.metric_modes = metric_modes if metric_modes else self._default_mertic_mode
     
     def save(self, ckpt, metrics, epoch):
         
@@ -61,9 +69,16 @@ class CheckpointManager:
                 # create a link indicating a best ckpt
                 best_metric_ckpt_name = self.ckpt_format(metric, value, threshold, epoch)
                 best_metric_ckpt_path = self.ckpt_dir / best_metric_ckpt_name
-                if best_metric_ckpt_path.exists():
+                if best_metric_ckpt_path.exists() or best_metric_ckpt_path.is_symlink():
                     best_metric_ckpt_path.unlink()
-                best_metric_ckpt_path.symlink_to(ckpt_path.name)
+                try:
+                    best_metric_ckpt_path.symlink_to(ckpt_path.name)
+                except OSError:
+                    # Windows refuses symlinks without Developer Mode (WinError 1314, "A required
+                    # privilege is not held by the client"). Keep a full copy instead: it loads like
+                    # the link would, and house_keeping() then removes the ckpt_e*.pth that no link
+                    # points to, so no checkpoint is lost.
+                    shutil.copyfile(ckpt_path, best_metric_ckpt_path)
 
                 # update current best
                 self.current_best[metric] = {'value': value, 'threshold': threshold, 'epoch': epoch}

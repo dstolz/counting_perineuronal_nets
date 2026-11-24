@@ -1,4 +1,3 @@
-from methods.rank.methods import CenterLoss
 import os
 import logging
 from functools import partial
@@ -11,7 +10,13 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm, trange
 
-from methods.rank.methods import CenterLoss
+# CenterLoss no longer exists in methods/rank/methods.py, so importing it unconditionally made
+# train_score.py fail at import (ImportError) before any training. It is only used to log the
+# centres of such a model, so the import is optional.
+try:
+    from methods.rank.methods import CenterLoss
+except ImportError:
+    CenterLoss = None
 from spacecutter.models import OrdinalLogisticModel
 from utils import CheckpointManager, seed_everything
 
@@ -49,9 +54,11 @@ def train_one_epoch(dataloader, model, optimizer, device, writer, epoch, cfg):
             n_iter = epoch * n_batches + i
             try:
                 writer.add_histogram('train/scores', scores, n_iter)
-            except ValueError:
-                breakpoint()
-                pass
+            except ValueError as e:
+                # TensorBoard refuses a histogram of non-finite scores. This used to call
+                # breakpoint(), which waits for a debugger command on stdin: a headless run
+                # (stdin an open pipe, e.g. launched from MATLAB) hung for ever. Log and go on.
+                log.warning(f'[TRAIN] score histogram skipped at iteration {n_iter}: {e}')
 
             for metric, value in batch_metrics.items():
                 writer.add_scalar(f'train/{metric}', value, n_iter)
@@ -60,7 +67,7 @@ def train_one_epoch(dataloader, model, optimizer, device, writer, epoch, cfg):
                 cutpoints = {str(i): c for i, c in enumerate(model.link.cutpoints.data.cpu())}
                 writer.add_scalars('train/cutpoints', cutpoints, n_iter)
             
-            if isinstance(model, CenterLoss):
+            if CenterLoss is not None and isinstance(model, CenterLoss):
                 cutpoints = {str(i): c for i, c in enumerate(model.centers.data.cpu())}
                 writer.add_scalars('train/centers', cutpoints, n_iter)
 
@@ -91,9 +98,9 @@ def validate(dataloader, model, device, writer, epoch, cfg):
     all_scores = torch.cat(all_scores)
     try:
         writer.add_histogram('valid/scores', all_scores, epoch)
-    except ValueError:
-        breakpoint()
-        pass
+    except ValueError as e:
+        # was breakpoint(): a headless run hung here (see train_one_epoch)
+        log.warning(f'[VALID] score histogram skipped at epoch {epoch}: {e}')
 
     metrics = pd.DataFrame(metrics).mean(axis=0).to_dict()
     metrics = {k: {'value': v, 'threshold': None} for k, v in metrics.items()}
@@ -133,6 +140,22 @@ def main(cfg):
     model_param_string = ', '.join(f'{k}={v}' for k, v in model_params.items() if not k.startswith('_'))
     log.info(f"[MODEL] {cfg.model.name}({model_param_string})")
 
+    # optionally start from pre-trained weights: model.pretrained=<path to a best.pth>, e.g. a shipped
+    # scorer to fine-tune on curated labels. optim.resume cannot do that (a shipped best.pth has no
+    # lr_scheduler state and resume reads last.pth of this run). weights_only=False as in detector.py
+    # (torch >= 2.6 defaults to weights_only=True, which refuses non-allow-listed objects; the shipped
+    # best.pth files load either way).
+    pretrained = cfg.model.get('pretrained', None)
+    if pretrained and not cfg.optim.resume:
+        checkpoint = torch.load(pretrained, map_location=device, weights_only=False)
+        state = checkpoint.get('model', checkpoint)
+        if hasattr(model, 'predictor') and not any(k.startswith('predictor.') for k in state):
+            model.predictor.load_state_dict(state)  # a plain ConvNet checkpoint into the ordinal wrapper
+            log.info(f"[PRETRAINED] predictor weights from {pretrained}")
+        else:
+            model.load_state_dict(state)  # same architecture: all weights, ordinal cutpoints included
+            log.info(f"[PRETRAINED] all weights from {pretrained}")
+
     # build the optimizer
     optimizer = hydra.utils.instantiate(cfg.optim.optimizer, model.parameters())
     scheduler = hydra.utils.instantiate(cfg.optim.lr_scheduler, optimizer)
@@ -149,7 +172,10 @@ def main(cfg):
     # optionally resume from a saved checkpoint
     if cfg.optim.resume:
         assert Path('last.pth').exists(), 'Cannot find checkpoint for resuming.'
-        checkpoint = torch.load('last.pth', map_location=device)
+        # weights_only=False (as detector.py): torch >= 2.6 defaults to weights_only=True, which refuses
+        # a checkpoint holding any non-allow-listed object (e.g. a numpy scalar in a metric). The
+        # last.pth written today loads either way (checked with torch 2.11); this is defensive.
+        checkpoint = torch.load('last.pth', map_location=device, weights_only=False)
 
         model.load_state_dict(checkpoint['model'])
         optimizer.load_state_dict(checkpoint['optimizer'])
@@ -188,7 +214,8 @@ def main(cfg):
         # convert for pandas
         train_metrics = {(metric, info): v for metric, infos in train_metrics.items() for info, v in infos.items()}
         train_metrics = pd.DataFrame(train_metrics, index=[epoch]).rename_axis('epoch')
-        train_log = train_log.append(train_metrics)
+        # DataFrame.append was removed in pandas 2.0 (AttributeError after the first epoch)
+        train_log = pd.concat([train_log, train_metrics])
         train_log.to_csv(train_log_path)
 
         # evaluation
@@ -223,13 +250,16 @@ def main(cfg):
             # convert for pandas
             valid_metrics = {(metric, info): v for metric, infos in valid_metrics.items() for info, v in infos.items()}
             valid_metrics = pd.DataFrame(valid_metrics, index=[epoch]).rename_axis('epoch')
-            valid_log = valid_log.append(valid_metrics)
+            valid_log = pd.concat([valid_log, valid_metrics])  # was DataFrame.append (pandas < 2)
             valid_log.to_csv(valid_log_path)
 
         # generate new tuples for train and validation
         train_loader.dataset.generate_tuples()
         valid_loader.dataset.generate_tuples()
 
+    # flush TensorBoard while the working directory is still the run folder: Hydra restores the
+    # original one after main() returns, and the writer's relative path then no longer exists
+    writer.close()
     log.info("Training ended. Exiting....")
 
 

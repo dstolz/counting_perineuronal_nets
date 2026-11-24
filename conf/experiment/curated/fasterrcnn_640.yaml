@@ -1,0 +1,51 @@
+# @package _global_
+
+# Stage-1 fine-tuning of FasterRCNN (640 x 640 patches) on a curated export (curation.Export.stage1):
+#   <export>/train/annotations.csv         index imgName (= <h5 stem>.tif), Y, X (model-input px), class
+#   <export>/train/fullFramesH5/<stem>.h5  float32 /data, shape (H, W), the detector-input image (0-255)
+# Every image is split into halves: train-half1 trains on the left half of even images and the right
+# half of odd ones, train-half2 validates on the other halves (both roots point at the same export).
+#
+#   python train.py experiment=curated/fasterrcnn_640 \
+#       data.train.root=<export> data.validation.root=<export> \
+#       model.pretrained=<repo>/pnn_v2_fasterrcnn_640/best.pth hydra.run.dir=<run folder>
+# (both roots: the YAML anchor of the data config copies the root at load time, so overriding one
+# does not change the other). curation.Trainer.stage1Command builds the full command line.
+
+defaults:
+  - /common: default
+  - /common/data: perineuronal-nets
+  - /common/method: detection
+  - /common/data/method-specific: perineuronal-nets_detection
+  - /common/model: fasterrcnn
+  - /common/optim: default
+
+data:
+    train:
+        root: ???
+        patch_size: 640
+    validation:
+        root: ???
+        patch_size: 640
+
+model:
+    pretrained: null          # model.pretrained=<path to a best.pth>: fine-tune from it
+
+optim:
+    optimizer:
+        _target_: torch.optim.SGD
+        lr: 0.001             # a tenth of the from-scratch rate: fine-tuning
+        momentum: 0.9
+        weight_decay: 0.0005
+    lr_scheduler:
+        milestones: [15]
+    epochs: 20
+    batch_size: 1
+    batch_accumulation: 8
+    num_workers: 0            # DataLoader worker processes corrupt shared memory on Windows
+    debug: false              # true writes a PNG of every validation image every epoch
+
+misc:
+    font_size: 20
+    text_pos: 15
+    bb_outline_width: 2
