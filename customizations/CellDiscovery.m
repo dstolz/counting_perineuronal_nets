@@ -3,13 +3,19 @@ classdef CellDiscovery < handle
     %   Open the GUI:
     %       CellDiscovery()          % open window (object managed internally)
     %       app = CellDiscovery();   % optionally retain the object handle
+    %       CellDiscovery(folder)    % open on a folder (it replaces the saved one)
     %
     %   Features:
-    %     - Recursive directory search with regex file filter
-    %     - Detection model + optional rescoring model (Stage 2) selection
+    %     - Recursive directory search with regex file filter. The tool's own
+    %       <stem>_resized.tif files are hidden from the list (the count label
+    %       says how many); files whose mapped pages all have a result CSV are
+    %       check-marked and counted as done.
+    %     - Detection model + optional rescoring model (Stage 2) selection,
+    %       per page in the page map
     %     - Multi-page TIFF support: process pages separately, with a
     %       per-page model mapping (e.g. page 1 = PNN model, page 2 = PV
-    %       model). Single-page files use page 1's mapping row.
+    %       model). Single-page files use page 1's mapping row. A page may
+    %       appear in only one row: Start refuses a map that names a page twice.
     %     - Optional image preprocessing applied before detection:
     %       morphological background subtraction (disk radius) and resize;
     %       optional bidirectional LSM artifact correction can also be run
@@ -27,17 +33,40 @@ classdef CellDiscovery < handle
     %       per-page parameters (Snap options... dialog). Adds non-destructive
     %       SNAP_X/SNAP_Y/SNAP_Shift/SNAP_Snapped columns to the result CSV and,
     %       when requested, overwrites X/Y with the snapped coordinates.
+    %     - The detector input (LSM -> background -> resize -> normalisation,
+    %       in the scratch TIFF's class) is built by CellToolkit.modelInputPage,
+    %       and everything needed to rebuild it exactly (resize factor and mode,
+    %       background radius, LSM correction with its page set and options,
+    %       normalisation percentiles/target/limits) is recorded in the
+    %       manifest's detection stage (detectionFacts), so curation exports
+    %       and rescoring regenerate the same image (CellToolkit.modelInputFromFile).
     %     - Pipeline order per page: detection (predict.py) -> snap
     %       (snapToCellCentroid) -> Stage-2 rescoring (score.py). Rescoring runs
     %       after snap so the scoring model crops patches centred on the snapped
     %       (refined) cell locations; the score lands in the 'rescore' column.
-    %     - Full predict.py argument exposure (device, batch-size, threshold)
+    %       Rescoring is its own streamed stage, like detection.
+    %     - Full predict.py argument exposure (device, batch-size, threshold).
+    %       Start checks these three fields before anything runs, and checks the
+    %       Python environment once per environment (Python / conda executable
+    %       and conda env), reporting whether a GPU is available: a cuda device
+    %       without one is refused, a cpu device with one gets a hint.
     %     - Real-time stdout/stderr streaming to the MATLAB Command Window
-    %     - Stop button that kills the active Python subprocess
+    %     - Stop button: the first click finishes the page in flight (all its
+    %       stages) and ends the batch; the button then reads "Abort now", which
+    %       kills the Python subprocess and discards that page (no CSV, manifest
+    %       entry or TIF is written for it)
+    %     - The batch ends with a done / skipped / failed summary in the progress
+    %       label (red when a page failed); the Command Window names the failed
+    %       pages and the warnings
+    %     - Closing the window while a batch runs asks first
     %     - Per-file CSV output placed next to the source image:
-    %         <image_stem>[_page<k>]_locs.csv
-    %       When resizing is used, a second CSV in resized-image coordinates
-    %       is also written: <image_stem>[_page<k>]_locs_resized.csv
+    %         <image_stem>_<suffix><page>_locs.csv
+    %       (the suffix is the page-map Suffix, letters only, default 'page', so
+    %       <image_stem>_page1_locs.csv). When resizing is used, a second CSV in
+    %       resized-image coordinates is also written:
+    %         <image_stem>_<suffix><page>_locs_resized.csv
+    %       The optional resized TIF is one per image file, <image_stem>_resized.tif,
+    %       holding every page.
     %     - Result figure with colormap, auto-contrast, scatter overlay,
     %       stats annotation; figure is reused across files. The raw page or
     %       the resized image may be shown (user-selectable).
@@ -51,7 +80,8 @@ classdef CellDiscovery < handle
     %     - All user preferences persisted across MATLAB sessions
     %
     %   Requirements:
-    %     - MATLAB R2014b+ with Java enabled (default)
+    %     - MATLAB with uifigure support (the window is built from uifigure
+    %       components; tested on R2025a)
     %     - Python with predict.py dependencies installed
     %     - predict.py must be locatable: either in the same folder as this
     %       file or one level up (e.g. when this file is in a subdirectory)
@@ -59,15 +89,50 @@ classdef CellDiscovery < handle
     %   NOTE: If this file lives in a subdirectory of the repo (e.g.
     %   customizations/), add that subdirectory to the MATLAB path:
     %       addpath('customizations')
+    %
+    %   Test seams (Hidden; exactly what the controls call; tDiscoveryBatch):
+    %     app.configure(Name, Value, ...)  set controls as a person would: PythonExe,
+    %                                      CondaExe, CondaEnv, Device, BatchSize,
+    %                                      Threshold (text), Overwrite, SavePng, SaveTif,
+    %                                      Diagnostic (logical), PageMap (9-column cell)
+    %     app.start()                      the Start Batch button
+    %     app.requestStop()                the Stop button and the diagnostic window's
+    %                                      Stop batch: the first call stops after the
+    %                                      page in flight, the next (Abort now) kills
+    %                                      its subprocess and discards that page
+    %     app.isRunning()                  a batch runs (its timer exists)
+    %     app.batchState()                 struct: Running, Stage ('' | 'detect' |
+    %                                      'score' | 'finish'), Job, Total, Progress,
+    %                                      ProgressColor, StopText, StopEnabled,
+    %                                      StopTooltip, PythonRuns (processes this
+    %                                      window started), ScratchDir (the last run's)
+    %     app.lastTally()                  the counts of the last run (newTally,
+    %                                      tallySummary)
+    %     app.stageLog()                   the stages of each job of the last run:
+    %                                      table Job, Label, Event, Tick (timer tick),
+    %                                      Seconds (since Start)
+    %     app.ConfirmCloseFcn              Hidden property: f(figure) -> true (stop the
+    %                                      batch and close) | false (keep it running);
+    %                                      asked when the window is closed mid-batch
+    %                                      (tDiscoveryGui replaces it to answer without
+    %                                      a dialog)
+    %   Static Hidden (tDiscovery, tModelInput): the pure helpers (page-map and
+    %   field checks, output names, the done marks, the tally words, ...) and the
+    %   ...ForTest / detectorInputForFile / detectionFactsFor wrappers at the end
+    %   of the file. The constructor options 'PrefGroup' and 'Search' (false =
+    %   no search on opening) let a test build a window of its own.
 
     %% ---- Constants -------------------------------------------------------
     properties (Constant, Access = private)
         COLORMAPS  = {'gray','hot','jet','parula','turbo','bone','copper','pink','hsv'}
-        %DOT_COLORS = {'yellow','red','cyan','magenta','green','blue','white','black'}
         DOT_COLORS = {'parula','hot','jet','turbo','hsv','pink','white','yellow','red','cyan','magenta','green','blue','black'}
         PREF_GROUP = 'PNNBatchGUI'
         SKIP_LABEL = '(skip)'    % page-map detection model sentinel: do not process page
         NONE_LABEL = '(none)'    % page-map rescore model sentinel: no rescoring
+        % Default page-map suffix. Outputs are <stem>_<suffix><page>_locs.csv and
+        % CellToolkit.pageFromIdentity reads the page back from _<letters><page>,
+        % so the suffix must be letters only and carry no page number itself.
+        DEFAULT_SUFFIX = 'page'
 
         % Pixel size the pretrained models were trained at. "Resize x" = 0
         % (auto) rescales each page to it from the TIFF calibration; a manual
@@ -82,6 +147,16 @@ classdef CellDiscovery < handle
         % the models were trained on.
         NORM_PERCENTILES = [1 99.9]
         NORM_TARGET      = 255
+
+        % Progress label colour, and the one of a run in which a page failed.
+        LABEL_COLOR      = [0 0 0]
+        LABEL_FAIL_COLOR = [0.75 0 0]
+
+        % The Stop button's two faces (setStopButton).
+        STOP_TIP  = ['Stop the batch after the page in flight has finished all its stages ' ...
+            '(detection, snap, rescoring, outputs). Click again to abort that page.']
+        ABORT_TIP = ['Abort now: kill the running Python process, discard the page in flight ' ...
+            '(no CSV, manifest entry or TIF is written for it) and end the batch.']
     end
 
     %% ---- Instance properties ---------------------------------------------
@@ -93,10 +168,6 @@ classdef CellDiscovery < handle
         hFileCountLabel
         hFileList
         hPyEdit
-        hDetList
-        hUseRescore
-        hRescoreLabel
-        hRescoreList
         hDeviceEdit
         hBatchEdit
         hThrEdit
@@ -116,13 +187,9 @@ classdef CellDiscovery < handle
         hTestEnvBtn
 
         % --- Multi-page & preprocessing handles ---
-        hPerPageChk             % enable per-page (multi-page TIFF) processing
         hPageTable              % editable page -> model / preprocessing mapping
         hAddPageBtn
         hDelPageBtn
-        hPreprocGlobalChk       % use one set of preprocessing settings for all pages
-        hGlobalBgEdit           % global background-subtraction radius
-        hGlobalResizeEdit       % global resize factor
         hDisplayPreprocChk      % show resized image instead of raw page
         hLSMOptionsBtn          % edit advanced bidirectional LSM correction options
         hSnapOptionsBtn         % edit per-page snapToCellCentroid post-processing options
@@ -134,45 +201,93 @@ classdef CellDiscovery < handle
         detModels
         rescoreModels
         P                       % preferences struct (always accessed as obj.P)
+        prefGroup = CellDiscovery.PREF_GROUP   % setpref group of obj.P (constructor option 'PrefGroup')
 
         % --- Batch state ---
         timerObj      = []
         jProcess      = []
         jReader       = []
         stopRequested = false
+        abortRequested = false  % second Stop click (Abort now): kill the subprocess, discard the page in flight
         fileIdx       = 1
         jobQueue      = {}      % cell array of job structs (see buildJobs)
         allAbsFiles   = {}      % absolute paths from last search (listbox shows relative)
-        tmpDir        = ''      % scratch dir for resized page images
+        tmpDir        = ''      % this run's scratch folder (tempname under tempdir\CellDiscovery), removed when the batch ends
         preprocCache  = []      % per-file cache of preprocessed pages: resized (detector input) + source-resolution (snap input); see ensurePreprocCache
+        inFlight      = []      % the page in flight: its job, stage ('detect' | 'score' | 'finish') and tables; see timerTick
+        pageWarnings  = {}      % warnings of the page in flight; they reach the tally when it completes
+        tally         = []      % the counts of the run (newTally); kept after it (lastTally)
+        stageEvents   = struct('Job', {}, 'Label', {}, 'Event', {}, 'Tick', {}, 'Seconds', {})   % stageLog
+        tickCount     = 0       % timer ticks of the run
+        runClock      = []      % tic of Start
+        pythonRuns    = 0       % Python processes this window started (env checks, predict.py, score.py)
+        envPassed     = []      % the last passed environment check: struct key (envKey), cuda (true | false | NaN); [] = none (Start re-checks)
+        dirListing    = {}      % the *_locs.csv files of the last search's directory listing (the "done" marks look in it)
+        searchRoot    = ''      % folder of the last search (the file list shows paths relative to it)
+        nHidden       = 0       % *_resized.tif files the last search hid
+    end
+
+    properties (Hidden)
+        % Asked when the window is closed while a batch runs: f(figure) returns
+        % true to stop the batch and close, false to keep it running. A test
+        % replaces it to answer without a dialog.
+        ConfirmCloseFcn = @CellDiscovery.askCloseWhileRunning
     end
 
     %% ---- Public interface ------------------------------------------------
     methods (Access = public)
 
-        function obj = CellDiscovery()
+        function obj = CellDiscovery(varargin)
             % Constructor — builds the GUI (or raises an existing window).
             %   obj = CellDiscovery()
+            %   obj = CellDiscovery(folder)
+            %   obj = CellDiscovery(folder, Name, Value, ...)   or   CellDiscovery(Name, Value, ...)
+            %
+            %   folder  folder to search; replaces the saved parent directory
+            %           and is saved as the new one. Default: the saved one.
+            %   Options
+            %     'PrefGroup'  setpref group the settings are read from and
+            %                  saved to (default 'PNNBatchGUI'); tests use
+            %                  their own so they never touch yours.
+            %     'Search'     false = do not search for files on opening
+            %                  (default true).
             %
             %   Call without capturing output — the GUI manages its own lifetime:
             %       CellDiscovery()          % recommended
             %       app = CellDiscovery();   % optional, for programmatic access
+            %   When the window is already open it is raised (and, given a
+            %   folder, pointed at it, as setSearchDir does); the returned
+            %   handle then has no figure of its own.
             %
             %   If callbacks stop working after editing this file, run:
             %       clear classes; CellDiscovery()
+            [folder, opts] = CellDiscovery.parseConstructorArgs(varargin{:});
 
             % Re-use existing window if already open
             hExist = findobj(0, 'Tag', 'PNNBatchGUIMain');
             if ~isempty(hExist)
-                figure(hExist(1));
+                if isempty(folder)
+                    figure(hExist(1));
+                else
+                    obj.setSearchDir(folder, opts.Search);   % resolves the live object
+                end
                 return;
             end
 
+            obj.prefGroup = opts.PrefGroup;
             obj.repoRoot = CellToolkit.detectRepoRoot();
             obj.discoverModels();
             obj.loadPrefs();
+            if ~isempty(folder)
+                obj.P.parentDir = folder;
+            end
             obj.buildGUI();  % stores obj in figure appdata — prevents GC
-            obj.doSearch();
+            if ~isempty(folder)
+                obj.savePrefs();   % the folder given is the new saved parent directory
+            end
+            if opts.Search
+                obj.doSearch();
+            end
         end
 
         function delete(obj)
@@ -186,7 +301,7 @@ classdef CellDiscovery < handle
         function setSearchDir(obj, folder, doSearchNow)
             % Point the GUI at a folder and (optionally) run the file search.
             %   app = CellDiscovery();  app.setSearchDir(folder)
-            % Used by CellDatasetManager to open detection on a chosen dataset.
+            % CellDiscovery(folder) does this when the window is already open.
             % Resolves the live GUI object even when the constructor re-used an
             % already-open window (in which case this handle has no figure).
             if nargin < 3, doSearchNow = true; end
@@ -265,8 +380,8 @@ classdef CellDiscovery < handle
             flds = fieldnames(defaults);
             for k = 1:numel(flds)
                 f = flds{k};
-                if ispref(obj.PREF_GROUP, f)
-                    obj.P.(f) = getpref(obj.PREF_GROUP, f);
+                if ispref(obj.prefGroup, f)
+                    obj.P.(f) = getpref(obj.prefGroup, f);
                 end
             end
         end
@@ -294,10 +409,7 @@ classdef CellDiscovery < handle
             obj.P.lsmOptions      = CellDiscovery.sanitizeLSMOptions(obj.P.lsmOptions);
             obj.P.pageMapData     = obj.hPageTable.Data;
 
-            flds = fieldnames(obj.P);
-            for k = 1:numel(flds)
-                setpref(obj.PREF_GROUP, flds{k}, obj.P.(flds{k}));
-            end
+            CellDiscovery.writePrefs(obj.prefGroup, obj.P);
         end
 
         function discoverModels(obj)
@@ -312,9 +424,10 @@ classdef CellDiscovery < handle
 
         function buildGUI(obj)
             % ---- Figure --------------------------------------------------
+            scr = get(groot, 'ScreenSize');   % primary screen [1 1 width height]
             obj.hFig = uifigure( ...
                 'Name',            'PNN / PV Batch Detector', ...
-                'Position',        [60 30 1300 1010], ...
+                'Position',        CellDiscovery.windowPosition(scr(3:4)), ...
                 'CloseRequestFcn', @obj.onClose, ...
                 'Tag',             'PNNBatchGUIMain', ...
                 'Resize',          'on', ...
@@ -353,10 +466,12 @@ classdef CellDiscovery < handle
                 'ValueChangedFcn', @obj.onDirEdit);
             obj.hDirEdit.Layout.Row = 1; obj.hDirEdit.Layout.Column = 2;
 
-            btn = uibutton(gDir, 'Text', 'Browse...', 'ButtonPushedFcn', @obj.onBrowseDir);
+            btn = uibutton(gDir, 'Text', 'Browse...', 'Tag', 'browseDirBtn', ...
+                'Tooltip', 'Pick the parent folder to search for images in a folder dialog; the search then runs at once.', ...
+                'ButtonPushedFcn', @obj.onBrowseDir);
             btn.Layout.Row = 1; btn.Layout.Column = 3;
 
-            obj.hFileCountLabel = uilabel(gDir, 'Text', '0 files found', ...
+            obj.hFileCountLabel = uilabel(gDir, 'Text', '0 files found', 'Tag', 'fileCountLabel', ...
                 'HorizontalAlignment', 'left', 'FontColor', [0.2 0.5 0.2]);
             obj.hFileCountLabel.Layout.Row = 1; obj.hFileCountLabel.Layout.Column = 4;
 
@@ -369,7 +484,9 @@ classdef CellDiscovery < handle
                 'ValueChangedFcn', @obj.onRegexEdit);
             obj.hRegexEdit.Layout.Row = 2; obj.hRegexEdit.Layout.Column = 2;
 
-            btn = uibutton(gDir, 'Text', 'Search', 'ButtonPushedFcn', @obj.onSearch);
+            btn = uibutton(gDir, 'Text', 'Search', 'Tag', 'searchBtn', ...
+                'Tooltip', 'Search the parent folder again with the file filter. Use it after files were added, removed or detected outside this window.', ...
+                'ButtonPushedFcn', @obj.onSearch);
             btn.Layout.Row = 2; btn.Layout.Column = 3;
 
             %% pPy
@@ -389,7 +506,9 @@ classdef CellDiscovery < handle
                 'Tooltip', 'Full path to python.exe, or just "python" if on PATH. When a Conda env is set, this is the python used inside that env.', ...
                 'ValueChangedFcn', @obj.onPyEdit);
             obj.hPyEdit.Layout.Row = 1; obj.hPyEdit.Layout.Column = 2;
-            btn = uibutton(gPy, 'Text', 'Browse...', 'ButtonPushedFcn', @obj.onBrowsePython);
+            btn = uibutton(gPy, 'Text', 'Browse...', 'Tag', 'browsePythonBtn', ...
+                'Tooltip', 'Pick the Python executable (python.exe) in a file dialog.', ...
+                'ButtonPushedFcn', @obj.onBrowsePython);
             btn.Layout.Row = 1; btn.Layout.Column = 3;
 
             lbl = uilabel(gPy, 'Text', 'conda executable:', 'HorizontalAlignment', 'left');
@@ -399,7 +518,9 @@ classdef CellDiscovery < handle
                 'Tooltip', 'Full path to conda.exe (auto-detected). Used only when a Conda env name is set below.', ...
                 'ValueChangedFcn', @obj.onCondaExeEdit);
             obj.hCondaExeEdit.Layout.Row = 2; obj.hCondaExeEdit.Layout.Column = 2;
-            btn = uibutton(gPy, 'Text', 'Browse...', 'ButtonPushedFcn', @obj.onBrowseCondaExe);
+            btn = uibutton(gPy, 'Text', 'Browse...', 'Tag', 'browseCondaBtn', ...
+                'Tooltip', 'Pick the conda executable (conda.exe or conda.bat) in a file dialog.', ...
+                'ButtonPushedFcn', @obj.onBrowseCondaExe);
             btn.Layout.Row = 2; btn.Layout.Column = 3;
 
             lbl = uilabel(gPy, 'Text', 'Conda env name:', 'HorizontalAlignment', 'left');
@@ -410,7 +531,7 @@ classdef CellDiscovery < handle
                 'ValueChangedFcn', @obj.onCondaEdit);
             obj.hCondaEdit.Layout.Row = 3; obj.hCondaEdit.Layout.Column = 2;
             obj.hTestEnvBtn = uibutton(gPy, 'Text', 'Test env', 'Tag', 'testEnvBtn', ...
-                'Tooltip', 'Quick check that Python + hydra + torch are importable', ...
+                'Tooltip', 'Quick check that Python + hydra + torch are importable; it also says whether a GPU (CUDA) is available. Start Batch repeats it only when these three fields changed.', ...
                 'ButtonPushedFcn', @obj.onTestEnv);
             obj.hTestEnvBtn.Layout.Row = 3; obj.hTestEnvBtn.Layout.Column = 3;
 
@@ -425,7 +546,7 @@ classdef CellDiscovery < handle
             midGrid.Layout.Row    = 2;
             midGrid.Padding       = [0 0 0 0];
             midGrid.ColumnSpacing = 6;
-            midGrid.ColumnWidth   = {'1x', 200};
+            midGrid.ColumnWidth   = {'1x'};
 
             %% pFiles
             pFiles = uipanel(midGrid, 'Title', 'Files to Process  (Ctrl+click to select a subset)');
@@ -434,6 +555,9 @@ classdef CellDiscovery < handle
             gFiles.Padding = [4 4 4 4];
             obj.hFileList = uilistbox(gFiles, 'Items', {}, ...
                 'Multiselect', 'on', 'Tag', 'fileList', 'FontSize', 11, ...
+                'Tooltip', ['The image files found by the search; a check mark means every page-map row ' ...
+                'already has its result CSV. Select nothing (or everything) to process all of them, ' ...
+                'or Ctrl+click / Shift+click to process only some.'], ...
                 'ValueChangedFcn', @(~,~) []);
 
             %% ---- Row 3 — Multi-page & Preprocessing --------------------
@@ -446,7 +570,7 @@ classdef CellDiscovery < handle
             gMP.RowHeight     = {24, 24, '1x'};
             gMP.ColumnWidth   = {230, 90, 80, 70, 80, 70, 'fit', '1x'};
 
-            % --- Row 1: per-page enable + add/remove ---
+            % --- Row 1: Snap / LSM options and add/remove page ---
             obj.hAddPageBtn = uibutton(gMP, 'Text', 'Add page', ...
                 'Tooltip', 'Add a page-mapping row', ...
                 'ButtonPushedFcn', @obj.onAddPageRow);
@@ -505,8 +629,17 @@ classdef CellDiscovery < handle
                 'ColumnWidth',   {50, 70, 220, 280, 60, 80, 130, 60, 80}, ...
                 'RowName',       {}, ...
                 'Tag',           'pageTable', ...
-                'Tooltip',       sprintf(['Resize x: factor applied to the page before detection. 0 = auto: computed from the ' ...
+                'Tooltip',       sprintf([ ...
+                'One row per TIFF page to process (rows without a detection model are skipped).\n' ...
+                'Page: the page number in the TIFF (1 = first).\n' ...
+                'Suffix: names the result file <stem>_<suffix><page>_locs.csv; use letters only (e.g. page).\n' ...
+                'Detection Model: the detector run on this page; (skip) leaves the page out.\n' ...
+                'Rescore Model: the scorer that rates each detection afterwards; (none) = no rescoring.\n' ...
+                'LSM: correct the bidirectional LSM scanner artifact first (options: LSM options...).\n' ...
+                'Bg radius: radius in pixels of the background subtraction; 0 = off.\n' ...
+                'Resize x: factor applied to the page before detection. 0 = auto: computed from the ' ...
                 'TIFF pixel-size calibration so the detector sees %g um/px (the training pixel size).\n' ...
+                'Snap: move each detection to its refined cell centre afterwards (options: Snap options...).\n' ...
                 'Normalize: stretch the detector input so its %g-%g percentiles span the 8-bit range the models ' ...
                 'were trained on (does not alter the saved resized TIF or the source image).'], ...
                 obj.TRAIN_UM_PER_PIXEL, obj.NORM_PERCENTILES(1), obj.NORM_PERCENTILES(2)), ...
@@ -530,7 +663,8 @@ classdef CellDiscovery < handle
             lbl.Layout.Row = 1; lbl.Layout.Column = 1;
             obj.hDeviceEdit = uieditfield(gPred, 'text', ...
                 'Value', obj.P.device, 'Tag', 'deviceEdit', ...
-                'Tooltip', 'Compute device (e.g. cpu | cuda:0)', ...
+                'Tooltip', ['Compute device for detection and rescoring: cpu, mps, cuda or cuda:<n> (e.g. cuda:0). ' ...
+                'Checked when you click Start Batch; a cuda device is refused when the environment has no GPU.'], ...
                 'ValueChangedFcn', @obj.onDeviceEdit);
             obj.hDeviceEdit.Layout.Row = 1; obj.hDeviceEdit.Layout.Column = 2;
 
@@ -538,7 +672,7 @@ classdef CellDiscovery < handle
             lbl.Layout.Row = 1; lbl.Layout.Column = 3;
             obj.hBatchEdit = uieditfield(gPred, 'text', ...
                 'Value', obj.P.batchSize, 'Tag', 'batchEdit', ...
-                'Tooltip', 'Number of 640x640 patches in parallel (--batch-size)', ...
+                'Tooltip', 'Number of 640x640 patches detected in parallel (--batch-size): a positive whole number.', ...
                 'ValueChangedFcn', @obj.onBatchEdit);
             obj.hBatchEdit.Layout.Row = 1; obj.hBatchEdit.Layout.Column = 4;
 
@@ -546,7 +680,7 @@ classdef CellDiscovery < handle
             lbl.Layout.Row = 1; lbl.Layout.Column = 5;
             obj.hThrEdit = uieditfield(gPred, 'text', ...
                 'Value', obj.P.threshold, 'Tag', 'thrEdit', ...
-                'Tooltip', 'Detection threshold 0-1; leave blank for checkpoint default (--threshold)', ...
+                'Tooltip', 'Detection threshold, a number from 0 to 1 (--threshold); leave blank to use the default stored with the model.', ...
                 'ValueChangedFcn', @obj.onThrEdit);
             obj.hThrEdit.Layout.Row = 1; obj.hThrEdit.Layout.Column = 6;
             lbl = uilabel(gPred, 'Text', '(blank = auto)', ...
@@ -572,7 +706,7 @@ classdef CellDiscovery < handle
                 'Position', [140 2 110 22]);
 
             lbl = uilabel(gPred, ...
-                'Text', 'Output per file:  <image_stem>[_page<k>]_locs.csv  placed in the image''s own subdirectory', ...
+                'Text', 'Output per file:  <image_stem>_<suffix><page>_locs.csv  placed in the image''s own subdirectory', ...
                 'HorizontalAlignment', 'left', 'FontColor', [0.45 0.45 0.45], 'FontSize', 11);
             lbl.Layout.Row = 3; lbl.Layout.Column = [1 8];
 
@@ -609,6 +743,8 @@ classdef CellDiscovery < handle
                 'Items', obj.DOT_COLORS, ...
                 'Value', obj.DOT_COLORS{min(obj.P.dotColorIdx, numel(obj.DOT_COLORS))}, ...
                 'Tag', 'dotColorPop', ...
+                'Tooltip', ['Colour of the detection dots in the result figure and PNG. A colormap name ' ...
+                '(parula, hot, ...) colours the dots by their rank in the score; a plain colour paints all dots alike.'], ...
                 'ValueChangedFcn', @obj.onDotColorChange);
             obj.hDotColorPop.Layout.Row = 1; obj.hDotColorPop.Layout.Column = 6;
 
@@ -665,12 +801,15 @@ classdef CellDiscovery < handle
             obj.hStartBtn = uibutton(gRun, 'Text', 'Start Batch', ...
                 'FontSize', 11, 'FontWeight', 'bold', ...
                 'FontColor', [0.05 0.42 0.05], 'Tag', 'startBtn', ...
+                'Tooltip', ['Run detection (and rescoring, where a rescore model is mapped) on the selected files, ' ...
+                'page by page, with the settings above. The fields are checked first, then the Python environment.'], ...
                 'ButtonPushedFcn', @obj.onStart);
             obj.hStartBtn.Layout.Row = 1; obj.hStartBtn.Layout.Column = 1;
 
             obj.hStopBtn = uibutton(gRun, 'Text', 'Stop', ...
                 'FontSize', 11, 'FontWeight', 'bold', ...
                 'FontColor', [0.60 0.05 0.05], 'Enable', false, 'Tag', 'stopBtn', ...
+                'Tooltip', CellDiscovery.STOP_TIP, ...
                 'ButtonPushedFcn', @obj.onStop);
             obj.hStopBtn.Layout.Row = 1; obj.hStopBtn.Layout.Column = 2;
 
@@ -690,7 +829,7 @@ classdef CellDiscovery < handle
             if ~isfolder(rootDir)
                 obj.hFileCountLabel.Text      = 'Invalid directory';
                 obj.hFileCountLabel.FontColor = [0.7 0 0];
-                obj.hFileList.Items = {};
+                obj.setFileList({}, {});
                 obj.allAbsFiles = {};
                 return;
             end
@@ -700,6 +839,9 @@ classdef CellDiscovery < handle
             drawnow;
 
             allFiles = CellToolkit.recDir(rootDir);
+            % The result CSVs found in this listing decide which files show as
+            % done (filesDone), before the regex narrows the list to the images.
+            obj.dirListing = CellDiscovery.resultCsvsOf(allFiles);
 
             if ~isempty(regexStr) && ~isempty(allFiles)
                 try
@@ -710,23 +852,73 @@ classdef CellDiscovery < handle
                 catch ME
                     obj.hFileCountLabel.Text      = ['Regex error: ' ME.message];
                     obj.hFileCountLabel.FontColor = [0.7 0 0];
-                    obj.hFileList.Items = {};
+                    obj.setFileList({}, {});
                     obj.allAbsFiles = {};
                     return;
                 end
             end
+            % The tool's own *_resized.tif outputs are not inputs: detecting on
+            % one writes a second set of results into the same dataset.
+            [allFiles, nHidden] = CellDiscovery.hideDerivedImages(allFiles);
 
-            n = numel(allFiles);
-            if n > 0
-                relFiles = cellfun(@(f) CellToolkit.makeRelativePath(f, rootDir), ...
-                    allFiles, 'UniformOutput', false);
-            else
-                relFiles = {};
-            end
-            obj.hFileList.Items = relFiles;
             obj.allAbsFiles = allFiles;
-            obj.hFileCountLabel.Text      = sprintf('%d file%s found', n, CellToolkit.ternary(n == 1, '', 's'));
+            obj.searchRoot  = rootDir;
+            obj.nHidden     = nHidden;
+            obj.refreshFileMarks();
+        end
+
+        function refreshFileMarks(obj)
+            % Redraw the file list and its count label from the last search: a
+            % file is marked done when every active page-map row has its result
+            % CSV in the search's directory listing (filesDone; no disk access).
+            % The user's selection stays. Called after a search, when the page
+            % map changes and when a batch ends.
+            if isempty(obj.hFig) || ~isvalid(obj.hFig), return; end
+            files = obj.allAbsFiles;
+            n = numel(files);
+            if n > 0
+                done = CellDiscovery.filesDone(files, obj.hPageTable.Data, obj.dirListing);
+                labels = cellfun(@(f) CellToolkit.makeRelativePath(f, obj.searchRoot), ...
+                    files, 'UniformOutput', false);
+                labels = CellDiscovery.fileLabels(labels, done);
+            else
+                done = false(0, 1);
+                labels = {};
+            end
+            obj.setFileList(labels, files);
+            obj.hFileCountLabel.Text      = CellDiscovery.fileCountText(n, obj.nHidden, nnz(done));
             obj.hFileCountLabel.FontColor = CellToolkit.ternary(n > 0, [0.1 0.45 0.1], [0.6 0.4 0]);
+        end
+
+        function setFileList(obj, labels, paths)
+            % Put LABELS in the file list with the absolute PATHS as their
+            % values (ItemsData), keeping the selected paths that are still there.
+            keep = obj.hFileList.Value;
+            if ischar(keep) || isstring(keep), keep = cellstr(keep); end
+            if ~iscell(keep), keep = {}; end
+            obj.hFileList.ItemsData = {};
+            obj.hFileList.Items     = labels(:)';
+            obj.hFileList.ItemsData = paths(:)';
+            keep = keep(ismember(keep, paths));
+            obj.hFileList.Value = keep;   % none selected = all files (onStart); a new list would select its first item
+        end
+
+        function markQueuedDone(obj)
+            % At the end of a batch: the result CSVs of the files it queued now
+            % exist (isfile on those only), so the listing learns them and the
+            % list shows the files done.
+            try
+                files = {};
+                for k = 1:numel(obj.jobQueue)
+                    files{end+1, 1} = obj.jobQueue{k}.imgFile; %#ok<AGROW>
+                end
+                files = unique(files);
+                want = CellDiscovery.wantedCsvs(files, obj.hPageTable.Data);
+                have = want(isfile(want));
+                obj.dirListing = unique([obj.dirListing(:); have(:)]);
+            catch
+            end
+            obj.refreshFileMarks();
         end
 
 
@@ -734,6 +926,17 @@ classdef CellDiscovery < handle
 
 
         function onClose(obj, src, ~)
+            % Closing the window mid-batch stops and discards the page in
+            % flight, so a running batch asks first (ConfirmCloseFcn). A
+            % window with no batch closes without asking.
+            if obj.isRunning()
+                try
+                    close = logical(obj.ConfirmCloseFcn(obj.hFig));
+                catch
+                    close = false;   % cannot ask: keep the batch running
+                end
+                if ~close, return; end
+            end
             obj.cleanup();
             obj.savePrefs();
             if isvalid(src)
@@ -826,12 +1029,18 @@ classdef CellDiscovery < handle
                 'WorkingDir', obj.repoRoot);
         end
 
-        function envStatus = onTestEnv(obj, ~, ~)
+        function [envStatus, cuda] = onTestEnv(obj, ~, ~)
             % Run a quick synchronous check that Python + required modules are
-            % importable. Returns 0 on success, nonzero on failure.
+            % importable (the Test env button; always runs). Returns 0 on
+            % success, nonzero on failure, and whether CUDA is available (true |
+            % false | NaN = unknown). A pass is remembered (envPassed) for the
+            % same Python / conda executable and conda env: Start skips its
+            % pre-flight while they are unchanged.
             pyExe    = strtrim(obj.hPyEdit.Value);
             condaExe = strtrim(obj.hCondaExeEdit.Value);
             condaEnv = strtrim(obj.hCondaEdit.Value);
+            cuda = NaN;
+            obj.envPassed = [];
 
             obj.hProgressLabel.Text = 'Checking Python environment ...';
             set(obj.hFig, 'Pointer', 'watch');
@@ -848,16 +1057,20 @@ classdef CellDiscovery < handle
                 return;
             end
 
-            [ok, ~, envOut] = CellToolkit.testPythonEnv(obj.pythonCfg(), {'hydra', 'torch'});
+            obj.pythonRuns = obj.pythonRuns + 1;
+            [ok, ~, envOut, cuda] = CellToolkit.testPythonEnv(obj.pythonCfg(), {'hydra', 'torch'});
             set(obj.hFig, 'Pointer', 'arrow');
             drawnow;
             envOut = strtrim(envOut);
             if ok
-                fprintf('[TEST] PASS: %s\n', envOut);
-                obj.hProgressLabel.Text = ['Environment OK: ' envOut];
+                txt = CellDiscovery.envStatusText(cuda);
+                fprintf('[TEST] PASS: %s\n', txt);
+                obj.hProgressLabel.Text = txt;
+                obj.envPassed = struct('key', CellDiscovery.envKey(pyExe, condaExe, condaEnv), 'cuda', cuda);
                 envStatus = 0;
                 return;
             end
+            cuda = NaN;
 
             fprintf('[TEST] FAIL:\n%s\n', envOut);
             % Build a helpful diagnostic message
@@ -894,32 +1107,8 @@ classdef CellDiscovery < handle
         %% Callbacks: model selection
 
 
-        function onDetModelChange(obj, src, ~)
-            obj.P.detModelIdx = find(strcmp(src.Items, src.Value), 1);
-            obj.savePrefs();
-        end
-
-        function onRescoreModelChange(obj, src, ~)
-            obj.P.rescoreModelIdx = find(strcmp(src.Items, src.Value), 1);
-            obj.savePrefs();
-        end
-
-        function onUseRescoreChange(obj, src, ~)
-            v = src.Value;
-            obj.P.useRescore = v;
-            obj.hRescoreList.Enable  = v;
-            obj.hRescoreLabel.Enable = v;
-            obj.savePrefs();
-        end
-
-
         %% Callbacks: multi-page & preprocessing
 
-
-        function onPerPageChange(obj, src, ~)
-            obj.P.perPageEnable = src.Value;
-            obj.savePrefs();
-        end
 
         function onAddPageRow(obj, ~, ~)
             data = obj.hPageTable.Data;
@@ -933,12 +1122,15 @@ classdef CellDiscovery < handle
                 nextPage = max(pages) + 1;
             end
             defDet = detChoices{min(2, numel(detChoices))};   % first real model if any, else (skip)
-            newRow = {nextPage, sprintf('page%d',nextPage), defDet, obj.NONE_LABEL, false, 0, 0, false, true};
+            % Suffix 'page': the output is <stem>_page<k>_locs.csv (the page
+            % number is appended to the suffix).
+            newRow = {nextPage, CellDiscovery.DEFAULT_SUFFIX, defDet, obj.NONE_LABEL, false, 0, 0, false, true};
             obj.hPageTable.Data = [data; newRow];
             obj.P.pageMapData   = obj.hPageTable.Data;
             obj.updateLSMOptionsButton();
             obj.updateSnapOptionsButton();
             obj.savePrefs();
+            obj.refreshFileMarks();
         end
 
         function onDelPageRow(obj, ~, ~)
@@ -956,6 +1148,7 @@ classdef CellDiscovery < handle
             obj.updateLSMOptionsButton();
             obj.updateSnapOptionsButton();
             obj.savePrefs();
+            obj.refreshFileMarks();
         end
 
         function onPageTableEdit(obj, ~, ~)
@@ -963,6 +1156,7 @@ classdef CellDiscovery < handle
             obj.updateLSMOptionsButton();
             obj.updateSnapOptionsButton();
             obj.savePrefs();
+            obj.refreshFileMarks();
         end
 
         function onPageTableSelect(obj, ~, evt)
@@ -971,16 +1165,6 @@ classdef CellDiscovery < handle
             end
         end
 
-
-        function onGlobalBgChange(obj, src, ~)
-            obj.P.globalBgRadius = src.Value;
-            obj.savePrefs();
-        end
-
-        function onGlobalResizeChange(obj, src, ~)
-            obj.P.globalResize = src.Value;
-            obj.savePrefs();
-        end
 
         function onDisplayPreprocChange(obj, src, ~)
             obj.P.displayPreproc = src.Value;
@@ -1083,6 +1267,7 @@ classdef CellDiscovery < handle
             resetBtn.Layout.Row = 1; resetBtn.Layout.Column = 1;
 
             cancelBtn = uibutton(btnGrid, 'push', 'Text', 'Cancel', ...
+                'Tooltip', 'Close this window and keep the LSM correction options as they were.', ...
                 'ButtonPushedFcn', @(~,~) delete(dlg));
             cancelBtn.Layout.Row = 1; cancelBtn.Layout.Column = 2;
 
@@ -1205,6 +1390,7 @@ classdef CellDiscovery < handle
                 'ButtonPushedFcn', @resetOptions);
             resetBtn.Layout.Row = 1; resetBtn.Layout.Column = 1;
             cancelBtn = uibutton(btnGrid, 'push', 'Text', 'Cancel', ...
+                'Tooltip', 'Close this window and keep the snap parameters as they were.', ...
                 'ButtonPushedFcn', @(~,~) delete(dlg));
             cancelBtn.Layout.Row = 1; cancelBtn.Layout.Column = 2;
             okBtn = uibutton(btnGrid, 'push', 'Text', 'OK', ...
@@ -1341,6 +1527,7 @@ classdef CellDiscovery < handle
 
         function onStart(obj, ~, ~)
             set(obj.hFig, 'Pointer', 'watch');
+            obj.hProgressLabel.FontColor = CellDiscovery.LABEL_COLOR;   % red was the last run's
             drawnow;
             pyExe    = strtrim(obj.hPyEdit.Value);
 
@@ -1368,59 +1555,129 @@ classdef CellDiscovery < handle
                 return;
             end
 
+            % --- Page map: refuse duplicate pages, warn about suffixes ---
+            [mapErrs, mapWarns] = CellDiscovery.checkPageMap(obj.hPageTable.Data);
+            for k = 1:numel(mapWarns)
+                fprintf(2, '[WARN] %s\n', mapWarns{k});
+            end
+            if ~isempty(mapErrs)
+                fprintf(2, '[ERROR] %s\n', mapErrs{:});
+                set(obj.hFig, 'Pointer', 'arrow');
+                drawnow;
+                uialert(obj.hFig, strjoin(mapErrs, newline), 'Page map: duplicate pages');
+                return;
+            end
+
+            % --- Free-text fields: refuse a value predict.py would fail on, once,
+            %     before any Python starts ---
+            fieldErrs = CellDiscovery.checkFields(obj.hDeviceEdit.Value, obj.hBatchEdit.Value, obj.hThrEdit.Value);
+            if ~isempty(fieldErrs)
+                fprintf(2, '[ERROR] %s\n', fieldErrs{:});
+                set(obj.hFig, 'Pointer', 'arrow');
+                drawnow;
+                uialert(obj.hFig, strjoin(fieldErrs, newline), 'Check the predict.py options');
+                return;
+            end
+
+            selVals = obj.hFileList.Value;   % absolute paths (ItemsData); none selected = all
+            if ischar(selVals), selVals = {selVals}; end
+            if isempty(selVals) || numel(selVals) == numel(allFiles)
+                queue = allFiles;
+            else
+                queue = allFiles(ismember(allFiles, selVals));
+            end
+
+            % --- Nothing to do: said without starting Python. In Ignore mode the
+            %     pages whose result CSV exists are counted as skipped (pendingRows
+            %     goes by file names only, so no TIFF is opened either). ---
+            [todo, nDone] = CellDiscovery.pendingRows(queue, obj.hPageTable.Data, logical(obj.hOverwriteRad.Value));
+            if all(cellfun(@isempty, todo))
+                if nDone > 0
+                    fprintf('[SKIP] %d page job(s) left out: result CSV exists (Ignore mode)\n', nDone);
+                end
+                obj.nothingToDo(nDone, 'no page-map row has a detection model.');
+                return;
+            end
+
             % Disable UI immediately before any blocking operations
             obj.setUIEnable(false);
             obj.hStopBtn.Enable = false;
             drawnow;
 
-            % --- Pre-flight: verify that hydra and torch are importable ---
-            envStatus = obj.onTestEnv;
-            if envStatus ~= 0
+            % --- Pre-flight: verify that hydra and torch are importable (and
+            %     whether CUDA is there). A passed check is reused while the
+            %     Python / conda executable and the conda env are unchanged. ---
+            key = CellDiscovery.envKey(strtrim(obj.hPyEdit.Value), strtrim(obj.hCondaExeEdit.Value), ...
+                strtrim(obj.hCondaEdit.Value));
+            if ~isempty(obj.envPassed) && strcmp(obj.envPassed.key, key)
+                cuda = obj.envPassed.cuda;
+                fprintf('[CHECK] Python environment unchanged since its last passed check; not repeated (Test env repeats it).\n');
+            else
+                [envStatus, cuda] = obj.onTestEnv;
+                if envStatus ~= 0
+                    obj.setUIEnable(true);
+                    obj.hStopBtn.Enable = false;
+                    set(obj.hFig, 'Pointer', 'arrow');
+                    drawnow;
+                    return;
+                end
+            end
+            [gpuAction, gpuMsg] = CellDiscovery.gpuCheck(obj.hDeviceEdit.Value, cuda);
+            if strcmp(gpuAction, 'block')
+                fprintf(2, '[ERROR] %s\n', gpuMsg);
                 obj.setUIEnable(true);
                 obj.hStopBtn.Enable = false;
+                obj.hProgressLabel.Text = 'Device not available (see the message).';
                 set(obj.hFig, 'Pointer', 'arrow');
                 drawnow;
+                uialert(obj.hFig, gpuMsg, 'Device not available');
                 return;
-            end
-
-            % -----------------------------------------------------------
-
-            selVals = obj.hFileList.Value;
-            if isempty(selVals) || numel(selVals) == numel(allFiles)
-                queue = allFiles;
-            else
-                selInd = ismember(obj.hFileList.Items, selVals);
-                queue  = allFiles(selInd);
+            elseif strcmp(gpuAction, 'hint')
+                fprintf('[HINT] %s\n', gpuMsg);
             end
 
             % --- Expand the selected files into a queue of per-page jobs ---
             obj.hProgressLabel.Text = 'Building job list ...';
             drawnow;
-            jobs = obj.buildJobs(queue);
+            [jobs, nDone] = obj.buildJobs(queue);
             if isempty(jobs)
                 obj.setUIEnable(true);
-                obj.hStartBtn.Enable = true;
-                obj.hStopBtn.Enable  = false;
-                obj.hProgressLabel.Text = 'Ready.';
+                obj.nothingToDo(nDone, 'no mapped page exists in the selected files (see the [SKIP] lines).');
+                return;
+            end
+
+            % Scratch folder of this run, removed with its contents when the batch
+            % ends (batchCleanup), on an internal error and when the window closes
+            % (cleanup). Its unique name also finds the run's processes (killProcess).
+            obj.tmpDir = tempname(fullfile(tempdir, 'CellDiscovery'));
+            [made, msg] = mkdir(obj.tmpDir);
+            if ~made
+                fprintf(2, '[ERROR] Could not create the scratch folder %s: %s\n', obj.tmpDir, msg);
+                obj.setUIEnable(true);
+                obj.hStopBtn.Enable = false;
+                obj.hProgressLabel.Text = 'Could not create the scratch folder (see the Command Window).';
+                obj.hProgressLabel.FontColor = CellDiscovery.LABEL_FAIL_COLOR;
                 set(obj.hFig, 'Pointer', 'arrow');
                 drawnow;
                 return;
             end
 
-            % Scratch directory for resized page images.
-            obj.tmpDir = fullfile(tempdir, 'CellDiscovery');
-            if ~isfolder(obj.tmpDir)
-                try mkdir(obj.tmpDir); catch, end
-            end
-
             obj.jobQueue      = jobs;
             obj.fileIdx       = 1;
             obj.stopRequested = false;
+            obj.abortRequested = false;
             obj.jProcess      = [];
             obj.jReader       = [];
             obj.preprocCache  = [];   % per-file preprocessing cache (lazy-filled)
+            obj.inFlight      = [];
+            obj.pageWarnings  = {};
+            obj.tally         = CellDiscovery.newTally(numel(jobs), nDone);
+            obj.stageEvents   = obj.stageEvents([]);
+            obj.tickCount     = 0;
+            obj.runClock      = tic;
 
             obj.setUIEnable(false);
+            obj.setStopButton('stop');
             obj.hStopBtn.Enable = true;
 
             total = numel(jobs);
@@ -1442,38 +1699,87 @@ classdef CellDiscovery < handle
         end
 
         function onStop(obj, ~, ~)
-            obj.stopRequested = true;
-            obj.hStopBtn.Enable = false;
-            obj.hProgressLabel.Text = 'Stop requested — finishing current subprocess ...';
-            fprintf('[STOP] Stop requested.\n');
+            % The Stop / Abort now button (requestStop).
+            obj.requestStop();
+        end
+
+        function nothingToDo(obj, nDone, why)
+            % End a Start that found no job: its tally (the pages skipped because
+            % their result exists) and the progress label say so.
+            obj.tally = CellDiscovery.newTally(0, nDone);
+            obj.tally.state = 'complete';
+            obj.stageEvents = obj.stageEvents([]);
+            if nDone > 0
+                obj.hProgressLabel.Text = sprintf(['Nothing to do: all %d page job(s) already ' ...
+                    'have results (Ignore mode). Choose Overwrite to redo them.'], nDone);
+            else
+                obj.hProgressLabel.Text = ['Nothing to do: ' why];
+            end
+            obj.hStartBtn.Enable = true;
+            obj.hStopBtn.Enable  = false;
+            set(obj.hFig, 'Pointer', 'arrow');
+            drawnow;
+        end
+
+        function setStopButton(obj, state)
+            % The Stop button's two faces: 'stop' (stop after the page in flight)
+            % and 'abort' (Abort now: discard it), each with its tooltip.
+            if strcmp(state, 'abort')
+                obj.hStopBtn.Text    = 'Abort now';
+                obj.hStopBtn.Tooltip = CellDiscovery.ABORT_TIP;
+            else
+                obj.hStopBtn.Text    = 'Stop';
+                obj.hStopBtn.Tooltip = CellDiscovery.STOP_TIP;
+            end
+        end
+
+        function showProgress(obj, txt)
+            % Set the progress label; while a stop is pending it says so too.
+            if obj.stopRequested
+                txt = [txt '   (stop requested: the batch ends after this page)'];
+            end
+            obj.hProgressLabel.Text = txt;
+        end
+
+        function resumeDiagnosticPause(~)
+            % Let a diagnostic pause go on, so a Stop or Abort click can end the
+            % batch (the window stays open; uiresume of a figure that is not
+            % waiting does nothing).
+            h = findall(0, 'Type', 'figure', 'Tag', 'PNNDiagFig');
+            if ~isempty(h)
+                uiresume(h(1));
+            end
         end
 
 
         %% Job-list construction
 
 
-        function jobs = buildJobs(obj, files)
+        function [jobs, nDone] = buildJobs(obj, files)
             % Expand a list of image files into a list of per-page jobs based on
             % the current per-page / preprocessing settings. Each job is one
             % (file, page) unit run through predict.py independently.
+            % In Ignore mode the rows whose output CSV already exists are left
+            % out first, from the file names alone (pendingRows), so a file
+            % whose pages are all done is never opened; nDone counts them.
             jobs = {};
 
-            mapData = obj.hPageTable.Data;   % only used in per-page mode
+            mapData = obj.hPageTable.Data;
+            [todo, nDone] = CellDiscovery.pendingRows(files, mapData, logical(obj.hOverwriteRad.Value));
+            if nDone > 0
+                fprintf('[SKIP] %d page job(s) left out: result CSV exists (Ignore mode)\n', nDone);
+            end
 
             for i = 1:numel(files)
+                if isempty(todo{i}), continue; end
                 f = files{i};
-                [fdir, stem, ext] = fileparts(f);
+                [fdir, stem] = fileparts(f);
                 if isempty(fdir), fdir = pwd; end
                 nPages = CellToolkit.countPages(f);
 
-                firstPageForFile = true;   % first accepted page row for this source file
-                for r = 1:size(mapData, 1)
+                for r = todo{i}
                     pg   = CellToolkit.parseNum(mapData{r,1}, 0);
                     detM = mapData{r,3};
-                    if pg < 1, continue; end
-                    if ~ischar(detM) || strcmp(detM, obj.SKIP_LABEL) || isempty(detM)
-                        continue;   % page not assigned a detection model
-                    end
                     if pg > nPages
                         % Single-page files therefore only ever match page 1.
                         fprintf('[SKIP] %s has %d page(s); skipping mapped page %d\n', ...
@@ -1483,34 +1789,11 @@ classdef CellDiscovery < handle
                     rescM = mapData{r,4};
                     if ~ischar(rescM) || strcmp(rescM, obj.NONE_LABEL), rescM = ''; end
 
-                    correctLSM = CellToolkit.parseLogical(mapData{r,5}, false);
-                    bg = CellToolkit.parseNum(mapData{r,6}, 0);
-                    [rz, srcUm, rzMode] = CellDiscovery.resolveResize( ...
-                        f, pg, CellToolkit.parseNum(mapData{r,7}, 1));
-                    snapOn = false;
-                    if size(mapData, 2) >= 8
-                        snapOn = CellToolkit.parseLogical(mapData{r,8}, false);
-                    end
-                    normOn = true;
-                    if size(mapData, 2) >= 9
-                        normOn = CellToolkit.parseLogical(mapData{r,9}, true);
-                    end
                     snapOpts = obj.resolveSnapOptionsForPage(pg);
-                    job = CellDiscovery.makeJob( ...
-                        f, fdir, stem, ext, mapData{r,2}, pg, nPages, true, detM, rescM, correctLSM, bg, rz, obj.P.lsmOptions, snapOn, snapOpts);
-                    job.normalize = normOn;
-                    job.calibratedUm = srcUm;   % NaN when the TIFF has no usable calibration
-                    if isfinite(srcUm)
-                        job.srcPixelSize = srcUm;
-                    else
-                        % No calibration: the resize factor is the user's
-                        % statement of the source pixel size.
-                        job.srcPixelSize = CellDiscovery.TRAIN_UM_PER_PIXEL * rz;
-                    end
-                    CellDiscovery.reportScale(job, rzMode);
-                    job.firstPage = firstPageForFile;
+                    job = CellDiscovery.jobForRow(f, fdir, stem, nPages, mapData(r,:), ...
+                        detM, rescM, obj.P.lsmOptions, snapOpts);
+                    CellDiscovery.reportScale(job, job.resizeMode);
                     jobs{end+1} = job; %#ok<AGROW>
-                    firstPageForFile = false;
                 end
             end
         end
@@ -1520,19 +1803,86 @@ classdef CellDiscovery < handle
 
 
         function timerCallback(obj)
+            % The timer's TimerFcn: one tick of the batch. An error escaping a
+            % tick would stop the timer and leave the window locked, so it ends
+            % the batch here instead (stopOnInternalError).
+            try
+                obj.timerTick();
+            catch ME
+                obj.stopOnInternalError(ME);
+            end
+        end
+
+        function stopOnInternalError(obj, ME)
+            % Report an error that escaped a timer tick (with its stack) and end
+            % the batch: timer stopped, subprocess killed, window unlocked.
+            fprintf(2, '[ERROR] The batch stopped on an internal error:\n%s\n', ...
+                getReport(ME, 'extended', 'hyperlinks', 'off'));
+            where = '';
+            if obj.fileIdx >= 1 && obj.fileIdx <= numel(obj.jobQueue)
+                where = sprintf(' at job %d / %d', obj.fileIdx, numel(obj.jobQueue));
+            end
+            try
+                % The job it happened in failed (nothing more is written for it).
+                obj.tally.error = ME.message;
+                obj.killProcess();
+                if obj.fileIdx >= 1 && obj.fileIdx <= numel(obj.jobQueue)
+                    obj.failJob(obj.jobQueue{obj.fileIdx}, ['internal error: ' ME.message]);
+                end
+            catch
+            end
+            try
+                obj.batchCleanup();
+            catch ME2
+                fprintf(2, '[ERROR] Cleaning up after it failed too: %s\n', ME2.message);
+                obj.cleanup();   % at least stop the timer and the subprocess, remove the scratch folder
+            end
+            if ~isempty(obj.hFig) && isvalid(obj.hFig)
+                obj.hProgressLabel.Text = sprintf( ...
+                    'Batch stopped on an internal error%s: %s (details in the Command Window)', ...
+                    where, ME.message);
+                obj.hProgressLabel.FontColor = CellDiscovery.LABEL_FAIL_COLOR;
+            end
+        end
+
+        function timerTick(obj)
+            % One tick of the batch. A page goes through these stages:
+            %   detect   predict.py runs on its scratch detector input; the ticks
+            %            stream its output until it exits (Case B)
+            %   after detection (detectionExited -> afterDetection, in the tick
+            %            that sees predict.py exit): read its CSV, build the
+            %            original-space table, snap
+            %   score    when the page has a scoring model and detections:
+            %            score.py runs as a second asynchronous stage, streamed by
+            %            the ticks like predict.py (launchScoring, scoringExited)
+            %   finish   write the CSVs, the manifest entry, the resized TIF, the
+            %            figure / PNG, the diagnostic pause, then the next job
+            %            (finishJob)
+            % Between ticks a page in flight always has a process running
+            % (inFlight and jProcess are set together), so a Stop click lets the
+            % page finish all its stages and Abort now (abortInFlight) can kill
+            % the process and discard the page. stageLog records the stages.
             if isempty(obj.hFig) || ~isvalid(obj.hFig), return; end
+            obj.tickCount = obj.tickCount + 1;
 
             total = numel(obj.jobQueue);
 
-            %% Case A: stop requested, no active process — clean up
-            if obj.stopRequested && isempty(obj.jProcess)
+            %% Abort now: kill the subprocess, discard the page in flight, end
+            if obj.abortRequested
+                obj.abortInFlight();
+                obj.batchCleanup();
+                return;
+            end
+
+            %% Case A: stop requested, no page in flight — clean up
+            if obj.stopRequested && isempty(obj.inFlight)
                 fprintf('[STOP] Batch stopped by user after %d / %d job(s).\n', ...
                     max(obj.fileIdx - 1, 0), total);
                 obj.batchCleanup();
                 return;
             end
 
-            %% Case B: active process — drain stdout, check for completion
+            %% Case B: a subprocess runs (detection or scoring) — drain stdout, check for completion
             if ~isempty(obj.jProcess)
                 CellDiscovery.echoLines(CellToolkit.drainReader(obj.jReader));
 
@@ -1544,44 +1894,23 @@ classdef CellDiscovery < handle
                 catch
                     % Process still running — return and wait for next tick
                 end
+                if ~done, return; end
 
-                if done
-                    % Block-drain anything still buffered after exit.
-                    CellDiscovery.echoLines(CellToolkit.drainReader(obj.jReader, true));
-
-                    job = obj.jobQueue{obj.fileIdx};
-                    if exitCode == 0
-                        fprintf('[DONE] (%d/%d) %s\n', obj.fileIdx, total, job.label);
-                        try
-                            obj.postProcess(job);
-                        catch ME
-                            fprintf(2,'[WARN] post-processing failed for %s: %s\n', ...
-                                job.label, ME.message);
-                        end
-                    else
-                        fprintf(2,'[FAIL] (%d/%d) exit code=%d  %s\n', ...
-                            obj.fileIdx, total, exitCode, job.label);
-                    end
-
-                    CellToolkit.deleteFiles(job.tmpImg);   % drop scratch page image
-                    CellToolkit.deleteFiles(job.tmpCsv);
-
-                    obj.jProcess = [];
-                    obj.jReader  = [];
-                    obj.fileIdx  = obj.fileIdx + 1;
-
-                    if obj.stopRequested
-                        fprintf('[STOP] Batch stopped by user.\n');
-                        obj.batchCleanup();
-                    end
+                % Block-drain anything still buffered after exit.
+                CellDiscovery.echoLines(CellToolkit.drainReader(obj.jReader, true));
+                obj.jProcess = [];
+                obj.jReader  = [];
+                if ~isempty(obj.inFlight) && strcmp(obj.inFlight.stage, 'score')
+                    obj.scoringExited(exitCode);
+                else
+                    obj.detectionExited(exitCode);
                 end
                 return;
             end
 
             %% Case C: no active process — launch the next job
             if obj.fileIdx > total
-                fprintf('=== PNN Batch GUI: all %d job(s) complete ===\n\n', total);
-                obj.batchCleanup();
+                obj.batchCleanup();   % prints the run's summary
                 return;
             end
 
@@ -1592,12 +1921,18 @@ classdef CellDiscovery < handle
                 fprintf('[SKIP] (%d/%d) result exists, Ignore mode: %s\n', ...
                     obj.fileIdx, total, job.label);
                 obj.hProgressLabel.Text = sprintf('Skipped %d / %d  (result exists)', obj.fileIdx, total);
+                obj.tally.skipped = obj.tally.skipped + 1;
+                obj.logStage(job, 'skip');
                 obj.fileIdx = obj.fileIdx + 1;
                 return;
             end
 
             obj.hProgressLabel.Text = sprintf('Processing %d / %d:  %s', obj.fileIdx, total, job.label);
             drawnow;
+            if obj.stopRequested || obj.abortRequested
+                return;   % clicked during the drawnow: the next tick ends the batch, this job not run
+            end
+            obj.pageWarnings = {};
 
             % --- Preprocess the whole file once (joint LSM), grab this page ---
             % Preprocessing is centralised: the entire channel stack is corrected
@@ -1610,10 +1945,10 @@ classdef CellDiscovery < handle
             % keep their source intensities for downstream measurements.
             try
                 obj.ensurePreprocCache(job.imgFile, job.nPages);
-                img = obj.preprocCache.pages{job.page};
+                job.lsmPages = obj.preprocCache.lsmIdx;   % pages LSM-corrected together (recorded)
+                [img, lims] = CellDiscovery.detectorInputPage(obj.preprocCache.pages{job.page}, job.normalize);
                 if job.normalize
-                    [img, job.normLimits] = CellToolkit.normalizeIntensity( ...
-                        img, obj.NORM_PERCENTILES, obj.NORM_TARGET);
+                    job.normLimits = lims;
                     if any(isnan(job.normLimits(:)))
                         fprintf(2, '[WARN] %s: no intensity spread to normalise; page used as is.\n', job.label);
                     else
@@ -1625,7 +1960,7 @@ classdef CellDiscovery < handle
             catch ME
                 fprintf(2,'[ERROR] (%d/%d) could not read/preprocess %s: %s\n', ...
                     obj.fileIdx, total, job.label, ME.message);
-                obj.fileIdx = obj.fileIdx + 1;
+                obj.failJob(job, ['could not read or preprocess the page: ' ME.message]);
                 return;
             end
 
@@ -1638,7 +1973,7 @@ classdef CellDiscovery < handle
             catch ME
                 fprintf(2,'[ERROR] (%d/%d) could not write scratch image: %s\n', ...
                     obj.fileIdx, total, ME.message);
-                obj.fileIdx = obj.fileIdx + 1;
+                obj.failJob(job, ['could not write the scratch image: ' ME.message]);
                 return;
             end
             obj.jobQueue{obj.fileIdx} = job;   % persist tmp paths for Case B
@@ -1649,13 +1984,13 @@ classdef CellDiscovery < handle
 
             % Core predict.py arguments. predict.py runs on the resized
             % scratch image; coordinates are mapped back to original-image space
-            % in postProcess. A blank/NaN threshold is omitted by
+            % in afterDetection. A blank/NaN threshold is omitted by
             % CellToolkit.predictArgs. Paths may contain spaces —
             % launchPythonAsync passes each token as a separate argument, so no
             % quoting is needed (conda-run wrapping is applied by the toolkit).
             %
-            % Detection ONLY: Stage-2 rescoring (job.rescoreModel) is deferred
-            % to postProcess so it runs AFTER snapToCellCentroid refinement,
+            % Detection ONLY: Stage-2 rescoring (job.rescoreModel) is a stage of
+            % its own after snapToCellCentroid refinement (launchScoring),
             % letting the scoring model crop patches centred on the snapped
             % cell locations rather than the raw detected ones.
             predOpts = struct( ...
@@ -1674,30 +2009,69 @@ classdef CellDiscovery < handle
                 [obj.jProcess, obj.jReader] = CellToolkit.launchPythonAsync(cfg, args);
             catch ME
                 fprintf(2,'[ERROR] Could not start process: %s\n', ME.message);
-                obj.fileIdx = obj.fileIdx + 1;
+                obj.failJob(job, ['predict.py could not start: ' ME.message]);
+                return;
             end
+            obj.pythonRuns = obj.pythonRuns + 1;
+            obj.inFlight = struct('stage', 'detect', 'job', job, ...
+                'locs', [], 'locsOrig', [], 'f', job.resize, 'nDets', 0, ...
+                'hasX', false, 'hasY', false, 'hasRescore', false, ...
+                'diagFromX', [], 'diagFromY', [], ...
+                'scoreIn', '', 'scoreOut', '', 'scoreRows', 0, 'csvWritten', false);
+            obj.logStage(job, 'detect-launch');
         end
 
 
-        %% Per-file post-processing: display + optional PNG export
+        %% Stages of the page in flight (see timerTick)
 
 
-        function postProcess(obj, job)
-            % Read predict.py output (in resized/resized coordinates),
-            % map detections back to original-image space, write the final
-            % CSV(s), and render/optionally export the result figure.
-            imgDir = job.imgDir;
-
-            if ~exist(job.tmpCsv, 'file')
-                fprintf('[WARN] Output CSV not found: %s\n', job.tmpCsv);
+        function detectionExited(obj, exitCode)
+            % predict.py of the page in flight exited: fail the page on a non-zero
+            % exit, else run "after detection" and either wait for score.py or
+            % finish the page now.
+            job   = obj.inFlight.job;
+            total = numel(obj.jobQueue);
+            obj.logStage(job, 'detect-exit');
+            if exitCode ~= 0
+                fprintf(2,'[FAIL] (%d/%d) exit code=%d  %s\n', ...
+                    obj.fileIdx, total, exitCode, job.label);
+                obj.failJob(job, sprintf('predict.py exited with code %d', exitCode));
+                obj.endOfPage();
                 return;
             end
+            fprintf('[DONE] (%d/%d) %s\n', obj.fileIdx, total, job.label);
+            try
+                next = obj.afterDetection();
+            catch ME
+                % nothing is written for the page yet
+                fprintf(2, '[FAIL] (%d/%d) %s: %s\n', obj.fileIdx, total, job.label, ME.message);
+                obj.failJob(job, ME.message);
+                obj.endOfPage();
+                return;
+            end
+            if strcmp(next, 'score')
+                return;   % the next ticks stream score.py until it exits (scoringExited)
+            end
+            obj.finishJob();
+        end
 
+        function next = afterDetection(obj)
+            % Stage "after detection" of the page in flight: read predict.py's
+            % output (in resized coordinates), stamp the imgName column, build the
+            % original-space copy and snap it. Then, when the page has a scoring
+            % model and detections, launch Stage-2 rescoring (next = 'score': the
+            % timer waits for score.py), else next = 'finish'. Throws when the page
+            % has no usable result (the caller fails the page).
+            job = obj.inFlight.job;
+
+            if ~exist(job.tmpCsv, 'file')
+                error('CellDiscovery:noDetections', 'predict.py wrote no output CSV (%s)', job.tmpCsv);
+            end
             try
                 locs = readtable(job.tmpCsv);
             catch ME
-                fprintf('[WARN] Could not read CSV %s: %s\n', job.tmpCsv, ME.message);
-                return;
+                error('CellDiscovery:badDetections', 'could not read predict.py''s CSV %s: %s', ...
+                    job.tmpCsv, ME.message);
             end
             nDets = height(locs);
 
@@ -1710,7 +2084,7 @@ classdef CellDiscovery < handle
                 locs.imgName = repmat({job.imgName}, nDets, 1);
             end
 
-            % --- Build original-space + resized-space copies and write them ---
+            % --- Build the original-space copy (locs stays in resized space) ---
             f = job.resize;
             locsOrig = locs;
             if f ~= 1
@@ -1739,44 +2113,229 @@ classdef CellDiscovery < handle
                     locsOrig = obj.applySnap(job, locsOrig);
                 catch ME
                     fprintf('[WARN] Snap failed for %s: %s\n', job.label, ME.message);
+                    obj.warnPage(['snap failed: ' ME.message]);
                 end
             end
 
+            obj.inFlight.locs       = locs;
+            obj.inFlight.locsOrig   = locsOrig;
+            obj.inFlight.f          = f;
+            obj.inFlight.nDets      = nDets;
+            obj.inFlight.hasX       = hasX;
+            obj.inFlight.hasY       = hasY;
+            obj.inFlight.hasRescore = hasRescore;
+            obj.inFlight.diagFromX  = diagFromX;
+            obj.inFlight.diagFromY  = diagFromY;
+            obj.logStage(job, 'after-detection');
+
             % --- Stage-2 rescoring (score.py), AFTER detection + snap ----------
-            % Deferred out of the predict.py call so the scoring model crops its
-            % 64x64 patches around the snapped (refined) cell centres. Scoring
-            % runs on the resized detector-input scratch image at the training
-            % pixel size, so applyRescore maps the snapped original-space
-            % coordinates back into resized space. The computed scores populate
-            % the 'rescore' column on both the original- and resized-coordinate
-            % tables. Best effort: a scoring failure never blocks the CSV write.
+            % Out of the predict.py call so the scoring model crops its 64x64
+            % patches around the snapped (refined) cell centres, and a stage of
+            % its own: score.py runs asynchronously, streamed by the timer like
+            % predict.py, so MATLAB stays free and Stop / Abort now act on it.
+            % Best effort: a scoring failure never blocks the CSV write.
+            next = 'finish';
             if isfield(job, 'rescoreModel') && ~isempty(job.rescoreModel) ...
                     && nDets > 0 && hasX && hasY
                 try
-                    rv = obj.applyRescore(job, locsOrig, f);
+                    if obj.launchScoring()
+                        next = 'score';
+                    end
                 catch ME
-                    rv = [];
                     fprintf('[WARN] Rescore failed for %s: %s\n', job.label, ME.message);
-                end
-                if ~isempty(rv)
-                    locsOrig.rescore = rv;
-                    locs.rescore     = rv;
-                    hasRescore       = true;
+                    obj.warnPage(['rescoring failed: ' ME.message]);
                 end
             end
+        end
+
+        function started = launchScoring(obj)
+            % Start Stage-2 rescoring (score.py) of the page in flight, after
+            % detection and snap; false when there is nothing to score.
+            %
+            % Scoring crops 64x64 patches from the resized detector-input
+            % scratch image (job.tmpImg) at the training pixel size, so the
+            % (snapped) original-image coordinates are mapped back into resized
+            % space (* the resize factor f). When snap ran, SNAP_X/SNAP_Y carry
+            % the refined centres (snapped points moved, unsnapped points keep
+            % their original location), so the model sees crops centred on the
+            % best available cell location regardless of the ApplyToXY setting.
+            started  = false;
+            job      = obj.inFlight.job;
+            locsOrig = obj.inFlight.locsOrig;
+            f        = obj.inFlight.f;
+            if exist(job.tmpImg, 'file') ~= 2
+                fprintf('[WARN] Scratch image missing; skipping rescore for %s.\n', job.label);
+                obj.warnPage('rescoring skipped: the scratch image is missing');
+                return;
+            end
+
+            % Effective scoring centres in original-image space.
+            vn = locsOrig.Properties.VariableNames;
+            if all(ismember({'SNAP_X','SNAP_Y'}, vn))
+                ex = locsOrig.SNAP_X; ey = locsOrig.SNAP_Y;
+            else
+                ex = locsOrig.X;      ey = locsOrig.Y;
+            end
+            if ~isnumeric(ex), ex = str2double(string(ex)); end
+            if ~isnumeric(ey), ey = str2double(string(ey)); end
+            live = ~isnan(ex) & ~isnan(ey);
+            keys = find(live);
+            if isempty(keys), return; end
+
+            % Write the score.py input. score.py consumes the first column as
+            % the DataFrame index, derives integer crop centres from Yp/Xp, and
+            % resolves imgName against --root. rescore_key rides through so the
+            % score can be merged back onto the right rows afterwards
+            % (readScores).
+            [~, imgStem, imgExt] = fileparts(job.tmpImg);
+            nLive = numel(keys);
+            inTbl = table();
+            inTbl.idx         = (0:nLive-1)';
+            inTbl.imgName     = repmat(string([imgStem imgExt]), nLive, 1);
+            inTbl.Xp          = double(ex(live)) * f;   % original -> resized space
+            inTbl.Yp          = double(ey(live)) * f;
+            inTbl.rescore_key = keys;
+
+            obj.inFlight.scoreIn   = fullfile(obj.tmpDir, [imgStem '_scorein.csv']);
+            obj.inFlight.scoreOut  = fullfile(obj.tmpDir, [imgStem '_scoreout.csv']);
+            obj.inFlight.scoreRows = height(locsOrig);
+            writetable(inTbl, obj.inFlight.scoreIn);
+
+            % No --batch-size: the Batch size field is the detector's (640x640
+            % patches, default 1); score.py's own default (512 crops per batch)
+            % applies, as in curation.Rescore.
+            args = CellToolkit.scoreArgs(char(job.rescoreModel), obj.inFlight.scoreIn, struct( ...
+                'root',      obj.tmpDir, ...
+                'device',    strtrim(obj.hDeviceEdit.Value), ...
+                'output',    obj.inFlight.scoreOut));
+            cfg = obj.pythonCfg();
+            fprintf('[SCORE] %s\n  CMD: %s\n', job.label, ...
+                CellToolkit.commandString(CellToolkit.pythonCommandParts(cfg, args)));
+            [obj.jProcess, obj.jReader] = CellToolkit.launchPythonAsync(cfg, args);
+            obj.inFlight.stage = 'score';
+            obj.pythonRuns = obj.pythonRuns + 1;
+            obj.logStage(job, 'score-launch');
+            obj.showProgress(sprintf('Scoring %d / %d:  %s', obj.fileIdx, numel(obj.jobQueue), job.label));
+            started = true;
+        end
+
+        function scoringExited(obj, exitCode)
+            % score.py of the page in flight exited: merge its scores (a failure is
+            % a warning, never a failed page) and finish the page.
+            job = obj.inFlight.job;
+            obj.logStage(job, 'score-exit');
+            try
+                rv = obj.readScores(exitCode);
+            catch ME
+                rv = [];
+                fprintf(2, '[WARN] Rescore failed for %s: %s\n', job.label, ME.message);
+                obj.warnPage(['rescoring failed: ' ME.message]);
+            end
+            if ~isempty(rv)
+                obj.inFlight.locsOrig.rescore = rv;
+                obj.inFlight.locs.rescore     = rv;
+                obj.inFlight.hasRescore       = true;
+            end
+            CellToolkit.deleteFiles({obj.inFlight.scoreIn, obj.inFlight.scoreOut});
+            obj.finishJob();
+        end
+
+        function rv = readScores(obj, exitCode)
+            % The rescore vector of the page in flight from score.py's output: N x 1,
+            % aligned to its rows by rescore_key (NaN where a row has none), or []
+            % when score.py failed or its output is unusable (warned).
+            rv  = [];
+            job = obj.inFlight.job;
+            out = obj.inFlight.scoreOut;
+            n   = obj.inFlight.scoreRows;
+            if exitCode ~= 0 || exist(out, 'file') ~= 2
+                fprintf(2, '[WARN] Rescore failed for %s (exit %d; its output is above).\n', ...
+                    job.label, exitCode);
+                if exitCode ~= 0
+                    obj.warnPage(sprintf('rescoring failed: score.py exited with code %d', exitCode));
+                else
+                    obj.warnPage('rescoring failed: score.py wrote no output');
+                end
+                return;
+            end
+
+            R   = readtable(out, 'VariableNamingRule', 'preserve');
+            rvn = string(R.Properties.VariableNames);
+            if ~all(ismember(["rescore_key","rescore"], rvn))
+                fprintf(2, '[WARN] Rescore output missing expected columns for %s.\n', job.label);
+                obj.warnPage('rescoring failed: its output has no rescore_key / rescore columns');
+                return;
+            end
+            rk = R.rescore_key; if ~isnumeric(rk), rk = str2double(string(rk)); end
+            rs = R.rescore;     if ~isnumeric(rs), rs = str2double(string(rs)); end
+            rv = nan(n, 1);
+            ok = rk >= 1 & rk <= n;
+            rv(rk(ok)) = rs(ok);
+            fprintf('[SCORE] %s: rescored %d / %d point(s)\n', ...
+                job.label, sum(~isnan(rv)), n);
+        end
+
+        function finishJob(obj)
+            % Stage "finish" of the page in flight (finishOutputs), then the next
+            % job. The page counts as done once its result CSV is written: an
+            % error before that fails it, one after it is a warning.
+            job = obj.inFlight.job;
+            obj.inFlight.stage = 'finish';
+            try
+                obj.finishOutputs();
+            catch ME
+                if ~obj.inFlight.csvWritten
+                    fprintf(2, '[FAIL] (%d/%d) %s: %s\n', obj.fileIdx, numel(obj.jobQueue), ...
+                        job.label, ME.message);
+                    obj.failJob(job, ME.message);
+                    obj.endOfPage();
+                    return;
+                end
+                fprintf(2,'[WARN] post-processing failed for %s: %s\n', job.label, ME.message);
+                obj.warnPage(['post-processing failed after the CSV was written: ' ME.message]);
+            end
+            obj.doneJob(job);
+            obj.endOfPage();
+        end
+
+
+        %% Per-page outputs: CSVs, manifest, TIF, display + optional PNG export
+
+
+        function finishOutputs(obj)
+            % The outputs of the page in flight (stage "finish"): write its
+            % CSV(s) (original space, and resized space when resized), record it
+            % in the dataset manifest, save the resized TIF, render/optionally
+            % export the result figure, and pause for the diagnostic view. Sets
+            % inFlight.csvWritten once the result CSV is written; throws when it
+            % cannot be (the page fails). Other problems are page warnings.
+            p          = obj.inFlight;
+            job        = p.job;
+            locs       = p.locs;        % resized (detector) coordinates
+            locsOrig   = p.locsOrig;    % original-image coordinates (+ SNAP_* columns)
+            f          = p.f;
+            nDets      = p.nDets;
+            hasX       = p.hasX;
+            hasY       = p.hasY;
+            hasRescore = p.hasRescore;
+            diagFromX  = p.diagFromX;
+            diagFromY  = p.diagFromY;
+            imgDir     = job.imgDir;
 
             try
                 writetable(locsOrig, job.outCsvOrig);
-                fprintf('[CSV ] Saved: %s\n', job.outCsvOrig);
             catch ME
-                fprintf('[WARN] Could not write %s: %s\n', job.outCsvOrig, ME.message);
+                error('CellDiscovery:csvNotWritten', 'could not write %s: %s', job.outCsvOrig, ME.message);
             end
+            obj.inFlight.csvWritten = true;
+            fprintf('[CSV ] Saved: %s\n', job.outCsvOrig);
             if f ~= 1 && ~isempty(job.outCsvResized)
                 try
                     writetable(locs, job.outCsvResized);   % resized-image coordinates
                     fprintf('[CSV ] Saved: %s\n', job.outCsvResized);
                 catch ME
                     fprintf('[WARN] Could not write %s: %s\n', job.outCsvResized, ME.message);
+                    obj.warnPage(['the resized-coordinate CSV was not written: ' ME.message]);
                 end
             end
 
@@ -1788,11 +2347,14 @@ classdef CellDiscovery < handle
             try
                 mf  = CellDatasetManifest.forImage(job.imgFile);
                 key = CellDatasetManifest.keyForCsv(job.outCsvOrig);
-                mf.recordDetection(key, struct('image', job.imgFile, ...
-                    'page', job.page, 'locs', job.outCsvOrig, ...
-                    'tool', 'CellDiscovery', 'model', job.detModel, 'count', nDets, ...
-                    'resize', job.resize, 'bgRadius', job.bgRadius, ...
-                    'normalized', job.normalize, 'normLimits', job.normLimits));
+                info = CellDiscovery.detectionFacts(job);   % everything needed to regenerate the model input
+                info.image = job.imgFile;
+                info.page  = job.page;
+                info.locs  = job.outCsvOrig;
+                info.tool  = 'CellDiscovery';
+                info.model = job.detModel;
+                info.count = nDets;
+                mf.recordDetection(key, info);
                 if f ~= 1 && ~isempty(job.outCsvResized)
                     mf.recordResized(key, job.outCsvResized, job.outTif);
                 end
@@ -1800,20 +2362,34 @@ classdef CellDiscovery < handle
                     mf.recordRescore(key, struct('tool', 'CellDiscovery', ...
                         'model', job.rescoreModel));
                 end
-                mf.save();
-            catch
+                if ~mf.save()   % save never throws; it returns false
+                    error('CellDiscovery:manifestNotSaved', 'the manifest file could not be written');
+                end
+            catch ME
+                fprintf(2, '[WARN] %s: the detection was not recorded in the dataset manifest: %s\n', ...
+                    job.label, ME.message);
+                obj.warnPage(['not recorded in the dataset manifest: ' ME.message]);
             end
 
             % --- Optionally save the resized image as TIF ---
-            % Written once per source file (on the first job for that file).
-            % All pages of the source file are resized using the page-map
-            % settings for each page (falling back to no-op for unmapped pages)
-            % so the output TIF has the same number of pages as the input TIF.
-            if obj.hSaveLsmTif.Value && job.firstPage
+            % Written once per source file in a run, by the first of its jobs
+            % that completes (so a skipped or failed first page does not lose
+            % it); in Ignore mode an existing TIF is kept (resizedTifDue). The
+            % per-file preprocessing cache remembers it. All pages of the
+            % source file are resized using the page-map settings for each page
+            % (falling back to no-op for unmapped pages) so the output TIF has
+            % the same number of pages as the input TIF.
+            if obj.hSaveLsmTif.Value
                 try
-                    obj.writeFullPreprocTif(job);
+                    obj.ensurePreprocCache(job.imgFile, job.nPages);
+                    if CellDiscovery.resizedTifDue(true, obj.preprocCache.tifWritten, ...
+                            obj.hOverwriteRad.Value, isfile(job.outTif))
+                        obj.preprocCache.tifWritten = true;   % once per file, even if the write fails
+                        obj.writeFullPreprocTif(job);
+                    end
                 catch ME
                     fprintf('[WARN] TIF save failed for %s: %s\n', job.label, ME.message);
+                    obj.warnPage(['resized TIF not saved: ' ME.message]);
                 end
             end
 
@@ -1837,6 +2413,7 @@ classdef CellDiscovery < handle
                 end
             catch ME
                 fprintf('[WARN] Could not load display image for %s: %s\n', job.label, ME.message);
+                obj.warnPage(['result figure not drawn (no PNG, no diagnostic pause): ' ME.message]);
                 return;
             end
 
@@ -1858,8 +2435,7 @@ classdef CellDiscovery < handle
                     'NumberTitle', 'off', ...
                     'Position',    [1340 80 900 720]);
             else
-                hResFig = hResFig(1);
-                figure(hResFig);
+                hResFig = hResFig(1);   % redrawn by handle: never raised, so it does not take the focus
                 clf(hResFig);
             end
 
@@ -1946,6 +2522,7 @@ classdef CellDiscovery < handle
                     fprintf('[PNG ] Saved: %s\n', pngFile);
                 else
                     fprintf('[WARN] PNG save failed for: %s\n', job.label);
+                    obj.warnPage('PNG not saved');
                 end
             end
 
@@ -2083,9 +2660,11 @@ classdef CellDiscovery < handle
                 job.page, job.nPages));
             uicontrol(hDiag, 'Style', 'pushbutton', 'Units', 'normalized', ...
                 'Position', [0.59 0.02 0.18 0.07], 'FontWeight', 'bold', ...
+                'TooltipString', 'Close this view and go on with the next page of the batch.', ...
                 'String', 'Continue', 'Callback', @(~,~) uiresume(hDiag));
             uicontrol(hDiag, 'Style', 'pushbutton', 'Units', 'normalized', ...
                 'Position', [0.79 0.02 0.18 0.07], 'ForegroundColor', [0.6 0 0], ...
+                'TooltipString', 'End the batch here (the page shown is already finished and kept).', ...
                 'String', 'Stop batch', 'Callback', @onStopDiag);
             % While paused, closing the window just continues (don't destroy the
             % reusable figure); restore normal close behaviour afterwards.
@@ -2097,8 +2676,12 @@ classdef CellDiscovery < handle
             end
 
             function onStopDiag(~, ~)
-                obj.stopRequested = true;
+                % The main window's stop request, so its button shows Abort now.
+                % The page shown is finished already, so this never aborts.
                 fprintf('[STOP] Stop requested from diagnostic window.\n');
+                if ~obj.stopRequested
+                    obj.requestStop();
+                end
                 if isvalid(hDiag), uiresume(hDiag); end
             end
         end
@@ -2128,6 +2711,7 @@ classdef CellDiscovery < handle
             % original-image space, so no resize remapping is needed.
             if exist('snapToCellCentroid', 'file') ~= 2
                 fprintf('[WARN] snapToCellCentroid.m is not on the MATLAB path; skipping snap for %s.\n', job.label);
+                obj.warnPage('snap skipped: snapToCellCentroid.m is not on the MATLAB path');
                 return;
             end
             if ~all(ismember({'X','Y'}, T.Properties.VariableNames)) || height(T) == 0
@@ -2182,87 +2766,6 @@ classdef CellDiscovery < handle
                 job.label, info.NumSnapped, info.NumPoints, applyTxt);
         end
 
-        function rv = applyRescore(obj, job, locsOrig, f)
-            % Run Stage-2 rescoring (score.py) AFTER detection and snap.
-            % Returns an N-by-1 rescore vector aligned to locsOrig's rows, or []
-            % on skip/failure (best effort: never blocks writing the CSV).
-            %
-            % Scoring crops 64x64 patches from the resized detector-input
-            % scratch image (job.tmpImg) at the training pixel size, so the
-            % (snapped) original-image coordinates are mapped back into resized
-            % space (* the resize factor f). When snap ran, SNAP_X/SNAP_Y carry
-            % the refined centres (snapped points moved, unsnapped points keep
-            % their original location), so the model sees crops centred on the
-            % best available cell location regardless of the ApplyToXY setting.
-            rv = [];
-            n  = height(locsOrig);
-            if isempty(job.rescoreModel) || n == 0, return; end
-            if exist(job.tmpImg, 'file') ~= 2
-                fprintf('[WARN] Scratch image missing; skipping rescore for %s.\n', job.label);
-                return;
-            end
-
-            % Effective scoring centres in original-image space.
-            vn = locsOrig.Properties.VariableNames;
-            if all(ismember({'SNAP_X','SNAP_Y'}, vn))
-                ex = locsOrig.SNAP_X; ey = locsOrig.SNAP_Y;
-            else
-                ex = locsOrig.X;      ey = locsOrig.Y;
-            end
-            if ~isnumeric(ex), ex = str2double(string(ex)); end
-            if ~isnumeric(ey), ey = str2double(string(ey)); end
-            live = ~isnan(ex) & ~isnan(ey);
-            keys = find(live);
-            if isempty(keys), return; end
-
-            % Write the score.py input. score.py consumes the first column as
-            % the DataFrame index, derives integer crop centres from Yp/Xp, and
-            % resolves imgName against --root. rescore_key rides through so the
-            % score can be merged back onto the right rows afterwards.
-            [~, imgStem, imgExt] = fileparts(job.tmpImg);
-            nLive = numel(keys);
-            inTbl = table();
-            inTbl.idx         = (0:nLive-1)';
-            inTbl.imgName     = repmat(string([imgStem imgExt]), nLive, 1);
-            inTbl.Xp          = double(ex(live)) * f;   % original -> resized space
-            inTbl.Yp          = double(ey(live)) * f;
-            inTbl.rescore_key = keys;
-
-            tmpInCsv = fullfile(obj.tmpDir, [imgStem '_scorein.csv']);
-            tmpOut   = fullfile(obj.tmpDir, [imgStem '_scoreout.csv']);
-            cleanup  = onCleanup(@() CellToolkit.deleteFiles({tmpInCsv, tmpOut})); %#ok<NASGU>
-            writetable(inTbl, tmpInCsv);
-
-            args = CellToolkit.scoreArgs(char(job.rescoreModel), tmpInCsv, struct( ...
-                'root',      obj.tmpDir, ...
-                'device',    strtrim(obj.hDeviceEdit.Value), ...
-                'batchSize', strtrim(obj.hBatchEdit.Value), ...
-                'output',    tmpOut));
-            cfg = obj.pythonCfg();
-            fprintf('[SCORE] %s\n  CMD: %s\n', job.label, ...
-                CellToolkit.commandString(CellToolkit.pythonCommandParts(cfg, args)));
-            [status, out] = CellToolkit.runPython(cfg, args);
-            if status ~= 0 || exist(tmpOut, 'file') ~= 2
-                fprintf(2, '[WARN] Rescore failed for %s (exit %d):\n%s\n', ...
-                    job.label, status, out);
-                return;
-            end
-
-            R   = readtable(tmpOut, 'VariableNamingRule', 'preserve');
-            rvn = string(R.Properties.VariableNames);
-            if ~all(ismember(["rescore_key","rescore"], rvn))
-                fprintf(2, '[WARN] Rescore output missing expected columns for %s.\n', job.label);
-                return;
-            end
-            rk = R.rescore_key; if ~isnumeric(rk), rk = str2double(string(rk)); end
-            rs = R.rescore;     if ~isnumeric(rs), rs = str2double(string(rs)); end
-            rv = nan(n, 1);
-            ok = rk >= 1 & rk <= n;
-            rv(rk(ok)) = rs(ok);
-            fprintf('[SCORE] %s: rescored %d / %d point(s)\n', ...
-                job.label, sum(~isnan(rv)), n);
-        end
-
         function ensurePreprocCache(obj, imgFile, nPages)
             % Preprocess every page of imgFile exactly once and cache the result
             % on obj.preprocCache, keyed by file path. Both the per-page
@@ -2276,9 +2779,12 @@ classdef CellDiscovery < handle
                 return;   % cache already valid for this file
             end
             mapData                   = obj.hPageTable.Data;
-            [pages, rzArr, pagesFull] = CellDiscovery.preprocessAllPages(imgFile, nPages, mapData, obj.P.lsmOptions);
+            [pages, rzArr, pagesFull, lsmIdx] = CellDiscovery.preprocessAllPages(imgFile, nPages, mapData, obj.P.lsmOptions);
+            % tifWritten: this file's *_resized.tif has been written (or its
+            % write attempted) in this run; see finishOutputs / resizedTifDue.
             obj.preprocCache = struct('imgFile', imgFile, 'pages', {pages}, ...
-                'rzArr', rzArr, 'pagesFull', {pagesFull});
+                'rzArr', rzArr, 'pagesFull', {pagesFull}, 'lsmIdx', lsmIdx, ...
+                'tifWritten', false);
         end
 
         function writeFullPreprocTif(obj, job)
@@ -2324,22 +2830,15 @@ classdef CellDiscovery < handle
 
 
         function batchCleanup(obj)
+            % End the batch: kill a subprocess still running, stop the timer,
+            % remove the run's scratch folder, print the run's summary (failed
+            % pages and warnings by name) and put its counts in the progress
+            % label (red when a page failed), unlock the window.
             if isempty(obj.hFig) || ~isvalid(obj.hFig), return; end
 
-            if ~isempty(obj.jProcess)
-                try
-                    obj.jProcess.destroyForcibly();
-                    fprintf('[STOP] Subprocess terminated.\n');
-                catch
-                end
-                obj.jProcess = [];
-                obj.jReader  = [];
-                % Remove scratch files for the job that was in flight.
-                if obj.fileIdx >= 1 && obj.fileIdx <= numel(obj.jobQueue)
-                    inflight = obj.jobQueue{obj.fileIdx};
-                    CellToolkit.deleteFiles(inflight.tmpImg);
-                    CellToolkit.deleteFiles(inflight.tmpCsv);
-                end
+            obj.killProcess();
+            if ~isempty(obj.inFlight)   % only after an internal error
+                obj.dropInFlight(obj.inFlight.job);
             end
 
             if ~isempty(obj.timerObj) && isvalid(obj.timerObj)
@@ -2348,21 +2847,148 @@ classdef CellDiscovery < handle
             end
             obj.timerObj = [];
             obj.preprocCache = [];   % release cached resized pages
+            obj.removeScratchDir();
 
-            if obj.stopRequested
-                msg = sprintf('Stopped by user  (%d / %d job(s) processed).', ...
-                    max(obj.fileIdx - 1, 0), numel(obj.jobQueue));
-            else
-                msg = sprintf('Complete — %d job(s) processed.', numel(obj.jobQueue));
+            % The run's tally: counts in the label, names in the Command Window.
+            t = obj.tally;
+            if isempty(t)
+                t = CellDiscovery.newTally(numel(obj.jobQueue), 0);
             end
-            obj.hProgressLabel.Text = msg;
+            t.notRun = max(numel(obj.jobQueue) - obj.fileIdx + 1, 0);
+            if ~isempty(t.error)
+                t.state = 'error';
+            elseif ~isempty(t.aborted)
+                t.state = 'aborted';
+            elseif obj.stopRequested || obj.abortRequested
+                t.state = 'stopped';
+            else
+                t.state = 'complete';
+            end
+            obj.tally = t;
+            [label, lines, failed] = CellDiscovery.tallySummary(t);
+            fprintf('%s\n', lines{:});
+            obj.hProgressLabel.Text = label;
+            if failed
+                obj.hProgressLabel.FontColor = CellDiscovery.LABEL_FAIL_COLOR;
+            else
+                obj.hProgressLabel.FontColor = CellDiscovery.LABEL_COLOR;
+            end
 
             obj.setUIEnable(true);
+            obj.setStopButton('stop');
             obj.hStopBtn.Enable  = false;
             obj.hStartBtn.Enable = true;
             set(obj.hFig, 'Pointer', 'arrow');
+            obj.markQueuedDone();   % the files this run finished show as done
             drawnow;
 
+        end
+
+
+        %% The page in flight: its end, the tally, the stage log
+
+
+        function failJob(obj, job, reason)
+            % Count the job at fileIdx as failed (label + reason), drop its scratch
+            % files and move on to the next job.
+            obj.tally.failed(end+1, 1) = struct('label', job.label, 'reason', reason);
+            obj.logStage(job, 'fail');
+            obj.dropInFlight(job);
+            obj.fileIdx = obj.fileIdx + 1;
+        end
+
+        function doneJob(obj, job)
+            % Count the page in flight as done, with the warnings it collected;
+            % drop its scratch files and move on to the next job.
+            obj.tally.done = obj.tally.done + 1;
+            for k = 1:numel(obj.pageWarnings)
+                obj.tally.warnings(end+1, 1) = struct('label', job.label, 'reason', obj.pageWarnings{k});
+            end
+            obj.logStage(job, 'finish');
+            obj.dropInFlight(job);
+            obj.fileIdx = obj.fileIdx + 1;
+        end
+
+        function endOfPage(obj)
+            % After the page in flight ended (done or failed): a Stop (or an Abort
+            % clicked while it finished) ends the batch here.
+            if obj.stopRequested || obj.abortRequested
+                fprintf('[STOP] Batch stopped by user.\n');
+                obj.batchCleanup();
+            end
+        end
+
+        function abortInFlight(obj)
+            % Abort now: kill the running subprocess and discard the page in
+            % flight with its scratch files. Nothing of it is written: its CSVs,
+            % manifest entry and TIF come only in its finish stage.
+            obj.killProcess();
+            if isempty(obj.inFlight), return; end
+            job = obj.inFlight.job;
+            fprintf('[STOP] Aborted %s: the page is discarded, nothing was written for it.\n', job.label);
+            obj.tally.aborted = job.label;
+            obj.logStage(job, 'abort');
+            obj.dropInFlight(job);
+            obj.fileIdx = obj.fileIdx + 1;
+        end
+
+        function dropInFlight(obj, job)
+            % Delete the scratch files of JOB (its detector input, predict.py's CSV
+            % and score.py's input and output) and forget the page in flight.
+            files = {job.tmpImg, job.tmpCsv};
+            if ~isempty(obj.inFlight)
+                files = [files, {obj.inFlight.scoreIn, obj.inFlight.scoreOut}];
+            end
+            CellToolkit.deleteFiles(files);
+            obj.inFlight = [];
+            obj.pageWarnings = {};
+        end
+
+        function warnPage(obj, reason)
+            % A problem of the page in flight that does not fail it (snap,
+            % rescoring, manifest, TIF, PNG); it reaches the tally if the page
+            % completes (doneJob).
+            obj.pageWarnings{end+1} = reason;
+        end
+
+        function logStage(obj, job, event)
+            % Append an event of the job at fileIdx to the run's stage log
+            % (stageLog): the timer tick it happened in and the seconds since Start.
+            secs = NaN;
+            if ~isempty(obj.runClock), secs = toc(obj.runClock); end
+            obj.stageEvents(end+1, 1) = struct('Job', obj.fileIdx, 'Label', string(job.label), ...
+                'Event', string(event), 'Tick', obj.tickCount, 'Seconds', secs);
+        end
+
+        function killProcess(obj)
+            % Kill the running subprocess, if any, with the processes it started:
+            % with a conda env it is conda.exe, and predict.py / score.py run in a
+            % child that destroyForcibly does not take down. Every process of the
+            % run has the run's scratch folder on its command line, so the rest
+            % are found by its unique name (killByCommandLine).
+            if isempty(obj.jProcess), return; end
+            try
+                obj.jProcess.destroyForcibly();
+                obj.jProcess.waitFor(5, java.util.concurrent.TimeUnit.SECONDS);
+            catch
+            end
+            try obj.jReader.close(); catch, end
+            obj.jProcess = [];
+            obj.jReader  = [];
+            [~, runName] = fileparts(obj.tmpDir);
+            CellDiscovery.killByCommandLine(runName);
+            fprintf('[STOP] Subprocess terminated.\n');
+        end
+
+        function removeScratchDir(obj)
+            % Remove this run's scratch folder with its contents (tmpDir keeps
+            % its name, for batchState).
+            d = obj.tmpDir;
+            if isempty(d) || ~isfolder(d), return; end
+            [ok, msg] = rmdir(d, 's');
+            if ~ok
+                fprintf(2, '[WARN] Could not remove the scratch folder %s: %s\n', d, msg);
+            end
         end
 
 
@@ -2373,13 +2999,11 @@ classdef CellDiscovery < handle
             ctrls = { ...
                 obj.hDirEdit,     obj.hRegexEdit,    obj.hPyEdit, ...
                 obj.hCondaExeEdit, obj.hCondaEdit,   obj.hTestEnvBtn, ...
-                obj.hDetList,     obj.hUseRescore,   obj.hRescoreList, ...
                 obj.hDeviceEdit,  obj.hBatchEdit,    obj.hThrEdit, ...
                 obj.hIgnoreRad,   obj.hOverwriteRad, ...
                 obj.hColormapPop, obj.hAutoContrast,  obj.hSavePng, obj.hSaveLsmTif, ...
                 obj.hDotColorPop, obj.hDotSizeEdit, ...
-                obj.hPerPageChk,  obj.hAddPageBtn,   obj.hDelPageBtn, ...
-                obj.hPreprocGlobalChk, obj.hGlobalBgEdit, obj.hGlobalResizeEdit, ...
+                obj.hAddPageBtn,  obj.hDelPageBtn, ...
                 obj.hDisplayPreprocChk, obj.hLSMOptionsBtn, obj.hSnapOptionsBtn, obj.hPageTable, ...
                 obj.hFileList,    obj.hStartBtn};
             for k = 1:numel(ctrls)
@@ -2392,7 +3016,7 @@ classdef CellDiscovery < handle
         end
 
 
-        %% Internal cleanup (timer + process only; no figure delete)
+        %% Internal cleanup (timer, process, scratch folder; no figure delete)
 
 
         function cleanup(obj)
@@ -2401,11 +3025,9 @@ classdef CellDiscovery < handle
                 delete(obj.timerObj);
                 obj.timerObj = [];
             end
-            if ~isempty(obj.jProcess)
-                try obj.jProcess.destroyForcibly(); catch, end
-                obj.jProcess = [];
-                obj.jReader  = [];
-            end
+            obj.killProcess();
+            obj.inFlight = [];
+            obj.removeScratchDir();
         end
 
     end  % private methods
@@ -2423,20 +3045,45 @@ classdef CellDiscovery < handle
             end
         end
 
-        function job = makeJob(f, fdir, stem, ext, suffix, pg, nPages, multiPage, detM, rescM, correctLSM, bg, rz, lsmOptions, snapEnable, snapOptions)
-            % Assemble a single processing-job struct. Output filenames use a
-            % per-page suffix only for genuine multi-page jobs.
-            if nargin < 15, snapEnable = false; end
-            if nargin < 16, snapOptions = CellDiscovery.defaultSnapOptions(); end
-            if multiPage
-                base    = sprintf('%s_%s%d', stem, suffix, pg);
-                imgName = base;                              % identity in CSV
-                label   = sprintf('%s  (page %d/%d)', stem, pg, nPages);
-            else
-                base    = stem;
-                imgName = [stem ext];
-                label   = stem;
+        function job = jobForRow(f, fdir, stem, nPages, row, detM, rescM, lsmOptions, snapOpts)
+            % The job of one page-map row (a 1 x 9 cell, older 8-column rows
+            % accepted) for image f: the preprocessing settings of the row, the
+            % resolved resize factor and pixel size. buildJobs calls it per row.
+            pg = CellToolkit.parseNum(row{1}, 0);
+            correctLSM = CellToolkit.parseLogical(row{5}, false);
+            bg = CellToolkit.parseNum(row{6}, 0);
+            [rz, srcUm, rzMode] = CellDiscovery.resolveResize( ...
+                f, pg, CellToolkit.parseNum(row{7}, 1));
+            snapOn = false;
+            if numel(row) >= 8
+                snapOn = CellToolkit.parseLogical(row{8}, false);
             end
+            normOn = true;
+            if numel(row) >= 9
+                normOn = CellToolkit.parseLogical(row{9}, true);
+            end
+            job = CellDiscovery.makeJob( ...
+                f, fdir, stem, row{2}, pg, nPages, detM, rescM, correctLSM, bg, rz, lsmOptions, snapOn, snapOpts);
+            job.normalize = normOn;
+            job.resizeMode = rzMode;    % 'auto' | 'manual' | 'uncalibrated' (recorded with the detection)
+            job.calibratedUm = srcUm;   % NaN when the TIFF has no usable calibration
+            if isfinite(srcUm)
+                job.srcPixelSize = srcUm;
+            else
+                % No calibration: the resize factor is the user's
+                % statement of the source pixel size.
+                job.srcPixelSize = CellDiscovery.TRAIN_UM_PER_PIXEL * rz;
+            end
+        end
+
+        function job = makeJob(f, fdir, stem, suffix, pg, nPages, detM, rescM, correctLSM, bg, rz, lsmOptions, snapEnable, snapOptions)
+            % Assemble a single processing-job struct. Every job is one page of
+            % a file: <stem>_<suffix><page>_locs.csv.
+            if nargin < 13, snapEnable = false; end
+            if nargin < 14, snapOptions = CellDiscovery.defaultSnapOptions(); end
+            [outCsv, base] = CellDiscovery.outputCsvPath(fdir, stem, suffix, pg);
+            imgName = base;                              % identity in CSV
+            label   = sprintf('%s  (page %d/%d)', stem, pg, nPages);
 
             job = struct();
             job.imgFile      = f;
@@ -2446,7 +3093,6 @@ classdef CellDiscovery < handle
             job.imgName      = imgName;
             job.page         = pg;
             job.nPages       = nPages;
-            job.multiPage    = multiPage;
             job.detModel     = detM;
             job.rescoreModel = rescM;     % '' = no rescoring
             job.correctLSM   = logical(correctLSM);  % true = correct bidirectional LSM artifact
@@ -2455,11 +3101,13 @@ classdef CellDiscovery < handle
             job.snapOptions  = CellDiscovery.sanitizeSnapOptions(snapOptions);
             job.bgRadius     = bg;        % 0 = no background subtraction
             job.resize       = rz;        % 1 = no resizing (resolved factor; see resolveResize)
-            job.normalize    = false;     % set by buildJobs: normalise detector-input intensity
+            job.resizeMode   = '';        % set by jobForRow: 'auto' | 'manual' | 'uncalibrated'
+            job.lsmPages     = [];        % set at launch: pages LSM-corrected together with this one
+            job.normalize    = false;     % set by jobForRow: normalise detector-input intensity
             job.normLimits   = [];        % [lo hi] source intensities mapped to [0 NORM_TARGET] (set at launch)
-            job.calibratedUm = NaN;       % set by buildJobs: source um/px from the TIFF calibration (NaN = none)
+            job.calibratedUm = NaN;       % set by jobForRow: source um/px from the TIFF calibration (NaN = none)
             job.srcPixelSize = CellDiscovery.TRAIN_UM_PER_PIXEL * rz;   % best estimate of the source um/px
-            job.outCsvOrig   = fullfile(fdir, [base '_locs.csv']);
+            job.outCsvOrig   = outCsv;
             job.outTif       = fullfile(fdir, [stem '_resized.tif']);   % shared across pages
             if rz ~= 1
                 job.outCsvResized = fullfile(fdir, [base '_locs_resized.csv']);
@@ -2469,7 +3117,6 @@ classdef CellDiscovery < handle
             job.tmpImg    = '';   % scratch page image (set at launch)
             job.tmpCsv    = '';   % predict.py raw output (set at launch)
             job.label     = label;
-            job.firstPage = false;   % set by buildJobs: true for the first page of each source file
         end
 
         function [rz, srcUm, mode] = resolveResize(imgFile, page, tableRz)
@@ -2523,31 +3170,43 @@ classdef CellDiscovery < handle
             end
         end
 
-        function img = applyPreprocess(img, correctLSM, lsmOptions, bgRadius, resizeFactor)
-            % Optional preprocessing applied before detection:
-            %   - bidirectional LSM line artifact correction
-            %   - morphological background subtraction (imtophat, disk strel)
-            %   - resize by a scalar factor
-            % LSM correction runs first, then background subtraction at full
-            % resolution, then resizing.
-            if correctLSM
-                if exist('correctBidirectionalLSMArtifact', 'file') ~= 2
-                    error('correctBidirectionalLSMArtifact.m must be on the MATLAB path to use Correct LSM.');
-                end
-                img = CellDiscovery.callCorrectBidirectionalLSMArtifact(img, lsmOptions);
+        function [img, lims] = detectorInputPage(page, normalize)
+            % The detector-input image of a cached page (LSM, background and resize
+            % already applied by preprocessAllPages): intensity-normalised when the
+            % page's Normalize box is ticked, in the class the scratch TIFF stores.
+            % CellToolkit.modelInputPage does both, so the curation exports and
+            % rescoring regenerate exactly this image. lims = the [lo hi] used
+            % ([] when not normalised).
+            [img, info] = CellToolkit.modelInputPage(page, struct('normalized', normalize, ...
+                'normPercentiles', CellDiscovery.NORM_PERCENTILES, 'normTarget', CellDiscovery.NORM_TARGET));
+            lims = info.normLimits;
+        end
+
+        function facts = detectionFacts(job)
+            % The model-input facts of a job, recorded in the manifest's detection
+            % stage so the exact detector input can be regenerated later
+            % (CellToolkit.modelInputFactsFor / modelInputFromFile; see
+            % CellToolkit's "Model input" section for the meaning of each field).
+            facts = struct('resize', job.resize, 'resizeMode', job.resizeMode, ...
+                'bgRadius', job.bgRadius, 'correctLSM', logical(job.correctLSM), ...
+                'normalized', logical(job.normalize), 'normLimits', job.normLimits);
+            if isfield(job, 'calibratedUm') && isfinite(job.calibratedUm)
+                facts.srcUmPerPixel = job.calibratedUm;
             end
-            if bgRadius > 0
-                se = strel('disk', round(bgRadius));
-                if size(img, 3) == 1
-                    img = imtophat(img, se);
-                else
-                    for c = 1:size(img, 3)
-                        img(:,:,c) = imtophat(img(:,:,c), se);
-                    end
-                end
+            if job.normalize
+                facts.normPercentiles = CellDiscovery.NORM_PERCENTILES;
+                facts.normTarget      = CellDiscovery.NORM_TARGET;
             end
-            if resizeFactor > 0 && resizeFactor ~= 1
-                img = imresize(img, resizeFactor, 'lanczos3', 'Antialiasing', true, 'Colormap', 'original', 'Dither', false);
+            if job.correctLSM
+                facts.lsmPages = job.lsmPages;
+                % the options in their stored text form (JSON keeps text exactly;
+                % numeric arrays would come back as columns)
+                opts = CellDiscovery.sanitizeLSMOptions(job.lsmOptions);
+                names = fieldnames(opts);
+                for k = 1:numel(names)
+                    opts.(names{k}) = CellDiscovery.lsmOptionValueToText(opts.(names{k}));
+                end
+                facts.lsmOptions = opts;
             end
         end
 
@@ -2599,52 +3258,11 @@ classdef CellDiscovery < handle
             opts = clean;
         end
 
-        function img = callCorrectBidirectionalLSMArtifact(img, opts)
-            % Call correctBidirectionalLSMArtifact with persisted name-value
-            % options.
-            args = CellDiscovery.lsmOptionsToNameValue(opts);
-            if isempty(args)
-                img = correctBidirectionalLSMArtifact(img);
-            else
-                img = correctBidirectionalLSMArtifact(img, args{:});
-            end
-        end
-
         function args = lsmOptionsToNameValue(opts)
-            opts = CellDiscovery.sanitizeLSMOptions(opts);
-            names = fieldnames(opts);
-            args = cell(1, 2*numel(names));
-            for k = 1:numel(names)
-                args{2*k-1} = names{k};
-                args{2*k} = CellDiscovery.parseLSMOptionValue(opts.(names{k}));
-            end
-        end
-
-        function v = parseLSMOptionValue(v)
-            if isnumeric(v) || islogical(v)
-                return;
-            end
-            if isstring(v)
-                v = char(v);
-            end
-            if ~ischar(v)
-                return;
-            end
-            txt = strtrim(v);
-            low = lower(txt);
-            if any(strcmp(low, {'true','false'}))
-                v = strcmp(low, 'true');
-                return;
-            end
-            num = str2num(txt); %#ok<ST2NM>
-            if ~isempty(num)
-                v = num;
-                return;
-            end
-            if startsWith(txt, '"') && endsWith(txt, '"') && strlength(string(txt)) >= 2
-                v = extractBetween(string(txt), 2, strlength(string(txt))-1);
-                v = char(v);
-            end
+            % Name-value cell for correctBidirectionalLSMArtifact from the persisted
+            % options (sanitised: every supported option, defaults filled in).
+            % The parsing is CellToolkit's, shared with modelInputFromFile.
+            args = CellToolkit.lsmNameValue(CellDiscovery.sanitizeLSMOptions(opts));
         end
 
         function txt = lsmOptionValueToText(v)
@@ -2697,7 +3315,7 @@ classdef CellDiscovery < handle
             % to the first real model by sanitizePageMap once models are known.
             % Columns: Page, Suffix, Detection model, Rescore model, LSM,
             % Bg radius, Resize x (0 = auto from TIFF calibration), Snap, Normalize.
-            data = {1, '', '(none)', '(none)', false, 0, 0, false, true};
+            data = {1, CellDiscovery.DEFAULT_SUFFIX, '(none)', '(none)', false, 0, 0, false, true};
         end
 
         function data = sanitizePageMap(data, detChoices, rescoreChoices)
@@ -2727,10 +3345,11 @@ classdef CellDiscovery < handle
                 p = CellToolkit.parseNum(data{r,1}, 1);
                 if p < 1, p = 1; end
                 data{r,1} = round(p);
-                % Detection model (must be a valid dropdown member)
-                % Suffix
+                % Suffix. A char suffix is kept as saved (existing results are
+                % named after it); anything else becomes the default 'page'.
                 s = data{r,2};
-                if ~ischar(s), s = sprintf('page%d',r); end
+                if isstring(s) && isscalar(s) && ~ismissing(s), s = char(s); end
+                if ~ischar(s), s = CellDiscovery.DEFAULT_SUFFIX; end
                 data{r,2} = s;
                 % Detection model (must be a valid dropdown member)
                 v = data{r,3};
@@ -2865,7 +3484,7 @@ classdef CellDiscovery < handle
             end
         end
 
-        function [pages, rzArr, pagesFull] = preprocessAllPages(imgFile, nPages, mapData, lsmOptions)
+        function [pages, rzArr, pagesFull, lsmIdx] = preprocessAllPages(imgFile, nPages, mapData, lsmOptions)
             % Preprocess every page of a source file and return the finished
             % per-page images plus their resize factors.
             %
@@ -2888,6 +3507,12 @@ classdef CellDiscovery < handle
             % Background subtraction and resize are then applied per page (they
             % are channel-independent). Pages not listed in the map pass through
             % unmodified so the page count always matches the source file.
+            % lsmIdx lists the pages corrected together (recorded with each
+            % detection as lsmPages).
+            %
+            % The steps are CellToolkit's (lsmCorrectPages, modelInputPage), so
+            % the curation exports and rescoring can regenerate exactly the
+            % detector input from the facts recorded in the manifest.
 
             % Build a lookup: page number -> row index in mapData.
             pageToRow = containers.Map('KeyType', 'int32', 'ValueType', 'int32');
@@ -2916,63 +3541,54 @@ classdef CellDiscovery < handle
 
             % Joint-channel LSM correction (once for all LSM-requested pages).
             % Only pages that have wantLSM=true are corrected; others stay raw.
-            % Stack only the LSM-requested pages so non-LSM pages are not
-            % affected, then redistribute the corrected slices back by index.
+            % CellToolkit.lsmCorrectPages stacks them (when same-size, single-
+            % channel and more than one) and corrects them in one call.
             lsmIdx = find(wantLSM);   % indices of pages that want LSM
             corrPages = rawPages;     % start as copy; overwrite LSM pages below
             if ~isempty(lsmIdx)
-                if exist('correctBidirectionalLSMArtifact', 'file') ~= 2
-                    error('correctBidirectionalLSMArtifact.m must be on the MATLAB path to use Correct LSM.');
-                end
-                lsmRaws   = rawPages(lsmIdx);
-                sameSize  = all(cellfun(@(im) isequal(size(im), size(lsmRaws{1})), lsmRaws));
-                allSingle = all(cellfun(@(im) size(im, 3) == 1, lsmRaws));
-                if numel(lsmIdx) > 1 && sameSize && allSingle
-                    stack  = cat(3, lsmRaws{:});   % H x W x numel(lsmIdx) stack
-                    Jstack = CellDiscovery.callCorrectBidirectionalLSMArtifact(stack, lsmOptions);
-                    for k = 1:numel(lsmIdx)
-                        corrPages{lsmIdx(k)} = Jstack(:,:,k);
-                    end
-                else
-                    for k = 1:numel(lsmIdx)
-                        corrPages{lsmIdx(k)} = CellDiscovery.callCorrectBidirectionalLSMArtifact(lsmRaws{k}, lsmOptions);
-                    end
-                end
+                corrPages(lsmIdx) = CellToolkit.lsmCorrectPages(rawPages(lsmIdx), ...
+                    CellDiscovery.lsmOptionsToNameValue(lsmOptions));
             end
 
             % Per-page background subtraction (LSM already applied above), then
-            % resize. pagesFull holds the bg-subtracted page at source
-            % resolution; pages resizes it. Splitting the single applyPreprocess
-            % call into "bg, then resize" yields pixels identical to the previous
-            % combined call (order is unchanged: bg first, resize second) while
-            % exposing the pre-resize image for snap.
+            % resize, by CellToolkit.modelInputPage without its intensity step
+            % (the detector input is normalised at launch, detectorInputPage).
+            % pagesFull holds the bg-subtracted page at source resolution (snap
+            % input); pages the resized one (detector input before normalisation,
+            % and what the optional *_resized.tif saves).
             pages     = cell(1, nPages);
             pagesFull = cell(1, nPages);
             for pg = 1:nPages
-                full          = CellDiscovery.applyPreprocess(corrPages{pg}, false, lsmOptions, bgArr(pg), 1);
-                pagesFull{pg} = full;
-                if rzArr(pg) > 0 && rzArr(pg) ~= 1
-                    pages{pg} = CellDiscovery.applyPreprocess(full, false, lsmOptions, 0, rzArr(pg));
-                else
-                    pages{pg} = full;
-                end
+                [~, pinfo] = CellToolkit.modelInputPage(corrPages{pg}, ...
+                    struct('bgRadius', bgArr(pg), 'resize', rzArr(pg)));
+                pagesFull{pg} = pinfo.full;
+                pages{pg}     = pinfo.resized;
             end
         end
 
-        function writeScratchTiff(img, path, createNew)
+        function writeScratchTiff(img, path)
             % Write a single-page scratch TIFF.  The Tiff low-level class is used
             % instead of imwrite() so float32, uint8, uint16, int16, and uint32
-            % source images are all handled correctly.  createNew is unused here
-            % (scratch files are always single-page overwrites) but accepted so
-            % callers with three arguments don't error.
-            if isa(img, 'double')
-                img = single(img);   % Tiff supports float32; float64 is exotic
-            end
+            % source images are all handled correctly.  The file is always a
+            % single-page overwrite.
+            % double -> single (Tiff supports float32; float64 is exotic), and any
+            % other unsupported class -> uint8: CellToolkit.modelInputClass, the
+            % class the models read (shared with modelInputPage).
+            img = CellToolkit.modelInputClass(img);
             t = Tiff(path, 'w');
-            nCh = size(img, 3);
+            closeTiff = onCleanup(@() t.close());   % also when a write fails: no file left locked
+            img = CellDiscovery.setPageTags(t, img, Tiff.Photometric.MinIsBlack);
+            t.write(img);
+            clear closeTiff   % closes the file
+        end
 
-            phot = Tiff.Photometric.MinIsBlack; % assume this is always the case
-            
+        function img = setPageTags(t, img, phot)
+            % The tags both TIFF writers share, set on the open handle t for the
+            % current page: size, photometric interpretation, bits per sample and
+            % sample format from the class of img (any class other than single,
+            % uint16, int16 and uint32 is converted to uint8, and returned),
+            % chunky planes, no compression.
+            nCh = size(img, 3);
             switch class(img)
                 case 'single'
                     bps = 32;  sf = Tiff.SampleFormat.IEEEFP;
@@ -2994,8 +3610,34 @@ classdef CellDiscovery < handle
             t.setTag('SampleFormat',        sf);
             t.setTag('PlanarConfiguration', Tiff.PlanarConfiguration.Chunky);
             t.setTag('Compression',         Tiff.Compression.None);
-            t.write(img);
-            t.close();
+        end
+
+        function n = killByCommandLine(marker)
+            % Kill the processes (never MATLAB itself) whose command line contains
+            % MARKER (letters, digits and underscores only), through WMI. Windows
+            % only and best effort; returns how many were killed.
+            n = 0;
+            if ~ispc || isempty(marker) || isempty(regexp(marker, '^\w+$', 'once')), return; end
+            try
+                NET.addAssembly('System.Management');
+                % In a LIKE pattern an underscore matches any one character: [_] is a literal one.
+                q = sprintf('SELECT ProcessId FROM Win32_Process WHERE CommandLine LIKE ''%%%s%%''', ...
+                    strrep(marker, '_', '[_]'));
+                en = System.Management.ManagementObjectSearcher(q).Get().GetEnumerator();
+                me = feature('getpid');
+                while en.MoveNext()
+                    pid = double(en.Current.GetPropertyValue('ProcessId'));
+                    if pid == me, continue; end
+                    try
+                        p = System.Diagnostics.Process.GetProcessById(int32(pid));
+                        p.Kill();
+                        p.WaitForExit(int32(3000));
+                        n = n + 1;
+                    catch
+                    end
+                end
+            catch
+            end
         end
 
         function res = readPageResInfo(file, page)
@@ -3048,27 +3690,7 @@ classdef CellDiscovery < handle
             else
                 phot = Tiff.Photometric.MinIsBlack;
             end
-            switch class(img)
-                case 'single'
-                    bps = 32;  sf = Tiff.SampleFormat.IEEEFP;
-                case 'uint16'
-                    bps = 16;  sf = Tiff.SampleFormat.UInt;
-                case 'int16'
-                    bps = 16;  sf = Tiff.SampleFormat.Int;
-                case 'uint32'
-                    bps = 32;  sf = Tiff.SampleFormat.UInt;
-                otherwise
-                    img = uint8(img);
-                    bps = 8;   sf = Tiff.SampleFormat.UInt;
-            end
-            t.setTag('ImageLength',         size(img, 1));
-            t.setTag('ImageWidth',          size(img, 2));
-            t.setTag('Photometric',         phot);   % must precede SamplesPerPixel
-            t.setTag('BitsPerSample',       bps);    % must precede SamplesPerPixel
-            t.setTag('SamplesPerPixel',     nCh);
-            t.setTag('SampleFormat',        sf);
-            t.setTag('PlanarConfiguration', Tiff.PlanarConfiguration.Chunky);
-            t.setTag('Compression',         Tiff.Compression.None);
+            img = CellDiscovery.setPageTags(t, img, phot);
 
             % Spatial calibration carried from the source page (scaled by resize)
             if nargin >= 3 && isstruct(res)
@@ -3238,5 +3860,550 @@ classdef CellDiscovery < handle
         end
 
     end  % static methods
+
+
+    %% ---- Pure helpers (also the test seams of tDiscovery) ------------------
+    methods (Static, Hidden)
+
+        function [folder, opts] = parseConstructorArgs(varargin)
+            % The constructor's arguments: CellDiscovery(folder, Name, Value, ...)
+            % or CellDiscovery(Name, Value, ...). An odd number of arguments
+            % starts with the folder ('' = none). Options: PrefGroup (setpref
+            % group, a valid MATLAB name), Search (logical).
+            folder = '';
+            args = varargin;
+            if mod(numel(args), 2) == 1
+                folder = args{1};
+                args = args(2:end);
+                if ~(ischar(folder) || (isstring(folder) && isscalar(folder)))
+                    error('CellDiscovery:badFolder', 'CellDiscovery(folder, ...): the folder must be text.');
+                end
+                folder = strtrim(char(folder));
+            end
+            isText = @(x) ischar(x) || (isstring(x) && isscalar(x));
+            p = inputParser;
+            p.FunctionName = 'CellDiscovery';
+            p.addParameter('PrefGroup', CellDiscovery.PREF_GROUP, @(x) isText(x) && isvarname(char(x)));
+            p.addParameter('Search', true, @(x) (islogical(x) || isnumeric(x)) && isscalar(x));
+            p.parse(args{:});
+            opts = p.Results;
+            opts.PrefGroup = char(opts.PrefGroup);
+            opts.Search = logical(opts.Search);
+        end
+
+        function writePrefs(group, P)
+            % Save every field of the struct P as a preference of GROUP in one
+            % setpref call (each call rewrites the preferences file).
+            setpref(group, fieldnames(P), struct2cell(P));
+        end
+
+        function [files, nHidden] = hideDerivedImages(files)
+            % Drop the tool's own outputs, <stem>_resized.tif / .tiff (any case),
+            % from a list of file paths; nHidden = how many were dropped.
+            nHidden = 0;
+            if isempty(files), return; end
+            derived = ~cellfun(@isempty, regexpi(files, '_resized\.tiff?$', 'once'));
+            nHidden = nnz(derived);
+            files = files(~derived);
+        end
+
+        function txt = fileCountText(n, nHidden, nDone)
+            % The file-count label of a search: "12 files found (3 *_resized.tif
+            % hidden)"; given NDONE (files whose pages all have results), also
+            % "132 files found · 97 done (3 *_resized.tif hidden)".
+            txt = sprintf('%d file%s found', n, CellToolkit.ternary(n == 1, '', 's'));
+            if nargin >= 3 && n > 0
+                txt = sprintf('%s %c %d done', txt, char(183), nDone);   % middle dot
+            end
+            if nHidden > 0
+                txt = sprintf('%s (%d *_resized.tif hidden)', txt, nHidden);
+            end
+        end
+
+        function pos = windowPosition(screenSize)
+            % The main window's [x y width height] on a screen of SCREENSIZE =
+            % [width height] pixels: the designed 1300 x 1010, cut to leave room
+            % for the taskbar below and the title bar above, and centred.
+            designW = 1300; designH = 1010;
+            taskbar = 48; titleBar = 40; slack = 8;
+            w = screenSize(1); h = screenSize(2);
+            usableH = h - taskbar - titleBar - slack;
+            W = min(designW, max(w - 40, 320));
+            H = min(designH, max(usableH, 300));
+            x = 1 + floor((w - W) / 2);
+            y = 1 + taskbar + floor((usableH - H) / 2);
+            pos = [x y W H];
+        end
+
+        function csvs = resultCsvsOf(files)
+            % The *_locs.csv files of a directory listing (a cellstr of paths):
+            % all the "done" marks need of it.
+            files = files(:);
+            if isempty(files), csvs = {}; return; end
+            csvs = files(endsWith(files, '_locs.csv', 'IgnoreCase', true));
+        end
+
+        function want = wantedCsvs(files, mapData)
+            % The result CSVs (outputCsvPath) of each file (rows) for each active
+            % page-map row (columns): a numel(files) x nActiveRows cellstr.
+            rows = [];
+            for r = 1:size(mapData, 1)
+                if CellDiscovery.isActiveRow(mapData(r, :)), rows(end+1) = r; end %#ok<AGROW>
+            end
+            want = cell(numel(files), numel(rows));
+            for i = 1:numel(files)
+                [fdir, stem] = fileparts(files{i});
+                if isempty(fdir), fdir = pwd; end
+                for k = 1:numel(rows)
+                    row = mapData(rows(k), :);
+                    want{i, k} = CellDiscovery.outputCsvPath(fdir, stem, row{2}, CellToolkit.parseNum(row{1}, 0));
+                end
+            end
+        end
+
+        function done = filesDone(files, mapData, listing)
+            % Which FILES are detected already: done(i) is true when the file has
+            % at least one active page-map row and every one of them has its
+            % result CSV (wantedCsvs) among the paths of LISTING (a cellstr: the
+            % search's directory listing). No disk access; file names compare
+            % without regard to case on Windows.
+            files = files(:);
+            done = false(numel(files), 1);
+            want = CellDiscovery.wantedCsvs(files, mapData);
+            if isempty(files) || isempty(want), return; end
+            have = listing(:);
+            if ispc
+                want = lower(want); have = lower(have);
+            end
+            found = reshape(ismember(want(:), have), size(want));
+            done = all(found, 2);
+        end
+
+        function labels = fileLabels(relPaths, done)
+            % The file list's labels: the relative paths, a check mark in front of
+            % the files that are done (the others are indented to line up).
+            labels = relPaths;
+            for k = 1:numel(labels)
+                labels{k} = [CellToolkit.ternary(done(k), [char(10003) ' '], '   ') relPaths{k}];
+            end
+        end
+
+        function errs = checkFields(device, batchSize, threshold)
+            % Problems of the free-text predict.py fields (cellstr, empty when
+            % all are fine): Device cpu | mps | cuda | cuda:<n> (case and
+            % surrounding blanks ignored), Batch size a positive whole number,
+            % Threshold blank or a number from 0 to 1.
+            errs = {};
+            device = strtrim(char(string(device)));
+            if isempty(regexpi(device, '^(cpu|mps|cuda(:\d+)?)$', 'once'))
+                errs{end+1} = sprintf('Device ''%s'' is not valid. Accepted: cpu, mps, cuda or cuda:<n> (e.g. cuda:0).', device);
+            end
+            b = strtrim(char(string(batchSize)));
+            if isempty(regexp(b, '^\d+$', 'once')) || str2double(b) < 1
+                errs{end+1} = sprintf('Batch size ''%s'' is not valid. Accepted: a positive whole number (e.g. 1).', b);
+            end
+            t = strtrim(char(string(threshold)));
+            if ~isempty(t)
+                v = str2double(t);
+                if ~isfinite(v) || v < 0 || v > 1
+                    errs{end+1} = sprintf('Threshold ''%s'' is not valid. Accepted: a number from 0 to 1, or blank for the model''s default.', t);
+                end
+            end
+        end
+
+        function [action, msg] = gpuCheck(device, cudaAvailable)
+            % What Start does about the Device given whether CUDA is available
+            % (true | false | NaN = unknown): 'block' (a cuda device and no CUDA),
+            % 'hint' (cpu although a GPU is available; does not block) or 'ok'.
+            action = 'ok'; msg = '';
+            device = lower(strtrim(char(string(device))));
+            if isnan(cudaAvailable), return; end
+            if startsWith(device, 'cuda') && ~cudaAvailable
+                action = 'block';
+                msg = sprintf(['Device is ''%s'' but PyTorch in this Python environment reports no CUDA GPU. ' ...
+                    'Set Device to cpu, or choose an environment with a CUDA build of PyTorch.'], device);
+            elseif strcmp(device, 'cpu') && cudaAvailable
+                action = 'hint';
+                msg = 'A GPU (CUDA) is available in this environment but Device is cpu; set Device to cuda:0 to detect faster.';
+            end
+        end
+
+        function key = envKey(pythonExe, condaExe, condaEnv)
+            % What a passed environment check holds for: the Python executable,
+            % the conda executable and the conda env (trimmed).
+            key = strjoin({strtrim(char(string(pythonExe))), strtrim(char(string(condaExe))), ...
+                strtrim(char(string(condaEnv)))}, '|');
+        end
+
+        function txt = envStatusText(cudaAvailable)
+            % The words of a passed environment check, e.g. "Environment OK, GPU available" (joined by a middle dot).
+            dot = char(183);   % middle dot
+            if isnan(cudaAvailable)
+                txt = 'Environment OK';
+            elseif cudaAvailable
+                txt = ['Environment OK ' dot ' GPU available'];
+            else
+                txt = ['Environment OK ' dot ' no GPU (CUDA not available)'];
+            end
+        end
+
+        function close = askCloseWhileRunning(fig)
+            % The default ConfirmCloseFcn: ask whether to stop the running batch
+            % and close the window (true) or keep it running (false, the default).
+            stopText = 'Stop the batch and close';
+            keepText = 'Keep it running';
+            sel = uiconfirm(fig, ['A batch is running. Closing the window stops it now and discards the page ' ...
+                'in flight (pages already finished are kept).'], 'Close while running?', ...
+                'Options', {stopText, keepText}, 'DefaultOption', keepText, 'CancelOption', keepText, ...
+                'Icon', 'warning');
+            close = strcmp(sel, stopText);
+        end
+
+        function tf = isActiveRow(row)
+            % A page-map row (1 x 9 cell) the batch runs: page >= 1 and a
+            % detection model assigned (not empty, not the (skip) label).
+            pg = CellToolkit.parseNum(row{1}, 0);
+            detM = row{3};
+            tf = pg >= 1 && ischar(detM) && ~isempty(detM) && ~strcmp(detM, CellDiscovery.SKIP_LABEL);
+        end
+
+        function [errs, warns] = checkPageMap(mapData)
+            % Problems of a page map that Start checks (cellstr messages).
+            % errs:  a page in more than one active row (isActiveRow), or whose
+            %        last row is inactive while an earlier one is active.
+            %        preprocessAllPages preprocesses each page with the LAST row
+            %        that names it (active or not), while every job maps its
+            %        detections back with its own row's resize factor, so the
+            %        coordinates would be wrong. An inactive row above the
+            %        active one is harmless.
+            % warns: an active row whose suffix is empty or not letters only. The
+            %        output is <stem>_<suffix><page>_locs.csv and
+            %        CellToolkit.pageFromIdentity reads the page from
+            %        _<letters><page>, so such a name loses or changes the page.
+            errs = {}; warns = {};
+            if isempty(mapData) || ~iscell(mapData), return; end
+            n = size(mapData, 1);
+            pages = zeros(n, 1);
+            active = false(n, 1);
+            for r = 1:n
+                pages(r) = round(CellToolkit.parseNum(mapData{r,1}, 0));
+                active(r) = CellDiscovery.isActiveRow(mapData(r, :));
+            end
+            for pg = unique(pages(active))'
+                rows = find(pages == pg);
+                if nnz(active(rows)) > 1 || ~active(rows(end))
+                    errs{end+1} = sprintf(['Page %d is in rows %s. The page is preprocessed with the ' ...
+                        'settings of the last of them (row %d), but each active row maps its detections ' ...
+                        'back with its own resize factor, so the coordinates would be wrong. Keep one ' ...
+                        'row for page %d.'], pg, char(strjoin(string(rows'), ', ')), rows(end), pg); %#ok<AGROW>
+                end
+            end
+            for r = find(active)'
+                sfx = mapData{r,2};
+                if isstring(sfx) && isscalar(sfx), sfx = char(sfx); end
+                if ~ischar(sfx), sfx = ''; end
+                if ~isempty(regexp(sfx, '^[A-Za-z]+$', 'once')), continue; end
+                pg = pages(r);
+                name = sprintf('<stem>_%s%d_locs.csv', sfx, pg);
+                readAs = CellToolkit.pageFromIdentity(sprintf('x_%s%d', sfx, pg));
+                if isnan(readAs)
+                    effect = 'has no page number the other Cell* tools can read';
+                elseif readAs ~= pg
+                    effect = sprintf('is read as page %d', readAs);
+                else
+                    effect = 'does not follow the <stem>_<letters><page> naming convention';
+                end
+                if isempty(sfx)
+                    what = 'the suffix is empty';
+                else
+                    what = sprintf('suffix ''%s'' is not letters only', sfx);
+                end
+                warns{end+1} = sprintf('Page-map row %d (page %d): %s, so the result %s %s. Use letters only, e.g. ''%s''.', ...
+                    r, pg, what, name, effect, CellDiscovery.DEFAULT_SUFFIX); %#ok<AGROW>
+            end
+        end
+
+        function [csv, base] = outputCsvPath(fdir, stem, suffix, page)
+            % The detection CSV of one page-map row for the image <fdir>\<stem>.*:
+            % base = <stem>_<suffix><page> (the per-page identity) and
+            % csv = <fdir>\<base>_locs.csv. makeJob and pendingRows (the Ignore-
+            % mode pre-filter) both name it here, so they cannot drift apart.
+            base = sprintf('%s_%s%d', stem, suffix, page);
+            csv  = fullfile(fdir, [base '_locs.csv']);
+        end
+
+        function [todo, nDone] = pendingRows(files, mapData, overwrite)
+            % The page-map rows to run for each file: todo{i} = the indices (a
+            % row vector) of the active rows (isActiveRow) of mapData, without,
+            % unless OVERWRITE, those whose output CSV (outputCsvPath) already
+            % exists. nDone = the rows left out that way. Only file names are
+            % looked at, so a TIFF whose pages are all done is never opened.
+            nRows = size(mapData, 1);
+            active = false(1, nRows);
+            for r = 1:nRows
+                active(r) = CellDiscovery.isActiveRow(mapData(r, :));
+            end
+            active = reshape(find(active), 1, []);   % a row, so buildJobs can loop over it
+            todo = cell(size(files));
+            nDone = 0;
+            for i = 1:numel(files)
+                rows = active;
+                if ~overwrite && ~isempty(rows)
+                    [fdir, stem] = fileparts(files{i});
+                    if isempty(fdir), fdir = pwd; end
+                    done = false(size(rows));
+                    for k = 1:numel(rows)
+                        row = mapData(rows(k), :);
+                        done(k) = isfile(CellDiscovery.outputCsvPath(fdir, stem, row{2}, ...
+                            CellToolkit.parseNum(row{1}, 0)));
+                    end
+                    nDone = nDone + nnz(done);
+                    rows(done) = [];   % stays 1 x n (indexing a scalar would give 0 x 0)
+                end
+                todo{i} = rows;
+            end
+        end
+
+        function tf = resizedTifDue(saveTif, writtenThisRun, overwrite, tifExists)
+            % Whether a completed job writes its file's <stem>_resized.tif: the
+            % Save-TIF box is on, it has not been written for this file in this
+            % run, and the mode is Overwrite or the TIF does not exist yet.
+            tf = logical(saveTif) && ~logical(writtenThisRun) && (logical(overwrite) || ~logical(tifExists));
+        end
+
+        function t = newTally(queued, skipped)
+            % The counts of a run, filled in as its pages end (tallySummary words
+            % them):
+            %   queued    jobs in the run's queue
+            %   done      pages whose result CSV was written
+            %   skipped   pages left out because their result exists (Ignore mode)
+            %   failed    struct array label, reason: pages without a result
+            %   warnings  struct array label, reason: problems of done pages (snap,
+            %             rescoring, manifest, TIF, PNG)
+            %   aborted   label of the page discarded by Abort now ('' = none)
+            %   notRun    queued jobs never started (a stop, an abort, an error)
+            %   state     'complete' | 'stopped' | 'aborted' | 'error' (set at the end)
+            %   error     message of the internal error that ended the run ('' = none)
+            t = struct('queued', queued, 'done', 0, 'skipped', skipped, ...
+                'failed', struct('label', {}, 'reason', {}), ...
+                'warnings', struct('label', {}, 'reason', {}), ...
+                'aborted', '', 'notRun', 0, 'state', '', 'error', '');
+        end
+
+        function [label, lines, failed] = tallySummary(t)
+            % The words of a run's tally (newTally): LABEL for the progress label,
+            % e.g. 'Complete: 38 done, 4 skipped, 2 failed (see the Command Window)';
+            % LINES (cellstr) for the Command Window, naming each failed page and
+            % each warning with its reason; FAILED = a page failed or an internal
+            % error ended the run (the label is then red).
+            nF = numel(t.failed);
+            nW = numel(t.warnings);
+            aborted = ~isempty(t.aborted);
+            failed = nF > 0 || strcmp(t.state, 'error');
+            switch t.state
+                case 'stopped', head = 'Stopped';
+                case 'aborted', head = 'Aborted';
+                case 'error',   head = 'Stopped on an internal error';
+                otherwise,      head = 'Complete';
+            end
+            counts = sprintf('%d done, %d skipped, %d failed', t.done, t.skipped, nF);
+            if aborted
+                counts = [counts ', 1 aborted'];
+            end
+            if t.notRun > 0
+                counts = sprintf('%s, %d not run', counts, t.notRun);
+            end
+            if nW > 0
+                counts = sprintf('%s, %d warning%s', counts, nW, CellToolkit.ternary(nW == 1, '', 's'));
+            end
+            label = sprintf('%s: %s', head, counts);
+            if nF > 0 || nW > 0 || aborted
+                label = [label ' (see the Command Window)'];
+            end
+
+            lines = {sprintf('=== PNN Batch GUI: %s: %s ===', lower(head), counts)};
+            if nF > 0
+                lines{end+1} = sprintf('Failed pages (%d):', nF);
+                for k = 1:nF
+                    lines{end+1} = sprintf('  %s: %s', t.failed(k).label, t.failed(k).reason); %#ok<AGROW>
+                end
+            end
+            if aborted
+                lines{end+1} = sprintf('Aborted page (discarded, nothing written for it): %s', t.aborted);
+            end
+            if nW > 0
+                lines{end+1} = sprintf('Warnings on completed pages (%d):', nW);
+                for k = 1:nW
+                    lines{end+1} = sprintf('  %s: %s', t.warnings(k).label, t.warnings(k).reason); %#ok<AGROW>
+                end
+            end
+            lines{end+1} = '';
+        end
+    end
+
+
+    %% ---- Test seams of a batch in the window (tDiscoveryBatch; see the class help) ----
+    methods (Hidden)
+
+        function configure(obj, varargin)
+            % Set controls of the window as a person would, by name: PythonExe,
+            % CondaExe, CondaEnv, Device, BatchSize, Threshold (text), Overwrite,
+            % SavePng, SaveTif, Diagnostic (logical), PageMap (a 9-column cell,
+            % sanitised against the models found). Saves the settings to this
+            % window's preference group.
+            p = inputParser;
+            p.FunctionName = 'CellDiscovery.configure';
+            names = {'PythonExe', 'CondaExe', 'CondaEnv', 'Device', 'BatchSize', 'Threshold', ...
+                'Overwrite', 'SavePng', 'SaveTif', 'Diagnostic', 'PageMap'};
+            for k = 1:numel(names)
+                p.addParameter(names{k}, []);
+            end
+            p.parse(varargin{:});
+            given = setdiff(names, p.UsingDefaults);
+            r = p.Results;
+            edits = struct('PythonExe', obj.hPyEdit, 'CondaExe', obj.hCondaExeEdit, ...
+                'CondaEnv', obj.hCondaEdit, 'Device', obj.hDeviceEdit, ...
+                'BatchSize', obj.hBatchEdit, 'Threshold', obj.hThrEdit);
+            boxes = struct('SavePng', obj.hSavePng, 'SaveTif', obj.hSaveLsmTif, ...
+                'Diagnostic', obj.hDiagnosticChk);
+            for k = 1:numel(given)
+                nm = given{k};
+                if isfield(edits, nm)
+                    edits.(nm).Value = char(string(r.(nm)));
+                elseif isfield(boxes, nm)
+                    boxes.(nm).Value = logical(r.(nm));
+                elseif strcmp(nm, 'Overwrite')
+                    if logical(r.Overwrite)   % radio buttons: select one, the group deselects the other
+                        obj.hOverwriteRad.Value = true;
+                    else
+                        obj.hIgnoreRad.Value = true;
+                    end
+                elseif strcmp(nm, 'PageMap')
+                    obj.hPageTable.Data = CellDiscovery.sanitizePageMap(r.PageMap, ...
+                        CellDiscovery.detChoiceList(obj.detModels, obj.SKIP_LABEL), ...
+                        [{obj.NONE_LABEL}, obj.rescoreModels]);
+                    obj.updateLSMOptionsButton();
+                    obj.updateSnapOptionsButton();
+                    obj.refreshFileMarks();
+                end
+            end
+            obj.savePrefs();
+        end
+
+        function start(obj)
+            % What the Start Batch button does (onStart).
+            obj.onStart();
+        end
+
+        function requestStop(obj)
+            % The Stop button (and the diagnostic window's Stop batch). The first
+            % request stops the batch after the page in flight has finished all its
+            % stages; the button then reads Abort now. The next request aborts:
+            % the subprocess is killed at once and the next tick discards the page
+            % in flight (abortInFlight) and ends the batch.
+            if ~obj.isRunning() || obj.abortRequested, return; end
+            if ~obj.stopRequested
+                obj.stopRequested = true;
+                obj.setStopButton('abort');
+                obj.hProgressLabel.Text = 'Stop requested — finishing the current page ... (Abort now discards it)';
+                fprintf('[STOP] Stop requested.\n');
+            else
+                obj.abortRequested = true;
+                obj.hStopBtn.Enable = false;
+                obj.hProgressLabel.Text = 'Aborting ...';
+                fprintf('[STOP] Abort requested.\n');
+                if ~isempty(obj.jProcess)
+                    try obj.jProcess.destroyForcibly(); catch, end   % at once; killProcess finishes it
+                end
+            end
+            obj.resumeDiagnosticPause();
+        end
+
+        function tf = isRunning(obj)
+            % A batch runs (its timer exists).
+            tf = ~isempty(obj.timerObj) && isvalid(obj.timerObj);
+        end
+
+        function s = batchState(obj)
+            % Where the batch is (see the class help).
+            stage = '';
+            if ~isempty(obj.inFlight), stage = obj.inFlight.stage; end
+            s = struct('Running', obj.isRunning(), 'Stage', stage, 'Job', obj.fileIdx, ...
+                'Total', numel(obj.jobQueue), 'Progress', obj.hProgressLabel.Text, ...
+                'ProgressColor', obj.hProgressLabel.FontColor, 'StopText', obj.hStopBtn.Text, ...
+                'StopEnabled', logical(obj.hStopBtn.Enable), 'StopTooltip', obj.hStopBtn.Tooltip, ...
+                'PythonRuns', obj.pythonRuns, 'ScratchDir', obj.tmpDir);
+        end
+
+        function t = lastTally(obj)
+            % The counts of the last run (newTally; [] before the first Start).
+            t = obj.tally;
+        end
+
+        function T = stageLog(obj)
+            % The stages each job of the last run went through, in order: table
+            % Job (queue index), Label, Event (detect-launch, detect-exit,
+            % after-detection, score-launch, score-exit, finish; or skip, fail,
+            % abort), Tick (the timer tick it happened in), Seconds (since Start).
+            e = obj.stageEvents;
+            T = table(reshape([e.Job], [], 1), reshape([e.Label], [], 1), reshape([e.Event], [], 1), ...
+                reshape([e.Tick], [], 1), reshape([e.Seconds], [], 1), ...
+                'VariableNames', {'Job', 'Label', 'Event', 'Tick', 'Seconds'});
+        end
+    end
+
+
+    %% ---- Test seams (tModelInput, tDiscovery) -------------------------------
+    methods (Static, Hidden)
+
+        function [img, lims, lsmIdx] = detectorInputForFile(imgFile, page, mapData, lsmOptions, normalize)
+            % The detector input the batch builds for page PAGE of imgFile with
+            % this page map and LSM options, by the code the batch runs:
+            % preprocessAllPages, detectorInputPage, then the scratch TIFF's class.
+            nPages = CellToolkit.countPages(imgFile);
+            [pages, ~, ~, lsmIdx] = CellDiscovery.preprocessAllPages(imgFile, nPages, mapData, lsmOptions);
+            [img, lims] = CellDiscovery.detectorInputPage(pages{page}, normalize);
+            img = CellToolkit.modelInputClass(img);
+        end
+
+        function facts = detectionFactsFor(imgFile, row, lsmOptions, lsmIdx, normLimits)
+            % The facts finishOutputs records for page-map row ROW of imgFile, the
+            % LSM page set lsmIdx and the normalisation limits used.
+            [fdir, stem] = fileparts(char(imgFile));
+            job = CellDiscovery.jobForRow(char(imgFile), fdir, stem, CellToolkit.countPages(imgFile), ...
+                row, 'model', '', lsmOptions, CellDiscovery.defaultSnapOptions());
+            job.lsmPages = lsmIdx;
+            if job.normalize, job.normLimits = normLimits; end
+            facts = CellDiscovery.detectionFacts(job);
+        end
+
+        function opts = defaultLSMOptionsForTest()
+            opts = CellDiscovery.defaultLSMOptions();
+        end
+
+        function data = defaultPageMapForTest()
+            data = CellDiscovery.defaultPageMap();
+        end
+
+        function data = sanitizePageMapForTest(data, detChoices, rescoreChoices)
+            data = CellDiscovery.sanitizePageMap(data, detChoices, rescoreChoices);
+        end
+
+        function job = jobForRowForTest(imgFile, row)
+            % The job buildJobs makes for page-map row ROW of imgFile (the
+            % row's detection model; no rescoring; default LSM/snap options).
+            [fdir, stem] = fileparts(char(imgFile));
+            job = CellDiscovery.jobForRow(char(imgFile), fdir, stem, CellToolkit.countPages(imgFile), ...
+                row, row{3}, '', CellDiscovery.defaultLSMOptions(), CellDiscovery.defaultSnapOptions());
+        end
+
+        function desc = sanitizeImageDescriptionForTest(desc)
+            desc = CellDiscovery.sanitizeImageDescription(desc);
+        end
+
+        function [val, skip] = parseSnapOptionValueForTest(v)
+            [val, skip] = CellDiscovery.parseSnapOptionValue(v);
+        end
+    end
 
 end  % classdef CellDiscovery

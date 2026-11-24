@@ -37,6 +37,17 @@
 %
 %   The config is a plain struct, so a caller may also build/modify it by
 %   hand; pythonConfig only supplies sensible defaults and normalises types.
+%
+%   The model input
+%   ---------------
+%   The image the detector and the Stage-2 scorer read (LSM correction, top-hat,
+%   resize to 0.645 um/px, normalisation to 0-255) is built by ONE pipeline,
+%   used by CellDiscovery and by the curation exports / rescoring:
+%       [img, info]  = CellToolkit.modelInputPage(page, facts);
+%       img          = CellToolkit.modelInputFromFile(tif, pageNo, facts);
+%       [facts, rep] = CellToolkit.modelInputFactsFor(det, tif, pageNo, locs, resizedLocs);
+%   (det = the manifest's detection stage, where CellDiscovery records the
+%   facts; see the "Model input" section below).
 
     %% ===================================================================
     %  Python environment & model execution
@@ -272,11 +283,14 @@
             end
         end
 
-        function [ok, msg, output] = testPythonEnv(cfg, importModules)
+        function [ok, msg, output, cudaAvailable] = testPythonEnv(cfg, importModules)
             % Quick synchronous check that the configured environment can
             % import the required modules. Defaults to {'hydra','torch'} —
             % the imports predict.py / score.py need. Returns ok (logical),
             % a human-readable msg ('' on success), and the raw command output.
+            % cudaAvailable (optional): when torch is among the modules, whether
+            % torch.cuda.is_available() (true / false); NaN when unknown (torch
+            % not imported, or the check failed).
             if nargin < 2 || isempty(importModules)
                 importModules = {'hydra', 'torch'};
             end
@@ -285,6 +299,12 @@
             end
             modList = strjoin(importModules, ', ');
             code    = sprintf('import %s; print(''OK'')', modList);
+            cudaAvailable = NaN;
+            askCuda = any(strcmp(importModules, 'torch'));
+            if askCuda
+                % No double quotes or percent signs: the snippet goes through system().
+                code = [code '; print(''CUDA'', int(torch.cuda.is_available()))'];
+            end
 
             % Guard the common misconfiguration: env set but no conda exe.
             env = char(CellToolkit.fieldOr(cfg, 'CondaEnv', ''));
@@ -299,6 +319,10 @@
             [status, output] = CellToolkit.runPython(cfg, {'-c', code});
             output = strtrim(output);
             ok = (status == 0) && contains(output, 'OK');
+            if ok && askCuda
+                tok = regexp(output, 'CUDA\s+([01])', 'tokens', 'once');
+                if ~isempty(tok), cudaAvailable = (tok{1} == '1'); end
+            end
             if ok
                 msg = '';
             else
@@ -611,23 +635,52 @@
             % stretched per channel (lims then has one row per channel).
             % Percentiles are taken over a regular subsample (<= ~4 M pixels)
             % of the finite pixels, so no toolbox is needed.
+            % The stretch itself is applyIntensityLimits (also used to re-apply
+            % recorded limits, see modelInputPage).
             if nargin < 2 || isempty(pct),    pct    = [1 99.9]; end
             if nargin < 3 || isempty(target), target = 255;      end
-            out  = single(img);
-            nCh  = size(out, 3);
+            lims = CellToolkit.intensityLimits(img, pct);
+            out  = CellToolkit.applyIntensityLimits(img, lims, target);
+        end
+
+        function lims = intensityLimits(img, pct)
+            % Per-channel [lo hi] = the pct(1)-th and pct(2)-th percentiles of the
+            % finite pixels of img (regular subsample of <= ~4 M pixels), as
+            % normalizeIntensity uses them; [NaN NaN] for a channel without spread.
+            if nargin < 2 || isempty(pct), pct = [1 99.9]; end
+            v0   = single(img);
+            nCh  = size(v0, 3);
             lims = nan(nCh, 2);
-            step = max(1, floor(sqrt(size(out, 1) * size(out, 2) / 4e6)));
+            step = max(1, floor(sqrt(size(v0, 1) * size(v0, 2) / 4e6)));
             for c = 1:nCh
-                v = out(1:step:end, 1:step:end, c);
+                v = v0(1:step:end, 1:step:end, c);
                 v = sort(double(v(isfinite(v))));
                 n = numel(v);
                 if n == 0, continue; end
                 lo = v(max(1, min(n, round(pct(1) / 100 * (n - 1)) + 1)));
                 hi = v(max(1, min(n, round(pct(2) / 100 * (n - 1)) + 1)));
                 if ~(hi > lo), continue; end
+                lims(c, :) = [lo hi];
+            end
+        end
+
+        function out = applyIntensityLimits(img, lims, target)
+            % single(img) with each channel c mapped linearly lims(c,1) -> 0 and
+            % lims(c,2) -> target, clipped to [0 target]. A channel whose limits
+            % are not finite with hi > lo is left as single(img). The arithmetic
+            % is normalizeIntensity's, so re-applying recorded limits reproduces
+            % its output bit for bit.
+            if nargin < 3 || isempty(target), target = 255; end
+            out = single(img);
+            nCh = size(out, 3);
+            if isempty(lims), return; end
+            lims = reshape(double(lims), [], 2);
+            if size(lims, 1) == 1 && nCh > 1, lims = repmat(lims, nCh, 1); end
+            for c = 1:min(nCh, size(lims, 1))
+                lo = lims(c, 1); hi = lims(c, 2);
+                if ~(isfinite(lo) && isfinite(hi) && hi > lo), continue; end
                 ch = (out(:, :, c) - single(lo)) * single(target / (hi - lo));
                 out(:, :, c) = min(max(ch, 0), single(target));
-                lims(c, :)   = [lo hi];
             end
         end
 
@@ -728,6 +781,374 @@
             catch
                 img = [];
             end
+        end
+
+    end
+
+    %% ===================================================================
+    %  Model input: the image the detector and the Stage-2 scorer read
+    %  ===================================================================
+    %
+    %  CellDiscovery never saves the image the models see: per page it is the
+    %  TIFF page after optional bidirectional-LSM correction (jointly over the
+    %  pages corrected together), morphological background subtraction
+    %  (top-hat), resize to the training pixel size and intensity normalisation
+    %  to 0-255, stored in the class its scratch TIFF uses. predict.py divides
+    %  it by 255; score.py (Stage 2) crops 64 x 64 patches from it raw.
+    %  modelInputPage is that one pipeline, shared by CellDiscovery (which calls
+    %  it to build the detector input) and by the curation exports and
+    %  rescoring (which regenerate the image from the recorded facts).
+    %
+    %  FACTS (struct; modelInputFacts fills the defaults). CellDiscovery records
+    %  them in the manifest's detection stage (CellDatasetManifest.recordDetection):
+    %    resize           factor applied to the page (1 = none). A detection at
+    %                     full-resolution X lies at X * resize in the model input
+    %                     (CellDiscovery maps detector output back with X / resize)
+    %    resizeMode       'auto' (from the TIFF calibration) | 'manual' | 'uncalibrated'
+    %    srcUmPerPixel    the page's calibrated um/px (NaN = none)
+    %    bgRadius         top-hat disk radius in source pixels (0 = none)
+    %    correctLSM       bidirectional LSM correction before everything else
+    %    lsmPages         the pages corrected together with this one (joint
+    %                     registration over all of them; [] = this page alone)
+    %    lsmOptions       correctBidirectionalLSMArtifact name-value options as
+    %                     text (CellDiscovery's stored form; parsed by lsmNameValue)
+    %    normalized       percentile stretch to 0-normTarget
+    %    normPercentiles  [1 99.9]     normTarget  255
+    %    normLimits       [lo hi] the stretch used (recorded; recomputed when absent)
+    %  Provenance added by modelInputFactsFor: assumed (names of facts that were
+    %  not recorded and were assumed), inferred (names inferred from other
+    %  evidence), source ("manifest" | "inferred" | "given"), notes.
+
+    properties (Constant)
+        TRAIN_UM_PER_PIXEL = 0.645      % pixel size the shipped models were trained at
+        NORM_PERCENTILES   = [1 99.9]   % CellDiscovery's intensity normalisation
+        NORM_TARGET        = 255
+    end
+
+    methods (Static)
+
+        function facts = modelInputFacts(s)
+            % Canonical model-input facts: every field of the FACTS list above,
+            % defaults filled in (no resize, no background, no LSM, not normalised).
+            % s may be any struct holding some of them, e.g. a manifest detection stage.
+            facts = struct('resize', 1, 'resizeMode', '', 'srcUmPerPixel', NaN, 'bgRadius', 0, ...
+                'correctLSM', false, 'lsmPages', [], 'lsmOptions', struct(), ...
+                'normalized', false, 'normPercentiles', CellToolkit.NORM_PERCENTILES, ...
+                'normTarget', CellToolkit.NORM_TARGET, 'normLimits', [], ...
+                'assumed', strings(1, 0), 'inferred', strings(1, 0), 'source', "given", 'notes', strings(1, 0));
+            if nargin < 1 || ~isstruct(s), return; end
+            f = fieldnames(facts);
+            for k = 1:numel(f)
+                if isfield(s, f{k}) && ~isempty(s.(f{k})), facts.(f{k}) = s.(f{k}); end
+            end
+            facts.resize          = double(facts.resize);
+            facts.bgRadius        = double(facts.bgRadius);
+            facts.correctLSM      = CellToolkit.parseLogical(facts.correctLSM, false);
+            facts.normalized      = CellToolkit.parseLogical(facts.normalized, false);
+            facts.lsmPages        = reshape(double(facts.lsmPages), 1, []);
+            facts.normPercentiles = reshape(double(facts.normPercentiles), 1, []);
+            facts.normTarget      = double(facts.normTarget);
+            if ~isempty(facts.normLimits)
+                facts.normLimits = reshape(double(facts.normLimits), [], 2);
+            end
+            facts.resizeMode = char(string(facts.resizeMode));
+        end
+
+        function [out, info] = modelInputPage(img, facts)
+            % The image the detection and scoring models read, from one page.
+            %   [out, info] = CellToolkit.modelInputPage(img, facts)
+            % img is the page as read from the TIFF, after LSM correction when
+            % facts.correctLSM (modelInputFromFile does that, jointly over
+            % facts.lsmPages, as CellDiscovery does). Steps, in CellDiscovery's
+            % order, each skipped when its fact says so:
+            %   1 background  imtophat with strel('disk', round(bgRadius)), per channel   (bgRadius > 0)
+            %   2 resize      imresize(img, resize, 'lanczos3', Antialiasing true)        (resize > 0, ~= 1)
+            %   3 intensity   map normLimits -> [0 normTarget], clipped; the limits are
+            %                 facts.normLimits when given, else the normPercentiles of
+            %                 the resized image (normalizeIntensity)                     (normalized)
+            %   4 class       as CellDiscovery's scratch TIFF stores it (modelInputClass)
+            % info: full (after step 1, source resolution: CellDiscovery's snap input),
+            % resized (after step 2: what CellDiscovery saves as *_resized.tif), normLimits
+            % ([] when not normalised), size ([h w] of out), facts (as used).
+            if nargin < 2, facts = struct(); end
+            facts = CellToolkit.modelInputFacts(facts);
+            if facts.bgRadius > 0
+                se = strel('disk', round(facts.bgRadius));
+                if size(img, 3) == 1
+                    img = imtophat(img, se);
+                else
+                    for c = 1:size(img, 3)
+                        img(:, :, c) = imtophat(img(:, :, c), se);
+                    end
+                end
+            end
+            full = img;
+            if facts.resize > 0 && facts.resize ~= 1
+                img = imresize(img, facts.resize, 'lanczos3', 'Antialiasing', true, ...
+                    'Colormap', 'original', 'Dither', false);
+            end
+            resized = img;
+            lims = [];
+            if facts.normalized
+                lims = facts.normLimits;
+                if isempty(lims)
+                    lims = CellToolkit.intensityLimits(img, facts.normPercentiles);
+                end
+                img = CellToolkit.applyIntensityLimits(img, lims, facts.normTarget);
+            end
+            out = CellToolkit.modelInputClass(img);
+            if nargout > 1
+                facts.normLimits = lims;
+                info = struct('full', full, 'resized', resized, 'normLimits', lims, ...
+                    'size', [size(out, 1) size(out, 2)], 'facts', facts);
+            end
+        end
+
+        function img = modelInputClass(img)
+            % The class CellDiscovery's scratch TIFF (the detector input file) stores
+            % a page in: double -> single; single, uint16, int16, uint32 kept;
+            % anything else -> uint8. predict.py / score.py read that file.
+            switch class(img)
+                case 'double'
+                    img = single(img);
+                case {'single', 'uint16', 'int16', 'uint32'}
+                    % stored as is
+                otherwise
+                    img = uint8(img);
+            end
+        end
+
+        function [out, info] = modelInputFromFile(imgFile, page, facts)
+            % Read page PAGE of imgFile and return its model input (modelInputPage).
+            % With facts.correctLSM the pages facts.lsmPages (default: PAGE alone;
+            % PAGE is always included) are corrected together first, exactly as
+            % CellDiscovery corrects the pages its page map marks LSM (lsmCorrectPages).
+            if nargin < 3, facts = struct(); end
+            facts  = CellToolkit.modelInputFacts(facts);
+            imgFile = char(imgFile);
+            nPages = CellToolkit.countPages(imgFile);
+            if facts.correctLSM
+                lsmIdx = unique([facts.lsmPages(:); page]', 'sorted');
+                lsmIdx = lsmIdx(lsmIdx >= 1 & lsmIdx <= nPages);
+                raws = cell(1, numel(lsmIdx));
+                for k = 1:numel(lsmIdx)
+                    raws{k} = CellToolkit.readPage(imgFile, lsmIdx(k), nPages);
+                end
+                corr = CellToolkit.lsmCorrectPages(raws, CellToolkit.lsmNameValue(facts.lsmOptions));
+                img = corr{lsmIdx == page};
+            else
+                img = CellToolkit.readPage(imgFile, page, nPages);
+            end
+            [out, info] = CellToolkit.modelInputPage(img, facts);
+        end
+
+        function pages = lsmCorrectPages(pages, nameValue)
+            % Bidirectional LSM correction of a set of pages, as CellDiscovery
+            % does it: more than one page, all the same size and single-channel ->
+            % one joint correctBidirectionalLSMArtifact call on the H x W x P stack
+            % (every channel drives the registration); otherwise each page alone.
+            %   nameValue : name-value cell for correctBidirectionalLSMArtifact
+            %               (lsmNameValue of the stored options; {} = its defaults)
+            if nargin < 2, nameValue = {}; end
+            if isempty(pages), return; end
+            if exist('correctBidirectionalLSMArtifact', 'file') ~= 2
+                error('correctBidirectionalLSMArtifact.m must be on the MATLAB path to use Correct LSM.');
+            end
+            sameSize  = all(cellfun(@(im) isequal(size(im), size(pages{1})), pages));
+            allSingle = all(cellfun(@(im) size(im, 3) == 1, pages));
+            if numel(pages) > 1 && sameSize && allSingle
+                stack  = cat(3, pages{:});
+                Jstack = CellToolkit.callLsm(stack, nameValue);
+                for k = 1:numel(pages)
+                    pages{k} = Jstack(:, :, k);
+                end
+            else
+                for k = 1:numel(pages)
+                    pages{k} = CellToolkit.callLsm(pages{k}, nameValue);
+                end
+            end
+        end
+
+        function nv = lsmNameValue(opts)
+            % Name-value cell for correctBidirectionalLSMArtifact from a struct of
+            % option values in CellDiscovery's stored text form ('"even"', '8',
+            % '[4 2 1]', 'true', 'NaN') or already typed. Field order is kept.
+            nv = {};
+            if ~isstruct(opts) || isempty(fieldnames(opts)), return; end
+            names = fieldnames(opts);
+            nv = cell(1, 2 * numel(names));
+            for k = 1:numel(names)
+                nv{2*k-1} = names{k};
+                nv{2*k}   = CellToolkit.parseLsmOptionValue(opts.(names{k}));
+            end
+        end
+
+        function v = parseLsmOptionValue(v)
+            % One stored LSM option value -> the value passed to the function:
+            % 'true'/'false' -> logical, numeric text -> number(s), '"text"' -> text.
+            if isnumeric(v) || islogical(v)
+                return;
+            end
+            if isstring(v)
+                v = char(v);
+            end
+            if ~ischar(v)
+                return;
+            end
+            txt = strtrim(v);
+            low = lower(txt);
+            if any(strcmp(low, {'true','false'}))
+                v = strcmp(low, 'true');
+                return;
+            end
+            num = str2num(txt); %#ok<ST2NM>
+            if ~isempty(num)
+                v = num;
+                return;
+            end
+            if startsWith(txt, '"') && endsWith(txt, '"') && strlength(string(txt)) >= 2
+                v = extractBetween(string(txt), 2, strlength(string(txt))-1);
+                v = char(v);
+            end
+        end
+
+        function [facts, rep] = modelInputFactsFor(det, imgFile, page, locsCsv, resizedCsv, opts)
+            % The model-input facts of a detected source, with what was assumed.
+            %   [facts, rep] = CellToolkit.modelInputFactsFor(det, imgFile, page, locsCsv, resizedCsv, opts)
+            %   det        the manifest's detection stage of the source
+            %              (mf.source(key).stages.detection), or struct() when none
+            %   imgFile    the source TIFF; page its page
+            %   locsCsv, resizedCsv   the detector's '*_locs.csv' and '*_locs_resized.csv'
+            %              ('' when absent); used only to infer the resize factor
+            %   opts.Assume  struct of facts to use for what was not recorded (e.g.
+            %              struct('bgRadius', 20)); they are reported as assumed
+            %
+            % Recorded facts are used as recorded. For sections detected before the
+            % facts were recorded (only the locs files exist), the FALLBACK is:
+            %   resize      INFERRED: from the TIFF calibration, round(um/0.645, 4) (1 when
+            %               within 1%), as CellDiscovery's auto mode computes it; without a
+            %               calibration, the median ratio X_resized / X over the rows of the
+            %               two locs files (the factor that detection used); else 1 (assumed).
+            %               When both are available the ratio is reported as a cross-check.
+            %   bgRadius    ASSUMED 0 (no background subtraction)
+            %   correctLSM  ASSUMED false
+            %   normalized  ASSUMED true with [1 99.9] -> 255, today's CellDiscovery default.
+            %               Detections made before 2026-11-23 (no normalisation in
+            %               CellDiscovery yet) saw the unnormalised page; a model trained
+            %               for use with today's pipeline must see the normalised one.
+            %   normLimits  recomputed from the regenerated image
+            % rep (struct): assumed, inferred (string arrays), resizeSource, resizeFromCalibration,
+            % resizeFromLocs, calibrationUm, notes (string array), text (one line per fact).
+            if nargin < 4, locsCsv = ''; end
+            if nargin < 5, resizedCsv = ''; end
+            if nargin < 6 || ~isstruct(opts), opts = struct(); end
+            assume = struct();
+            if isfield(opts, 'Assume') && isstruct(opts.Assume), assume = opts.Assume; end
+            if ~isstruct(det), det = struct(); end
+            has = @(n) isfield(det, n) && ~isempty(det.(n)) && ~(isnumeric(det.(n)) && isscalar(det.(n)) && isnan(det.(n)));
+            facts = CellToolkit.modelInputFacts(det);
+            facts.normLimits = [];
+            if has('normLimits'), facts.normLimits = reshape(double(det.normLimits), [], 2); end
+            rep = struct('assumed', strings(1, 0), 'inferred', strings(1, 0), 'resizeSource', "", ...
+                'resizeFromCalibration', NaN, 'resizeFromLocs', NaN, 'calibrationUm', NaN, ...
+                'notes', strings(1, 0), 'text', strings(0, 1));
+
+            um = NaN;
+            try um = CellToolkit.tiffPixelSizeUm(imgFile, page); catch, end
+            rep.calibrationUm = um;
+            if isfinite(um)
+                rz = round(um / CellToolkit.TRAIN_UM_PER_PIXEL, 4);
+                if abs(rz - 1) < 0.01, rz = 1; end
+                rep.resizeFromCalibration = rz;
+            end
+            rep.resizeFromLocs = CellToolkit.resizeFromLocs(locsCsv, resizedCsv);
+
+            if has('resize')
+                rep.resizeSource = "manifest";
+            elseif isfinite(rep.resizeFromCalibration)
+                facts.resize = rep.resizeFromCalibration;
+                facts.resizeMode = 'auto';
+                rep.resizeSource = "tiff calibration";
+                rep.inferred(end+1) = "resize";
+            elseif isfinite(rep.resizeFromLocs)
+                facts.resize = round(rep.resizeFromLocs, 4);
+                facts.resizeMode = 'manual';
+                rep.resizeSource = "locs ratio";
+                rep.inferred(end+1) = "resize";
+            else
+                facts.resize = 1;
+                rep.resizeSource = "assumed";
+                rep.assumed(end+1) = "resize";
+            end
+            if isfinite(rep.resizeFromLocs) && rep.resizeSource ~= "locs ratio"
+                d = rep.resizeFromLocs / facts.resize - 1;
+                rep.notes(end+1) = sprintf('resize x%.4f (%s); the locs files say x%.4f (%+.3f%%)', ...
+                    facts.resize, rep.resizeSource, rep.resizeFromLocs, 100 * d);
+            end
+            if ~isfinite(facts.srcUmPerPixel), facts.srcUmPerPixel = um; end
+
+            dflt = struct('bgRadius', 0, 'correctLSM', false, 'normalized', true);
+            names = fieldnames(dflt);
+            for k = 1:numel(names)
+                n = names{k};
+                if has(n), continue; end
+                if isfield(assume, n), v = assume.(n); else, v = dflt.(n); end
+                facts.(n) = v;
+                rep.assumed(end+1) = string(n);
+            end
+            facts = CellToolkit.modelInputFacts(facts);
+            if facts.normalized && ~has('normPercentiles')
+                facts.normPercentiles = CellToolkit.NORM_PERCENTILES;
+                facts.normTarget = CellToolkit.NORM_TARGET;
+            end
+            if facts.normalized && isempty(facts.normLimits)
+                rep.notes(end+1) = "normLimits recomputed from the regenerated image";
+            end
+            if facts.correctLSM && ~has('lsmOptions')
+                rep.notes(end+1) = "LSM options not recorded: correctBidirectionalLSMArtifact defaults";
+            end
+            if ~has('resize')
+                facts.source = "inferred";      % no facts recorded for this detection
+            elseif isempty(rep.assumed) && isempty(rep.inferred)
+                facts.source = "manifest";
+            else
+                facts.source = "manifest+inferred";
+            end
+            facts.assumed  = rep.assumed;
+            facts.inferred = rep.inferred;
+            facts.notes    = rep.notes;
+            tag = @(n) CellToolkit.ternary(any(rep.assumed == n), " (assumed)", ...
+                CellToolkit.ternary(any(rep.inferred == n), " (inferred)", ""));
+            rep.text = [ ...
+                sprintf("resize x%.4f%s [%s]", facts.resize, tag("resize"), rep.resizeSource); ...
+                sprintf("bgRadius %g%s", facts.bgRadius, tag("bgRadius")); ...
+                sprintf("correctLSM %d%s", facts.correctLSM, tag("correctLSM")); ...
+                sprintf("normalized %d%s", facts.normalized, tag("normalized"))];
+        end
+
+        function f = resizeFromLocs(locsCsv, resizedCsv)
+            % Median ratio of X_resized / X (and Y) over the rows of a detector's
+            % '*_locs_resized.csv' and '*_locs.csv', which CellDiscovery writes
+            % together, row for row (X = X_resized / factor). NaN when either file
+            % is missing, the row counts differ or no row has a usable ratio.
+            f = NaN;
+            if isempty(locsCsv) || isempty(resizedCsv) || ~isfile(locsCsv) || ~isfile(resizedCsv)
+                return;
+            end
+            try
+                o = readtable(char(locsCsv), 'VariableNamingRule', 'preserve');
+                r = readtable(char(resizedCsv), 'VariableNamingRule', 'preserve');
+            catch
+                return;
+            end
+            if height(o) ~= height(r) || ~all(ismember({'X','Y'}, o.Properties.VariableNames)) ...
+                    || ~all(ismember({'X','Y'}, r.Properties.VariableNames))
+                return;
+            end
+            q = [r.X ./ o.X; r.Y ./ o.Y];
+            q = q(isfinite(q) & q > 0 & [o.X; o.Y] > 1);
+            if isempty(q), return; end
+            f = median(q);
         end
 
     end
@@ -927,6 +1348,15 @@
                 v = s.(name);
             else
                 v = default;
+            end
+        end
+
+        function img = callLsm(img, nameValue)
+            % correctBidirectionalLSMArtifact with an optional name-value cell.
+            if isempty(nameValue)
+                img = correctBidirectionalLSMArtifact(img);
+            else
+                img = correctBidirectionalLSMArtifact(img, nameValue{:});
             end
         end
 

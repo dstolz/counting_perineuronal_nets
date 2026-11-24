@@ -17,7 +17,8 @@ CellDiscovery
 
 ## What it does
 
-- Searches a folder (and all sub-folders) for image files matching a pattern.
+- Searches a folder (and all sub-folders) for image files matching a pattern,
+  and shows which of them already have results.
 - Runs the project's detection model (`predict.py`) on each image.
 - Optionally re-grades each detection with a second "rescoring" model.
 - Optionally pre-processes images first (background subtraction, resizing, and
@@ -48,7 +49,8 @@ CellDiscovery
    or overwrite images that already have results.
 
 5. **Start.** Click **Start Batch**. Progress is shown at the bottom and printed
-   in detail to the MATLAB Command Window. Use **Stop** to cancel.
+   in detail to the MATLAB Command Window. Use **Stop** to cancel (see
+   [Stopping a batch](#stopping-a-batch)).
 
 ---
 
@@ -62,9 +64,17 @@ CellDiscovery
   full path). The default `(?i)\.tif$` matches any `.tif` file,
   case-insensitively. Edit it to narrow the search (for example, to match only
   files whose name contains `C1`).
-- **Search** — Re-runs the search. The green label shows how many files matched.
-- **Files to Process** list — Shows the matched files. By default **all** files
-  are processed. To process only some, **Ctrl+click** to select a subset.
+- **Search** — Re-runs the search. The green label shows how many files matched
+  and how many of them are already done, for example
+  `132 files found · 97 done (3 *_resized.tif hidden)`.
+- **Files to Process** list — Shows the matched files. A file that already has a
+  results CSV for **every** page you have set to run in the page table is
+  marked with a check mark and counted as done; the marks update when you edit
+  the page table and when a batch ends. By default **all** files are
+  processed. To process only some, **Ctrl+click** to select a subset.
+- **Resized TIFs are left out.** The `*_resized.tif` files are this tool's own
+  output (see [Output files](#output-files)), not images to analyse, so the
+  search never lists them. The label says how many it left out.
 
 ### Python Environment
 
@@ -79,16 +89,22 @@ to pre-process the image first. See
 
 ### predict.py Options
 
-- **Device** — Where to run: `cpu`, or a GPU such as `cuda:0`. GPU is much
-  faster if you have one.
+- **Device** — Where to run: `cpu`, `mps`, or a GPU such as `cuda` or `cuda:0`.
+  GPU is much faster if you have one.
 - **Batch size** — How many image tiles to process at once. Higher is faster but
-  uses more memory. Leave at `1` if unsure.
+  uses more memory. Leave at `1` if unsure. It must be a whole number of 1 or
+  more.
 - **Threshold** — The detection confidence cutoff (0–1). **Leave blank** to use
   the value baked into the model (recommended). Lower values find more cells but
   also more false positives.
 - **Existing results** — Choose **Ignore (skip)** to leave already-processed
   images untouched (safe to re-run after an interruption), or **Overwrite** to
   re-process and replace them.
+
+When you click **Start Batch**, the three fields above are checked first. If
+one is not valid, a message says which and why, and nothing runs. The label
+under these options reminds you where the results go:
+`<image_stem>_<suffix><page>_locs.csv`, in the image's own folder.
 
 ### Display & Export Options
 
@@ -108,8 +124,35 @@ to pre-process the image first. See
 ### Run Controls
 
 - **Start Batch** — Begins processing. The interface locks while running.
-- **Stop** — Requests a stop; the current image finishes, then the batch halts.
+- **Stop** — Ends the batch after the page now being processed is finished. The
+  button then turns into **Abort now**. See
+  [Stopping a batch](#stopping-a-batch).
 - **Progress label** — Live status (e.g. which file of how many is running).
+  When the batch ends it gives the counts (see
+  [When the batch ends](#when-the-batch-ends)).
+
+### Stopping a batch
+
+- Click **Stop** once. The page being processed is finished completely
+  (detection, snapping, rescoring and its output files), and then the batch
+  stops. Pages not yet started are left alone.
+- If you do not want to wait (on a CPU a page can take minutes), the button
+  now reads **Abort now**. Click it to stop immediately: the running Python
+  process is killed and the page in progress is **discarded**, so no result is
+  written for it. Pages that were already finished are kept.
+- **Closing the window** while a batch runs asks you first. If you choose to
+  stop and close, it acts like **Abort now**; choose to keep it running and
+  nothing changes.
+
+### When the batch ends
+
+The progress label gives the counts, for example
+`Complete: 38 done, 4 skipped, 2 failed (see the Command Window)`. *Skipped*
+pages are those left out because their results already exist (Ignore mode);
+*failed* pages produced no result. The line turns **red** when a page failed.
+The Command Window lists each failed page by name with the reason, and any
+warnings about pages that did finish (for example a snap or rescoring step that
+did not work), so you can find them without scrolling through the whole run.
 
 ---
 
@@ -136,7 +179,19 @@ environment name or missing dependencies.
 > rescoring models are discovered from here.
 
 You don't need to run **Test env** every time — the tool runs it automatically
-as a pre-flight check when you press **Start Batch**.
+as a pre-flight check when you press **Start Batch**. The check is not repeated
+while the Python executable, conda executable and environment name are
+unchanged since the last time it passed (the Command Window says so); **Test
+env** always runs it again.
+
+The check also reports whether a **GPU** is available ("Environment OK · GPU
+available", or "no GPU"). When you press **Start Batch**:
+
+- If **Device** is a `cuda` device but no GPU is available, the batch does not
+  start and a message tells you to set Device to `cpu` or to use another
+  environment.
+- If a GPU is available but **Device** is `cpu`, a hint in the Command Window
+  suggests `cuda:0`. The batch still runs.
 
 ---
 
@@ -151,7 +206,7 @@ Columns:
 | Column | Meaning |
 |--------|---------|
 | **Page** | The TIFF page number this row applies to (1 = first page). |
-| **Suffix** | Text added to the output file name for this page (e.g. `page1`). |
+| **Suffix** | Letters added to the output file name for this page. The result is named `<name>_<suffix><page>_locs.csv`, so with the default `page`, page 1 gives `<name>_page1_locs.csv`. Use letters only and **do not put the page number in the suffix** (it is added for you); other tools read the page number from that name, and a suffix that is empty or has digits or other characters gets a `[WARN]` line when you start. |
 | **Detection Model** | The model used to find cells. Choose `(skip)` to not process this page. |
 | **Rescore Model** | Optional Stage-2 model that adds a quality score. `(none)` = no rescoring. |
 | **Correct LSM** | Tick to apply bidirectional-scanner artifact correction first. |
@@ -162,6 +217,11 @@ Columns:
 
 - **Single-page images** only ever use the row for **page 1**.
 - Use **Add page** / **Remove page** to manage rows for multi-page TIFFs.
+- **Each page may appear in only one row.** If the table names a page twice,
+  **Start Batch** refuses to run and says which rows are involved (the two rows
+  could ask for different resizing of the same page, which would put the
+  detections in the wrong place). Remove the extra row, or give it a different
+  page number.
 - A page mapped to `(skip)` is ignored. This lets you, for example, process only
   page 2 of every file.
 
@@ -258,14 +318,14 @@ image**:
 
 | File | When | Contents |
 |------|------|----------|
-| `<name>[_page<k>]_locs.csv` | Always | One row per detected cell: `X`, `Y`, `class`, `score`, and more. When **Snap** is on, also `SNAP_X`, `SNAP_Y`, `SNAP_Shift`, `SNAP_Snapped`. |
-| `<name>[_page<k>]_locs_resized.csv` | When resizing is used | Same detections, but in resized-image coordinates. |
-| `<name>[_page<k>]_locs.png` | When *Save annotated PNG* is on | Preview image with detections overlaid. |
-| `<name>[_page<k>]_resized.tif` | When *Save resized TIF* is on | The pre-processed image the model received, before intensity normalisation. |
+| `<name>_<suffix><page>_locs.csv` | Always | One row per detected cell: `X`, `Y`, `class`, `score`, and more. When **Snap** is on, also `SNAP_X`, `SNAP_Y`, `SNAP_Shift`, `SNAP_Snapped`. With the default suffix: `<name>_page1_locs.csv`. |
+| `<name>_<suffix><page>_locs_resized.csv` | When resizing is used | Same detections, but in resized-image coordinates. |
+| `<name>_<suffix><page>_locs.png` | When *Save annotated PNG* is on | Preview image with detections overlaid. |
+| `<name>_resized.tif` | When *Save resized TIF* is on | **One file per image**, holding all its pages: the pre-processed image the model received, before intensity normalisation. It is not an input for this tool (the search leaves it out). In Ignore mode an existing one is kept. |
 
-These `*_locs.csv` files are the input to the
-**[Cell Neighbor Resolver](CellNeighborResolution.md)** and
-**[Cell Localization QC](CellQualityControl.md)** tools.
+These `*_locs.csv` files are the input to **[Cell Curator](CellCurator.md)** (and
+to the Legacy **[Cell Neighbor Resolver](CellNeighborResolution.md)** and
+**[Cell Localization QC](CellQualityControl.md)** tools).
 
 ---
 
@@ -276,7 +336,10 @@ These `*_locs.csv` files are the input to the
 - **Process a subset.** Ctrl+click files in the *Files to Process* list to run
   only those.
 - **Watch the Command Window.** Per-file progress, warnings, and Python output
-  stream there in real time.
+  stream there in real time, for rescoring as well as for detection.
+- **Opening from the Dataset Manager.** The **Detect cells…** button opens this
+  window already searching the selected dataset's folder (or the parent
+  directory when none is selected).
 
 ---
 
@@ -287,11 +350,14 @@ These `*_locs.csv` files are the input to the
 | **"No detection model found"** | No model folder (with a `best.pth`) was found in the project root. Make sure trained models are present. |
 | **Test env fails / "cannot import hydra or torch"** | Your Python environment is wrong. Check the conda env name spelling, confirm the conda executable path, and that the env has the project requirements installed. |
 | **"Invalid directory"** | The parent directory path doesn't exist — re-browse for it. |
-| **No files found** | Your file filter (regex) excludes everything. The default `(?i)\.tif$` matches all `.tif` files. |
+| **No files found** | Your file filter (regex) excludes everything. The default `(?i)\.tif$` matches all `.tif` files. Note that `*_resized.tif` files are always left out. |
+| **Start says a page is named twice** | Two rows of the page table have the same page number. Remove one (see [Choosing models per page](#choosing-models-per-page)). |
+| **Start says Device / Batch size / Threshold is not valid** | Correct the field named in the message: Device is `cpu`, `mps`, `cuda` or `cuda:0`; Batch size a whole number from 1; Threshold blank or a number from 0 to 1. |
+| **"Device not available"** | Device is a `cuda` device but the Python environment reports no GPU. Set Device to `cpu`, or use an environment with a GPU build of PyTorch. |
 | **Buttons stopped responding after a code update** | Run `clear classes; CellDiscovery` in MATLAB. |
 | **Detection is very slow** | Set **Device** to a GPU (`cuda:0`) if available, and/or increase **Batch size**. |
 
 ---
 
 [← Back to the User Guide home](Home.md) ·
-Next: [Cell Neighbor Resolver →](CellNeighborResolution.md)
+Next: [Cell Curator →](CellCurator.md)
