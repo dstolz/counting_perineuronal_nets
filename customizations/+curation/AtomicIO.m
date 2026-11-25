@@ -100,7 +100,7 @@ classdef AtomicIO
         %READJSON  jsondecode of PATH, or [] when the file is missing, empty or not valid JSON.
         %   Lenient: never use it for a file whose content is written back (see readJsonStrict).
         %   Note: jsondecode collapses nested arrays ([[1,2]] -> 1x2, [1,2] -> 2x1); readers
-        %   normalise the shapes they need.
+        %   normalize the shapes they need.
             s = [];
             txt = curation.AtomicIO.readText(path);
             if isempty(strtrim(txt)), return; end

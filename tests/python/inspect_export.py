@@ -5,13 +5,13 @@ what they see, as JSON, for the MATLAB tests tExportStage2 / tExportStage1.
         datasets.PerineuronalNetsRankDataset(root, split='all', mode='patches', patch_size=64,
         neg_fraction=0, random_offset=0, transforms=None): its length, images, agreement levels and,
         per item (in the dataset's own order): imgName, X, Y, agreement, patch shape and the offset
-        of the patch's smoothed maximum from the patch centre (a blob or a ring centred on the
+        of the patch's smoothed maximum from the patch center (a blob or a ring centered on the
         cell gives ~(0, 0); a transposed or shifted image does not).
 
     python tests/python/inspect_export.py stage1 <export root> <out.json> [rects.csv]
         datasets.PerineuronalNetsDataset(root, split=train-half1 / train-half2, patch_size=640,
         target='detection', side 60, random_offset=0): per split its length (patches), images and
-        annotations, every box centre in image coordinates (unclipped boxes only; patch start and
+        annotations, every box center in image coordinates (unclipped boxes only; patch start and
         split origin added back), the image shapes; with rects.csv (imgName, y0, y1, x0, x1;
         0-based, end exclusive) the max of /data in each rectangle.
 """
@@ -48,7 +48,7 @@ def stage2(root):
             cm, pm = float(p[28:37, 28:37].mean()), float(p.mean())
         items.append({'imgName': str(a.imgName), 'X': int(a.X), 'Y': int(a.Y), 'agreement': int(agreement),
                       'h': int(p.shape[0]), 'w': int(p.shape[1]), 'dtype': str(np.asarray(patch).dtype),
-                      'dy': dy, 'dx': dx, 'centreMean': cm, 'patchMean': pm})
+                      'dy': dy, 'dx': dx, 'centerMean': cm, 'patchMean': pm})
     levels = ds.annot['agreement'].value_counts().to_dict()
     return {'len': len(ds), 'numImages': ds.patches.num_images(), 'str': str(ds),
             'xyDtype': str(ds.annot['X'].dtype), 'levels': {str(k): int(v) for k, v in levels.items()},
@@ -60,7 +60,7 @@ def stage1(root, rects=None):
     for split in ('train-half1', 'train-half2'):
         ds = PerineuronalNetsDataset(root=root, split=split, patch_size=640, overlap=0, random_offset=0,
                                      target='detection', target_params={'side': 60}, transforms=None)
-        centres = []
+        centers = []
         for d in ds.datasets:
             oy, ox = (int(v) for v in d.origin_yx)
             for j in range(len(d)):
@@ -70,11 +70,11 @@ def stage1(root, rects=None):
                 sy, sx = int(local_start[0]) + oy, int(local_start[1]) + ox
                 for (y0, x0, y1, x1) in np.asarray(bbs).reshape(-1, 4):
                     if y0 <= 0 or x0 <= 0 or y1 >= ph or x1 >= pw:
-                        continue  # clipped at the patch border: its centre moved
-                    centres.append({'imgName': image_id, 'Y': float((y0 + y1) / 2 + sy),
+                        continue  # clipped at the patch border: its center moved
+                    centers.append({'imgName': image_id, 'Y': float((y0 + y1) / 2 + sy),
                                     'X': float((x0 + x1) / 2 + sx), 'side': float(y1 - y0)})
         out[split] = {'len': len(ds), 'numImages': ds.num_images(), 'numAnnotations': int(len(ds.annot)),
-                      'str': str(ds), 'centres': centres,
+                      'str': str(ds), 'centers': centers,
                       'halves': [{'imgName': d.image_id, 'split': d.split} for d in ds.datasets]}
     ds = PerineuronalNetsDataset(root=root, split='train-half1', patch_size=640, target='detection',
                                  target_params={'side': 60}, transforms=None)

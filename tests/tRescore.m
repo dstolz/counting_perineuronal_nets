@@ -8,7 +8,7 @@ classdef tRescore < matlab.unittest.TestCase
     %                            detection get finite scores from pv_v2_scoring_ordinal_regression.
     %     detectorScale          (Slow, Python) Rescore's scores of untouched detections equal
     %                            score.py run directly on CellDiscovery's detector input (the
-    %                            normalised, resized page as a TIFF, points at X * resize): the
+    %                            normalized, resized page as a TIFF, points at X * resize): the
     %                            scale CellDiscovery rescores on. The legacy CellNeighborResolution
     %                            way (the raw full-resolution page through imwrite, points at X) is
     %                            run too and its scores printed: they differ.

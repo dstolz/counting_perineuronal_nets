@@ -6,9 +6,8 @@ plus everything the Cell\* tools derive from it — and answers, for every file
 operation, *which file is the correct one*.
 
 It is not a GUI. The [Cell Dataset Manager](CellDatasetManager.md) dashboard and
-the working tools (Discovery, [Cell Curator](CellCurator.md) and the Legacy
-Neighbor Resolver and QC) all go through it instead of guessing filenames from
-naming conventions.
+the working tools (Discovery and [Cell Curator](CellCurator.md)) all go through
+it instead of guessing filenames from naming conventions.
 
 ---
 
@@ -44,7 +43,38 @@ Each dataset has a sidecar next to its image:
 <base>.celldataset.json        schema "celldataset/2.0"
 ```
 
-Paths inside are stored relative to the dataset folder. Example:
+Paths inside are stored relative to the dataset folder. A scan of a folder where
+nothing changed writes nothing (`updatedUtc` is the time of the last real change).
+
+### The base of a dataset
+
+Cell Discovery names what it writes after the image it read, suffix included
+(`<x>_proj.tif` → `<x>_proj_ECM1_locs.csv`), so the base of a dataset is the stem
+its localization files start with: `forCsv` is the authority. An image whose name
+ends in a role suffix (`_proj`, `_resized`, `_preprocessed`) is settled by the
+same three rules in `forImage` and in `discover`:
+
+1. localization files named after the image exist → it is **the** image of the
+   dataset with its own name as base (`<x>_proj`);
+2. else the name without the suffix has an image of its own or localization files
+   → it is that dataset's companion (base `<x>`, the projection of `<x>.tif`);
+3. else a projection alone is a dataset of its own (`<x>_proj`), so its base does
+   not change when detections are added. A resized image alone stays with the
+   base without the suffix.
+
+So the lab's layout, `<x>_proj.tif` beside `<x>_proj_ECM1_locs.csv` and
+`<x>_proj_PV2_locs.csv`, is one dataset `<x>_proj` with two sources, and its
+manifest is `<x>_proj.celldataset.json`.
+
+> **Until 2026-11-24** only rule 2 existed. A section in the lab's layout was
+> listed twice (bases `<x>` and `<x>_proj`), and Cell Discovery recorded its
+> detection (tool, model, and how the detector's input was prepared) in
+> `<x>.celldataset.json`, where the exports, rescoring and the lab database record
+> did not look, and from where the next scan removed it. `discover` now adopts
+> what such a stray manifest still holds for the same locs file
+> (`adoptStrayFacts`); the stray file itself is left alone and can be deleted.
+
+Example:
 
 ```jsonc
 {
@@ -137,10 +167,11 @@ key = CellDatasetManifest.keyForCsv(csv);
 mf.recordDetection(key, struct('image',img,'page',pg,'locs',csv, ...
                                'tool','CellDiscovery','model','m','count',n));
 mf.recordResized(key, rcsv, 'slice42_resized.tif');
-mf.recordResolve(key, struct('tool','CellNeighborResolution'));
-mf.recordRescore(key, struct('tool','CellNeighborResolution','model','m'));
-mf.recordQc(key, qc, struct('reviewed',r,'good',g,'bad',b,'uncertain',u));
+mf.recordRescore(key, struct('tool','CellDiscovery','model','m'));
 mf.recordCuration(key, curCsv, store.counts());   % counts plus .complete and .tool, as Cell Curator passes them
+% No caller since the legacy Neighbor Resolver and QC tools were removed:
+mf.recordResolve(key, struct('tool','CellNeighborResolution'));
+mf.recordQc(key, qc, struct('reviewed',r,'good',g,'bad',b,'uncertain',u));
 mf.setActiveLocs(key, rcsv, 'resized');   % re-point the active file
 mf.save();
 ```
@@ -159,11 +190,9 @@ is shared via `CellDatasetManifest.locsToken()`.
 
 | Tool | What it records / resolves |
 |------|-----------------------------|
-| **Cell Discovery** | `recordDetection` / `recordResized` / `recordRescore` — seeds the image, analyzed pages, the active locs CSV, and provenance. |
-| **Cell Neighbor Resolver** | resolves the companion image/page via `imageForLocs` / `channelPage`; records `recordResolve` / `recordRescore`. Curation is in place, so the active pointer is unchanged. |
-| **Cell Localization QC** *(Legacy)* | records `recordQc` (QC path + Good/Bad/Uncertain counts). |
+| **Cell Discovery** | `recordDetection` / `recordResized` / `recordRescore` in the manifest of the locs file it just wrote (`forCsv`) — seeds the image, analyzed pages, the active locs CSV, and provenance. |
 | **Cell Curator** | `recordCuration` whenever you leave a source, complete it or close the window (the curation CSV path and its counts). It reads the detector's `locs` file, **not** `activeLocs`. |
-| **Cell Dataset Manager** | `discover` for the dashboard; **Set active locs…** calls `setActiveLocs`. |
+| **Cell Dataset Manager** | `discover` for the list; **Set active locs…** calls `setActiveLocs`, **Set active image…** `setActiveImage`. |
 
 Every write is best-effort and guarded, so a manifest problem can never break a
 tool's save.

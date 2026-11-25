@@ -39,8 +39,8 @@ classdef CellCurator < handle
 %   app.close()                          save, record to the manifests, release every lock and timer
 %
 %   Review by exception: each page of the Review queue holds cells of one P(Good) band and has one
-%   default label (Good or Bad). Untouched tiles wear a muted border in the default's colour;
-%   tiles you decide wear a full-strength border in their label's colour; a corner badge marks a
+%   default label (Good or Bad). Untouched tiles wear a muted border in the default's color;
+%   tiles you decide wear a full-strength border in their label's color; a corner badge marks a
 %   flag. Click = toggle a tile to the opposite of the default (the exception), again = back to
 %   untouched; right-click = Uncertain; drag = paint the same change; keys g/b/u/f/x act on the
 %   tile under the pointer, else the cursor tile (or on every selected tile, Shift+click). Enter
@@ -51,7 +51,7 @@ classdef CellCurator < handle
 %
 %   Audit (blind) tiles: rows whose AuditRole is holdout or confirm-audit and that were not decided
 %   blind yet (curation.Queues: BLIND TILES) are mixed into the review pages, and fill pages of their
-%   own ("Blind tiles"). They wear a neutral grey border, the inspector hides their scores and P, the
+%   own ("Blind tiles"). They wear a neutral gray border, the inspector hides their scores and P, the
 %   page default never applies to them, and a left click only puts the cursor on them: g, b or u (or
 %   a label button; a right-click is Uncertain) decides one, with LabelSource "blind". Enter applies
 %   the default to the ordinary untouched tiles and keeps the page while an audit tile on it is
@@ -73,10 +73,10 @@ classdef CellCurator < handle
 %   curation.Audit.report of the folder in the background and shows it in the Audit tab, where
 %   "Save report" writes .cellcuration\audit_report_<date>.txt and .csv.
 %
-%   Map (Tab or v, or the Map view button): the whole section in the centre, one point per cell
-%   coloured by its state (excluded cells dimmed; merged and stale rows not drawn), with the
+%   Map (Tab or v, or the Map view button): the whole section in the center, one point per cell
+%   colored by its state (excluded cells dimmed; merged and stale rows not drawn), with the
 %   exclusion regions and the reference ROI strip (<image stem>_roi.roi beside the image, drawn
-%   only). Tools: Select [s], Add [a], Move [m], Lasso [l] (Esc: back to Select); Snap to centre
+%   only). Tools: Select [s], Add [a], Move [m], Lasso [l] (Esc: back to Select); Snap to center
 %   refines added and moved positions with snapToCellCentroid. g/b/u/f/x act on the selected
 %   points; Enter or a double-click shows the selected cell in the gallery; [.] in the gallery
 %   shows the pointed-at cell on the map. A lasso offers Good/Bad/Uncertain, Exclude region [e]
@@ -88,10 +88,10 @@ classdef CellCurator < handle
 %   proposal, k keep both, j merge, arrows skip/back); the Sweep queue steps through
 %   MapView.sweepRects fields with the Add tool (Space next, Backspace previous; the field reached
 %   is kept per source for the session). The right panel's Map tab is a small locator of the
-%   section (updated only while it is showing). The points' markers (a colour and a symbol per
+%   section (updated only while it is showing). The points' markers (a color and a symbol per
 %   state: to review, Good, Bad, Uncertain, flagged; curation.MapMarkers; default: open circles in
-%   the label colours, cells to review as filled blue squares) are chosen in Markers... on the map's
-%   tool bar (curation.MarkerDialog) and kept in the settings. When the Review queue is empty the centre shows
+%   the label colors, cells to review as filled blue squares) are chosen in Markers... on the map's
+%   tool bar (curation.MarkerDialog) and kept in the settings. When the Review queue is empty the center shows
 %   the finish checklist; "Mark source complete [Enter]" sets Complete, writes <stem>_final.csv
 %   and records the manifest; a later edit that leaves cells to review or flagged undoes it in the
 %   same transaction.
@@ -134,9 +134,9 @@ classdef CellCurator < handle
 %     app.hoverTile(k)                           the pointer is over tile k (0 = off the tiles)
 %     app.confirmPage(), app.showQueue(name), app.nextSource(), app.previousPage(), app.nextPage(),
 %     app.undo(), app.redo(), app.waitForLayout(timeout)
-%     app.showCentre("map" | "gallery"), app.setMapTool(name), app.setSnap(tf)
+%     app.showCenter("map" | "gallery"), app.setMapTool(name), app.setSnap(tf)
 %     app.mapClick(xy, selectionType)            a press and release on the map at image point XY
-%                                                (the view is centred on XY first when XY is not
+%                                                (the view is centered on XY first when XY is not
 %                                                in view); goes through curation.MapView's events
 %     app.mapDrag(fromXY, toXY)                  a drag on the map (Move tool: moves the point)
 %     app.mapLasso(polygon)                      a lasso drawn along POLYGON (M x 2, image px)
@@ -147,14 +147,17 @@ classdef CellCurator < handle
 %     app.requestReport(), app.saveReport()      the Audit report... and Save report buttons
 %     app.requestRescore(), app.waitForRescore(timeout)   Rescore now / Score edited cells
 %     app.showTraining()                         the Training... button (app.Training: the panel)
+%     txt = app.showSubject()                    the Subject... button: what the lab database says
+%                                                about the section's subject (sex, species, project,
+%                                                tags, variables), in the status bar
 %     d = app.openMarkerDialog()                 the Markers... button (d: the curation.MarkerDialog,
-%                                                whose seams set colours and symbols, ok, cancel)
+%                                                whose seams set colors and symbols, ok, cancel)
 %     app.applyMarkerStyles(S, keep)             draw the map with markers S; KEEP (default true)
 %                                                also saves them in the settings
 %   Read-only properties: Figure, Store, Gallery, Page (Kind, Ids, P, Default, Band, Blind, Queue,
 %   PageId, Number, Total, Untouched), QueueName, MapPanel, StatusText, ContextText, SourceKey, Datasets,
 %   DatasetIndex, SourceIndex, Session, Sessions, DisplayMode, Gain, Gamma, Zoom, Cursor,
-%   HoverTile, InspectedTile, Selection, LastTimings, CentreView, Map, Locator, MapTool,
+%   HoverTile, InspectedTile, Selection, LastTimings, CenterView, Map, Locator, MapTool,
 %   MapSelection, MapTask, PairList, PairIndex, SnapOn, Lasso, SelectedRegion, SweepFieldUm,
 %   Assist (the curation.AssistRunner, [] when off), AuditReport, Rescorer, Training, MarkerStyle
 %   (the map's markers), MarkerDialog (the open markers window, [] when none), Counters
@@ -234,8 +237,8 @@ classdef CellCurator < handle
         Settings struct = struct()
         Options struct = struct()
         Prepared = []
-        CentreView string = "gallery"      % "gallery" | "map"
-        Map = []                           % the centre curation.MapView (created on first use)
+        CenterView string = "gallery"      % "gallery" | "map"
+        Map = []                           % the center curation.MapView (created on first use)
         Locator = []                       % the right panel's locator curation.MapView
         MapTool string = "select"
         MapSelection uint32 = zeros(0, 1, 'uint32')
@@ -272,6 +275,8 @@ classdef CellCurator < handle
         IdleArmed = []            % tic when the idle timer was started
         IdleDue double = 0        % its delay then, s
         NextPage = []
+        ReviewOffset double = 1   % which page of the Review queue is on screen (PgDn/PgUp move it)
+        FocusDue logical = false  % the new window has not been given the keyboard focus yet
         LivePage = []
         ListPages = []
         ListIndex double = 0
@@ -284,7 +289,7 @@ classdef CellCurator < handle
         ImageCache = []
         Closing logical = false
         Closed logical = false
-        MapLoadedId string = ""            % session the centre map shows
+        MapLoadedId string = ""            % session the center map shows
         MapDataset string = ""             % folder|base of that session (a channel switch keeps the view)
         MapPending uint32 = zeros(0, 1, 'uint32')   % cells changed while the map was hidden
         MapFull logical = false            % the map needs all its points again
@@ -384,6 +389,7 @@ classdef CellCurator < handle
             obj.showNone();
             if ~isempty(parentDir)
                 obj.openParent(parentDir);
+                obj.focusIfDue();
             else
                 obj.startWarmUp();
             end
@@ -551,7 +557,7 @@ classdef CellCurator < handle
                 end
                 return
             end
-            if obj.CentreView == "map" && obj.mapKey(key, shift)
+            if obj.CenterView == "map" && obj.mapKey(key, shift)
                 return
             end
             M = @curation.UiText.msg;
@@ -562,7 +568,7 @@ classdef CellCurator < handle
                 case "f", obj.flagTiles(obj.keyTargets());
                 case {"x", "backspace"}, obj.clearTiles(obj.keyTargets());
                 case {"return", "space"}, obj.confirmPage();
-                case {"tab", "v"}, obj.toggleCentre();
+                case {"tab", "v"}, obj.toggleCenter();
                 case ".", obj.showOnMap();
                 case "s", obj.setMapTool("select", true);
                 case "a", obj.setMapTool("add", true);
@@ -572,10 +578,8 @@ classdef CellCurator < handle
                 case "j", obj.setStatus(M('keyOnMap', 'j', 'it merges the lassoed cells or a close pair.'));
                 case "k", obj.setStatus(M('keyOnMap', 'k', 'it keeps both cells of a close pair.'));
                 case "delete", obj.setStatus(M('keyOnMap', 'Del', 'it removes the selected exclusion region.'));
-                case "leftarrow"
-                    if shift, obj.moveCursor(0, -1); else, obj.previousPage(); end
-                case "rightarrow"
-                    if shift, obj.moveCursor(0, 1); else, obj.nextPage(); end
+                case "leftarrow",  obj.moveCursor(0, -1);
+                case "rightarrow", obj.moveCursor(0, 1);
                 case "pageup",    obj.previousPage();
                 case "pagedown",  obj.nextPage();
                 case "uparrow",   obj.moveCursor(-1, 0);
@@ -625,7 +629,7 @@ classdef CellCurator < handle
                     if n > 0
                         ctx = struct('ProposalP', P.P(u), 'Queue', P.Queue, 'PageId', P.PageId, 'DwellMs', dwell);
                         % a page that stays on screen (an audit tile is undecided) is never drawn from:
-                        % its tiles would turn grey under the reviewer
+                        % its tiles would turn gray under the reviewer
                         keepOff = zeros(0, 1, 'uint32');
                         if any(pend), keepOff = P.Ids; end
                         try
@@ -726,6 +730,7 @@ classdef CellCurator < handle
             obj.HistPos = 0;
             obj.LivePage = [];
             obj.NextPage = [];
+            obj.ReviewOffset = 1;
             obj.ListPages = [];
             obj.ListIndex = 0;
             if isempty(obj.Store)
@@ -744,7 +749,7 @@ classdef CellCurator < handle
             p = curation.Proposals.current(T, obj.SourceKey);
             opts = obj.queueOpts(T);
             if startsWith(name, "browse")
-                % an audit tile waiting for its blind judgement is not browsed (its label would show)
+                % an audit tile waiting for its blind judgment is not browsed (its label would show)
                 keep = ~(curation.BlindTiles.roleMask(T.AuditRole) & T.LabelSource ~= "blind");
                 T = T(keep, :);
                 p = p(keep);
@@ -786,10 +791,21 @@ classdef CellCurator < handle
         end
 
         function previousPage(obj)
-            %PREVIOUSPAGE  Left / PageUp: show the previous page of this session (still editable).
+            %PREVIOUSPAGE  PageUp: the page before this one. In the Review queue that is first the
+            %   pages left unconfirmed with PageDown, then the pages confirmed in this session
+            %   (still editable).
             if obj.Closed || isempty(obj.Session), return; end
             obj.endDrag();
             H = obj.Session.History;
+            if obj.HistPos == 0 && obj.Page.Kind == "active" && obj.QueueName == "review" && obj.ReviewOffset > 1
+                obj.ReviewOffset = obj.ReviewOffset - 1;
+                page = obj.reviewPage([], 1);
+                if ~isempty(page)
+                    obj.showPageStruct(page);
+                    obj.setStatus(curation.UiText.msg('pageShown', page.Number, page.Total));
+                end
+                return
+            end
             if obj.HistPos == 0
                 if isempty(H)
                     obj.setStatus(curation.UiText.msg('noHistory'));
@@ -807,14 +823,15 @@ classdef CellCurator < handle
         end
 
         function nextPage(obj)
-            %NEXTPAGE  Right / PageDown: next page without confirming (pages without a default and
-            %   earlier pages only).
+            %NEXTPAGE  PageDown: the next page, without confirming this one. A Review page left
+            %   this way keeps its untouched tiles in the queue (nothing is labeled by PageDown);
+            %   PageUp comes back to it.
             if obj.Closed, return; end
             obj.endDrag();
             switch obj.Page.Kind
                 case {"history", "changed"}, obj.forward();
                 case "list",                 obj.advanceList();
-                case "active",               obj.setStatus(curation.UiText.msg('noSkip'));
+                case "active",               obj.leavePage();
             end
         end
 
@@ -982,11 +999,13 @@ classdef CellCurator < handle
             body.Layout.Row = 2;
             body.Layout.Column = 1;
             obj.buildLeft(body);
-            obj.buildCentre(body);
+            obj.buildCenter(body);
             obj.buildRight(body);
             obj.updateEditEnable();
             f.Visible = obj.Options.Visible;
-            obj.refocus();
+            % the keyboard focus is given once the first page is up (focusIfDue): asking for it
+            % here waits about 3 s for the new window's view in a fresh MATLAB session
+            obj.FocusDue = true;
         end
 
         function buildTopBar(obj, root)
@@ -1106,14 +1125,14 @@ classdef CellCurator < handle
             b = g;
         end
 
-        function buildCentre(obj, body)
+        function buildCenter(obj, body)
             C = curation.UiText.colors();
             bg = C.Background / 255;
             G = uigridlayout(body, [4 1], 'RowHeight', {36, '1x', 24, 22}, 'ColumnWidth', {'1x'}, ...
                 'Padding', [0 0 0 0], 'RowSpacing', 4);
             G.Layout.Row = 1;
             G.Layout.Column = 2;
-            obj.UI.Centre = G;
+            obj.UI.Center = G;
             % row 1: the context line and the Gallery / Map switch
             top = uigridlayout(G, [1 2], 'ColumnWidth', {'1x', 132}, 'RowHeight', {'1x'}, ...
                 'Padding', [0 0 0 0], 'ColumnSpacing', 6);
@@ -1181,7 +1200,7 @@ classdef CellCurator < handle
             obj.buildFinish(G, bg);
             obj.buildMapArea(G, bg);
             % the status bar: the message of the moment, and the lab database at its right end
-            sb = uigridlayout(G, [1 3], 'ColumnWidth', {'1x', 0, 0}, 'RowHeight', {'1x'}, ...
+            sb = uigridlayout(G, [1 4], 'ColumnWidth', {'1x', 0, 0, 0}, 'RowHeight', {'1x'}, ...
                 'Padding', [0 0 0 0], 'ColumnSpacing', 6, 'Tag', 'gl:status');
             sb.Layout.Row = 4; sb.Layout.Column = 1;
             obj.UI.StatusBar = sb;
@@ -1191,16 +1210,24 @@ classdef CellCurator < handle
         end
 
         function buildDatabase(obj, sb)
-            %BUILDDATABASE  The lab database lamp (celldb.addLamp) and a Database... button at the right
-            %   end of the status bar. Nothing here may change what the app writes; without the celldb
-            %   package (or the client) the window works the same.
+            %BUILDDATABASE  The lab database lamp (celldb.addLamp), a Database... button and a Subject...
+            %   button at the right end of the status bar. Nothing here may change what the app writes;
+            %   without the celldb package (or the client) the window works the same. The subject's
+            %   tags and variables are shown only when Subject... is pressed, never by themselves: a
+            %   reviewer should not see the animal's group while deciding on cells.
             obj.UI.DbLamp = [];
             obj.UI.DbButton = [];
+            obj.UI.SubjectButton = [];
             if ~CellCurator.hasCelldb(), return; end
             try
+                sj = uibutton(sb, 'Text', curation.UiText.label('subject'), 'Tag', 'btn:subject', ...
+                    'FontSize', 11, 'ButtonPushedFcn', @(~, ~) obj.uiCall(@() obj.showSubject()));
+                sj.Layout.Row = 1; sj.Layout.Column = 2;
+                CellToolkit.setTooltip(sj, curation.UiText.tip('subject'));
+                obj.UI.SubjectButton = sj;
                 b = uibutton(sb, 'Text', curation.UiText.label('database'), 'Tag', 'btn:database', ...
                     'FontSize', 11, 'ButtonPushedFcn', @(~, ~) obj.uiCall(@() obj.openDatabase()));
-                b.Layout.Row = 1; b.Layout.Column = 2;
+                b.Layout.Row = 1; b.Layout.Column = 3;
                 tip = curation.UiText.tip('database');
                 try
                     s = string(celldb.statusText());
@@ -1209,9 +1236,9 @@ classdef CellCurator < handle
                 end
                 CellToolkit.setTooltip(b, tip);
                 obj.UI.DbButton = b;
-                lamp = celldb.addLamp(sb, 'Row', 1, 'Column', 3, 'Parent', obj.Figure);
+                lamp = celldb.addLamp(sb, 'Row', 1, 'Column', 4, 'Parent', obj.Figure);
                 obj.UI.DbLamp = lamp;
-                sb.ColumnWidth = {'1x', 84, 'fit'};
+                sb.ColumnWidth = {'1x', 76, 84, 'fit'};
             catch ME
                 warning('CellCurator:database', 'No lab database controls: %s', ME.message);
             end
@@ -1272,9 +1299,9 @@ classdef CellCurator < handle
         end
 
         function buildMapArea(obj, G, bg)
-            %BUILDMAPAREA  The map's place in the centre (over the gallery and its legend): a tool bar,
+            %BUILDMAPAREA  The map's place in the center (over the gallery and its legend): a tool bar,
             %   the map host (the curation.MapView and its action bars are created on first use) and
-            %   the map's colour legend.
+            %   the map's color legend.
             U = @curation.UiText.label;
             T = @curation.UiText.tip;
             ma = uipanel(G, 'BorderType', 'none', 'BackgroundColor', bg, 'Visible', 'off', 'Tag', 'pn:mapArea');
@@ -1391,7 +1418,7 @@ classdef CellCurator < handle
 
         function buildLegend(obj, G, row, bg)
             %BUILDLEGEND  One line under the gallery: a swatch drawn the way the tiles show each
-            %   colour (a coloured frame, or the corner badge) and what it means.
+            %   color (a colored frame, or the corner badge) and what it means.
             items = curation.UiText.legendItems();
             widths = {};
             for k = 1:numel(items)
@@ -1545,8 +1572,9 @@ classdef CellCurator < handle
                 'uncertain',  @() obj.labelAction("Uncertain"),                     C.Uncertain / 255, [0.1 0.1 0.1]
                 'flag',       @() obj.flagAction(),                                 C.Flag / 255,      [0.1 0.1 0.1]
                 'clear',      @() obj.clearAction(),                                [0.94 0.94 0.94],  [0.1 0.1 0.1]
-                'prev',       @() obj.previousPage(),                               [0.94 0.94 0.94],  [0.1 0.1 0.1]
                 'confirm',    @() obj.confirmPage(),                                [0.80 0.88 0.98],  [0.1 0.1 0.1]
+                'prev',       @() obj.previousPage(),                               [0.94 0.94 0.94],  [0.1 0.1 0.1]
+                'next',       @() obj.nextPage(),                                   [0.94 0.94 0.94],  [0.1 0.1 0.1]
                 'nextSource', @() obj.nextSource(),                                 [0.94 0.94 0.94],  [0.1 0.1 0.1]};
             obj.UI.ActionButtons = gobjects(1, size(spec, 1));
             for i = 1:size(spec, 1)
@@ -1562,7 +1590,7 @@ classdef CellCurator < handle
             obj.UI.ShowOnMap = uibutton(bg, 'Text', U('showOnMap'), 'Tag', 'btn:showOnMap', ...
                 'FontWeight', 'bold', 'ButtonPushedFcn', @(~, ~) obj.uiCall(@() obj.buttonAction(@() obj.showOnMap(true))));
             obj.UI.ShowOnMap.Layout.Row = 5;
-            obj.UI.ShowOnMap.Layout.Column = [1 2];
+            obj.UI.ShowOnMap.Layout.Column = 2;
             CellToolkit.setTooltip(obj.UI.ShowOnMap, curation.UiText.tip('showOnMap'));
 
             % the locator (a small curation.MapView, created the first time the tab is shown)
@@ -1613,6 +1641,13 @@ classdef CellCurator < handle
             end
         end
 
+        function focusIfDue(obj)
+            %FOCUSIFDUE  Give the new window the keyboard focus, once (so keys work without a click).
+            if ~obj.FocusDue, return; end
+            obj.FocusDue = false;
+            obj.refocus();
+        end
+
         function refocus(obj)
             obj.TextFocus = false;
             obj.NoteCell = uint32(0);
@@ -1659,7 +1694,7 @@ classdef CellCurator < handle
             %   reviewer has not seen is never confirmed. An ignored press says so in the status bar.
             tf = true;
             shownTic = [];
-            if obj.CentreView == "map"
+            if obj.CenterView == "map"
                 if any(obj.MapTask == ["pairs" "sweep"]) && isempty(obj.Lasso) && obj.SelectedRegion == 0
                     shownTic = obj.ItemShownTic;
                 else
@@ -1719,7 +1754,7 @@ classdef CellCurator < handle
                 if obj.locatorShowing() && CellCurator.hitsView(hit, obj.Locator) && obj.Locator.onButtonDown(e)
                     return
                 end
-                if obj.CentreView == "gallery" && ~isempty(obj.Gallery) && isvalid(obj.Gallery)
+                if obj.CenterView == "gallery" && ~isempty(obj.Gallery) && isvalid(obj.Gallery)
                     obj.Gallery.onButtonDown(e);
                 end
             catch ME
@@ -1737,7 +1772,7 @@ classdef CellCurator < handle
                 if obj.locatorShowing() && obj.Locator.onMotion(e)
                     return
                 end
-                if obj.CentreView == "gallery" && ~isempty(obj.Gallery) && isvalid(obj.Gallery) && obj.Gallery.onMotion(e)
+                if obj.CenterView == "gallery" && ~isempty(obj.Gallery) && isvalid(obj.Gallery) && obj.Gallery.onMotion(e)
                     obj.LastInputTic = tic;
                 end
             catch ME
@@ -1747,7 +1782,7 @@ classdef CellCurator < handle
 
         function onButtonUp(obj, e)
             try
-                if ~isempty(obj.Map) && isvalid(obj.Map) && obj.CentreView == "map" && obj.Map.onButtonUp(e)
+                if ~isempty(obj.Map) && isvalid(obj.Map) && obj.CenterView == "map" && obj.Map.onButtonUp(e)
                     return
                 end
                 if ~isempty(obj.Locator) && isvalid(obj.Locator) && obj.Locator.onButtonUp(e)
@@ -1778,7 +1813,7 @@ classdef CellCurator < handle
         end
 
         function tf = mapShowing(obj)
-            tf = obj.CentreView == "map" && ~isempty(obj.Map) && isvalid(obj.Map);
+            tf = obj.CenterView == "map" && ~isempty(obj.Map) && isvalid(obj.Map);
         end
 
         function tf = locatorShowing(obj)
@@ -1827,7 +1862,7 @@ classdef CellCurator < handle
             if id == 0, return; end
             if ~any(obj.Store.get('CellID') == id), return; end
             if ~obj.canEdit(), return; end
-            if obj.CentreView == "map"
+            if obj.CenterView == "map"
                 ctx = struct('Queue', "map");
             else
                 ctx = struct('Queue', obj.Page.Queue, 'PageId', obj.Page.PageId);
@@ -1840,19 +1875,19 @@ classdef CellCurator < handle
             %ONQUEUECHOSEN  A queue picked from the list or the finish checklist: the gallery queues
             %   show the gallery, Close pairs and Sweep the map.
             name = string(name);
-            if ~any(name == CellCurator.MAP_QUEUES) && obj.CentreView == "map"
-                obj.showCentre("gallery");
+            if ~any(name == CellCurator.MAP_QUEUES) && obj.CenterView == "map"
+                obj.showCenter("gallery");
             end
             obj.showQueue(name);
         end
 
         function onViewButton(obj, value)
             if logical(value)
-                obj.showCentre("map");
+                obj.showCenter("map");
             else
-                obj.showCentre("gallery");
+                obj.showCenter("gallery");
             end
-            want = obj.CentreView == "map";
+            want = obj.CenterView == "map";
             if obj.UI.View.Value ~= want, obj.UI.View.Value = want; end
         end
 
@@ -1979,7 +2014,7 @@ classdef CellCurator < handle
             %   a pointer that did not.
             k = 0;
             try
-                if obj.CentreView ~= "gallery" || isempty(obj.Gallery.Layout) || ~obj.isTilePage(), return; end
+                if obj.CenterView ~= "gallery" || isempty(obj.Gallery.Layout) || ~obj.isTilePage(), return; end
                 fp = double(obj.Figure.CurrentPoint(1, 1:2));
                 k = double(obj.Gallery.hitTest(fp, "figure"));
                 if ~(k >= 1 && k <= numel(obj.Page.Ids)), k = 0; end
@@ -2235,6 +2270,8 @@ classdef CellCurator < handle
         end
 
         function moveCursor(obj, dr, dc)
+            %MOVECURSOR  The arrow keys: the cursor moves DR rows and DC tiles. Left and right run
+            %   on into the neighboring row; nothing moves past the first or the last tile.
             K = numel(obj.Page.Ids);
             if K == 0 || ~obj.isTilePage(), return; end
             nc = max(1, obj.Gallery.Grid(2));
@@ -2425,7 +2462,7 @@ classdef CellCurator < handle
                 src = obj.Store.get('LabelSource', ids);
                 flg = obj.Store.get('Flag', ids);
                 role = curation.BlindTiles.roleMask(obj.Store.get('AuditRole', ids));
-                pend = role & src ~= "blind";               % an audit tile waiting for its judgement
+                pend = role & src ~= "blind";               % an audit tile waiting for its judgment
                 good = lab == "Good" & ~pend;
                 bad = lab == "Bad" & ~pend;
                 unc = lab == "Uncertain" & ~pend;
@@ -2468,10 +2505,14 @@ classdef CellCurator < handle
             n = max(1, prod(g));
         end
 
-        function page = reviewPage(obj, excludeIds, offset)
-            %REVIEWPAGE  First page of the Review queue (without EXCLUDEIDS); OFFSET 1 = the page
-            %   to show now, 2 = the page after it (its number assumes the current one is confirmed).
+        function [page, k, n] = reviewPage(obj, excludeIds, offset)
+            %REVIEWPAGE  Page obj.ReviewOffset of the Review queue (without EXCLUDEIDS); OFFSET 1 =
+            %   the page to show now, 2 = the page after it (its number assumes the current one is
+            %   confirmed). K: the page taken (ReviewOffset, at most the last page), N: how many
+            %   pages the queue has. With OFFSET 1, ReviewOffset is set to K.
             page = [];
+            k = 1;
+            n = 0;
             if isempty(obj.Store) || isempty(obj.Session), return; end
             T = CellCurator.queueTable(obj.Store);
             p = curation.Proposals.current(T, obj.SourceKey);
@@ -2483,11 +2524,43 @@ classdef CellCurator < handle
                 if ~isempty(opts.Raw), opts.Raw = opts.Raw(keep); end
             end
             pages = curation.Queues.review(T, p, opts);
-            if isempty(pages), return; end
+            n = numel(pages);
+            if n == 0
+                if offset == 1, obj.ReviewOffset = 1; end
+                return
+            end
+            k = min(max(1, round(obj.ReviewOffset)), n);
+            if offset == 1, obj.ReviewOffset = k; end
             done = obj.Session.PagesDone;
-            page = CellCurator.fromQueuePage(pages(1), "active");
-            page.Number = done + offset;
-            page.Total = done + offset - 1 + numel(pages);
+            page = CellCurator.fromQueuePage(pages(k), "active");
+            page.Number = done + offset + k - 1;
+            page.Total = done + offset - 1 + n;
+        end
+
+        function leavePage(obj)
+            %LEAVEPAGE  PageDown on a Review page: show the page after it and label nothing. The
+            %   page's untouched tiles stay in the queue, one page back (PageUp). A page with
+            %   nothing left to decide is simply done (as Enter would say).
+            P = obj.Page;
+            if obj.QueueName ~= "review" || P.Kind ~= "active", return; end
+            if ~any(obj.untouchedOf(P)) && ~any(obj.blindPending(P.Ids) & obj.Store.get('Flag', P.Ids) == "")
+                obj.confirmPage();
+                return
+            end
+            nx = obj.NextPage;
+            obj.NextPage = [];
+            if isempty(nx) || nx.For ~= P.PageId || nx.PageSize ~= obj.pageSize() || nx.From ~= obj.ReviewOffset
+                [page, k] = obj.reviewPage(P.Ids, 2);
+                nx = struct('Page', page, 'K', k);
+            end
+            if isempty(nx.Page) || nx.K < obj.ReviewOffset
+                obj.setStatus(curation.UiText.msg('lastPage'));      % nothing after this page
+                obj.schedule("prefetch");
+                return
+            end
+            obj.ReviewOffset = obj.ReviewOffset + 1;
+            obj.showPageStruct(nx.Page);
+            obj.setStatus(curation.UiText.msg('pageLeft', P.Number));
         end
 
         function n = reviewPageCount(obj)
@@ -2514,8 +2587,9 @@ classdef CellCurator < handle
         function page = takeNextPage(obj, P)
             nx = obj.NextPage;
             obj.NextPage = [];
-            if ~isempty(nx) && nx.For == P.PageId && nx.PageSize == obj.pageSize()
+            if ~isempty(nx) && nx.For == P.PageId && nx.PageSize == obj.pageSize() && nx.From == obj.ReviewOffset
                 page = nx.Page;
+                obj.ReviewOffset = nx.K;        % the last page was confirmed: the one before it
                 obj.LastTimings.NextPrefetched = true;
             else
                 page = obj.reviewPage([], 1);
@@ -2530,9 +2604,10 @@ classdef CellCurator < handle
             switch P.Kind
                 case "active"
                     if obj.QueueName ~= "review", return; end
-                    nx = obj.reviewPage(P.Ids, 2);
+                    [nx, k] = obj.reviewPage(P.Ids, 2);
                     if isempty(nx), return; end
-                    obj.NextPage = struct('For', P.PageId, 'PageSize', obj.pageSize(), 'Page', nx);
+                    obj.NextPage = struct('For', P.PageId, 'PageSize', obj.pageSize(), 'Page', nx, ...
+                        'K', k, 'From', obj.ReviewOffset);
                     obj.Gallery.prefetch(nx.Ids, obj.styleFor(nx));
                 case "list"
                     n = numel(obj.ListPages);
@@ -2654,7 +2729,7 @@ classdef CellCurator < handle
             else
                 txt = curation.UiText.msg('redid', cs.Desc);
             end
-            if obj.CentreView == "map"
+            if obj.CenterView == "map"
                 obj.afterMapReplay(ids);
                 obj.setStatus(txt);
                 obj.schedule(["panels" "inspector" "undo"]);
@@ -2783,7 +2858,7 @@ classdef CellCurator < handle
             M = @curation.UiText.msg;
             D = curation.UiText.DASH;
             P = obj.Page;
-            if obj.CentreView == "map" && ~isempty(obj.Store)
+            if obj.CenterView == "map" && ~isempty(obj.Store)
                 txt = char(obj.mapContextText());
                 return
             end
@@ -3009,7 +3084,7 @@ classdef CellCurator < handle
         function rerenderVisible(obj)
             %RERENDERVISIBLE  Redraw what shows the tiles' look: the gallery (when on screen) and
             %   the maps (now when on screen, else when next shown).
-            if obj.CentreView == "gallery"
+            if obj.CenterView == "gallery"
                 obj.rerender();
             else
                 obj.GalleryStale = true;
@@ -3134,12 +3209,13 @@ classdef CellCurator < handle
                 return
             end
             try
+                obj.focusIfDue();
                 pend = obj.Pending;
                 obj.Pending = CellCurator.noPending();
                 if pend.status && ~isempty(obj.PendingStatus)
                     obj.setStatus(obj.PendingStatus);
                 end
-                if pend.prefetch && obj.CentreView == "gallery", obj.prefetchNext(); end
+                if pend.prefetch && obj.CenterView == "gallery", obj.prefetchNext(); end
                 if pend.inspector, obj.refreshInspector(); end
                 if pend.panels
                     obj.refreshPanels();
@@ -3174,7 +3250,7 @@ classdef CellCurator < handle
                 pg = pg(r);
                 return
             end
-            if obj.CentreView == "map"
+            if obj.CenterView == "map"
                 if obj.MapHover > 0
                     id = obj.MapHover;
                 elseif ~isempty(obj.MapSelection)
@@ -3431,11 +3507,11 @@ classdef CellCurator < handle
             else
                 why = obj.readOnlyWhy();
             end
-            inMap = obj.CentreView == "map";
+            inMap = obj.CenterView == "map";
             ids = ["good" "bad" "uncertain" "flag" "clear" "confirm"];
             for b = obj.UI.ActionButtons
                 act = extractAfter(string(b.Tag), "btn:");
-                if inMap && any(act == ["confirm" "prev"])      % page buttons: the gallery's
+                if inMap && any(act == ["confirm" "prev" "next"])      % page buttons: the gallery's
                     obj.setEnable(b, false, curation.UiText.tip(act), curation.UiText.disabled(act, CellCurator.WhyMap));
                 elseif any(ids == act)
                     obj.setEnable(b, ~ro, curation.UiText.tip(act), curation.UiText.disabled(act, why));
@@ -4229,7 +4305,7 @@ classdef CellCurator < handle
             if isempty(ids), return; end
             obj.FinishCache = [];
             obj.NextPage = [];
-            if obj.Page.Kind == "empty" && obj.QueueName == "review" && obj.CentreView == "gallery"
+            if obj.Page.Kind == "empty" && obj.QueueName == "review" && obj.CenterView == "gallery"
                 obj.showFinish();
             end
             obj.updateContext();
@@ -4243,7 +4319,7 @@ classdef CellCurator < handle
         end
 
         function tf = blindPending(obj, ids)
-            %BLINDPENDING  Cells IDS (column) that are audit tiles waiting for their blind judgement.
+            %BLINDPENDING  Cells IDS (column) that are audit tiles waiting for their blind judgment.
             tf = obj.blindRole(ids) & obj.Store.get('LabelSource', ids) ~= "blind";
         end
 
@@ -4287,6 +4363,58 @@ classdef CellCurator < handle
                 if strlength(string(rec.reason)) > 0
                     obj.setStatus(sprintf('%s %s', char(obj.StatusText), char(string(rec.reason))));
                 end
+            catch ME
+                obj.reportError(ME);
+            end
+        end
+    end
+
+    %% ======================================================================== lab database: the subject
+    methods
+        function txt = showSubject(obj)
+            %SHOWSUBJECT  The Subject... button: what the lab database says about the subject of the
+            %   open section (its sex, species and project, its tags and its variables), from this
+            %   computer's cache (celldb.subjectInfo; never the server), written to the status bar and
+            %   returned. Shown only on request: review stays blind to the animal's group otherwise.
+            M = @curation.UiText.msg;
+            txt = '';
+            try
+                id = "";
+                if ~isempty(obj.Store) && isvalid(obj.Store)
+                    for stem = [string(obj.Store.Meta.ManifestBase), string(obj.Store.Meta.Stem)]
+                        sec = celldb.parseSectionName(stem);
+                        if strlength(sec.SubjectID) > 0, id = string(sec.SubjectID); break; end
+                    end
+                    if id == "", txt = M('subjectNoName'); end
+                else
+                    txt = M('subjectNoSource');
+                end
+                if id ~= ""
+                    I = celldb.subjectInfo(id);
+                    if ~I.asked
+                        [ok, why] = celldb.available();
+                        if ok
+                            txt = M('subjectNotAsked', char(id));
+                        else
+                            txt = M('subjectNoClient', char(id), char(string(why)));
+                        end
+                    elseif ~I.known
+                        txt = M('subjectAbsent', char(id));
+                    else
+                        said = char(I.text);
+                        if strlength(I.tags) > 0
+                            said = [said '. ' M('subjectTags', char(I.tags))];
+                        end
+                        if strlength(I.variables) > 0
+                            said = [said '. ' M('subjectVariables', char(I.variables))];
+                        end
+                        if I.facts_read && strlength(I.tags) == 0 && strlength(I.variables) == 0
+                            said = [said '. ' M('subjectNoFacts')];
+                        end
+                        txt = M('subjectKnown', char(id), said);
+                    end
+                end
+                obj.setStatus(txt);
             catch ME
                 obj.reportError(ME);
             end
@@ -4504,6 +4632,7 @@ classdef CellCurator < handle
             obj.Gallery.setCache(sess.Cache);
             obj.HistPos = 0;
             obj.LivePage = [];
+            obj.ReviewOffset = 1;
             obj.Selection = zeros(1, 0);
             obj.Gallery.setSelection([]);
             obj.Cursor = 0;
@@ -4546,7 +4675,7 @@ classdef CellCurator < handle
             tStep = tic;
             obj.showQueue("review");
             obj.LastTimings.OpenPageMs = 1000 * toc(tStep);
-            if obj.CentreView == "map"
+            if obj.CenterView == "map"
                 obj.loadMap();
                 obj.updateContext();
             end
@@ -4833,7 +4962,7 @@ classdef CellCurator < handle
 
         %% ---- creating the map in the background
         function maybePrepareMap(obj)
-            %MAYBEPREPAREMAP  Create the centre map (hidden) once the person has paused for
+            %MAYBEPREPAREMAP  Create the center map (hidden) once the person has paused for
             %   PrepareIdleSec with a source on screen, so the first Tab does not wait for it.
             if obj.Closed || ~obj.Options.PrepareMap || isempty(obj.Session) || obj.CreatingMap || ...
                     (~isempty(obj.Map) && isvalid(obj.Map))
@@ -5020,8 +5149,8 @@ classdef CellCurator < handle
             end
         end
 
-        function showCentre(obj, view)
-            %SHOWCENTRE  "map": the map of the section in the centre; "gallery": the tiles.
+        function showCenter(obj, view)
+            %SHOWCENTER  "map": the map of the section in the center; "gallery": the tiles.
             if obj.Closed, return; end
             if string(view) == "map"
                 obj.showMapView();
@@ -5047,9 +5176,9 @@ classdef CellCurator < handle
                 obj.syncToolButtons();
                 return
             end
-            if showMap && obj.CentreView ~= "map"
-                obj.showCentre("map");
-                if obj.CentreView ~= "map"
+            if showMap && obj.CenterView ~= "map"
+                obj.showCenter("map");
+                if obj.CenterView ~= "map"
                     obj.syncToolButtons();
                     return
                 end
@@ -5066,7 +5195,7 @@ classdef CellCurator < handle
         end
 
         function setSnap(obj, tf)
-            %SETSNAP  Snap added and moved cells to their centre (snapToCellCentroid) or not.
+            %SETSNAP  Snap added and moved cells to their center (snapToCellCentroid) or not.
             obj.SnapOn = logical(tf);
             if obj.UI.Snap.Value ~= obj.SnapOn, obj.UI.Snap.Value = obj.SnapOn; end
             obj.updateContext();
@@ -5076,7 +5205,7 @@ classdef CellCurator < handle
             %MAPCLICK  A press and release at image point XY of the map ('normal' | 'alt' | 'extend'
             %   (Shift+click) | 'open' (double click)), through curation.MapView's own handlers.
             if nargin < 3 || isempty(selectionType), selectionType = 'normal'; end
-            if obj.CentreView ~= "map", obj.showCentre("map"); end
+            if obj.CenterView ~= "map", obj.showCenter("map"); end
             if ~obj.mapShowing(), return; end
             xy = double(xy(1, 1:2));
             obj.Map.refreshLayout();
@@ -5097,7 +5226,7 @@ classdef CellCurator < handle
 
         function mapDrag(obj, fromXY, toXY)
             %MAPDRAG  Press at FROMXY, move to TOXY, release (Move tool: moves the point there).
-            if obj.CentreView ~= "map", obj.showCentre("map"); end
+            if obj.CenterView ~= "map", obj.showCenter("map"); end
             if ~obj.mapShowing(), return; end
             fromXY = double(fromXY(1, 1:2));
             toXY = double(toXY(1, 1:2));
@@ -5113,7 +5242,7 @@ classdef CellCurator < handle
 
         function mapLasso(obj, poly)
             %MAPLASSO  A lasso drawn along POLY (M x 2 image px) with the Lasso tool.
-            if obj.CentreView ~= "map", obj.showCentre("map"); end
+            if obj.CenterView ~= "map", obj.showCenter("map"); end
             if ~obj.mapShowing(), return; end
             obj.setMapTool("lasso");
             if obj.MapTool ~= "lasso", return; end
@@ -5202,7 +5331,7 @@ classdef CellCurator < handle
         end
 
         function setSweepWidth(obj, um)
-            %SETSWEEPWIDTH  Width of a missed-cell sweep field in micrometres (a setting).
+            %SETSWEEPWIDTH  Width of a missed-cell sweep field in micrometers (a setting).
             um = CellCurator.clamp(double(um), [100 5000], obj.SweepFieldUm);
             obj.SweepFieldUm = um;
             if isfield(obj.UI, 'SweepWidth') && isvalid(obj.UI.SweepWidth) && obj.UI.SweepWidth.Value ~= um
@@ -5253,10 +5382,10 @@ classdef CellCurator < handle
                 return
             end
             obj.endDrag();
-            if obj.CentreView ~= "map"
+            if obj.CenterView ~= "map"
                 obj.UI.MapArea.Visible = 'on';
                 obj.Gallery.Panel.Visible = 'off';
-                obj.CentreView = "map";
+                obj.CenterView = "map";
             end
             t0 = tic;
             obj.ensureMap();
@@ -5279,7 +5408,7 @@ classdef CellCurator < handle
         end
 
         function showGalleryView(obj)
-            if obj.CentreView == "gallery"
+            if obj.CenterView == "gallery"
                 obj.syncViewButton();
                 return
             end
@@ -5296,7 +5425,7 @@ classdef CellCurator < handle
             obj.leaveMapTask();
             obj.Gallery.Panel.Visible = 'on';
             obj.UI.MapArea.Visible = 'off';
-            obj.CentreView = "gallery";
+            obj.CenterView = "gallery";
             obj.MapHover = uint32(0);
             if ~isempty(obj.Map) && isvalid(obj.Map), obj.Map.setHover(0); end   % no stale ring next time
             obj.syncViewButton();
@@ -5321,21 +5450,21 @@ classdef CellCurator < handle
             obj.locatorChanged();
         end
 
-        function toggleCentre(obj)
-            if obj.CentreView == "map"
-                obj.showCentre("gallery");
+        function toggleCenter(obj)
+            if obj.CenterView == "map"
+                obj.showCenter("gallery");
             else
-                obj.showCentre("map");
+                obj.showCenter("map");
             end
         end
 
         function syncViewButton(obj)
-            want = obj.CentreView == "map";
+            want = obj.CenterView == "map";
             if obj.UI.View.Value ~= want, obj.UI.View.Value = want; end
         end
 
         function syncToolButtons(obj)
-            %SYNCTOOLBUTTONS  The active tool's button pressed, coloured and bold.
+            %SYNCTOOLBUTTONS  The active tool's button pressed, colored and bold.
             for i = 1:numel(obj.UI.ToolButtons)
                 want = CellCurator.MAP_TOOLS(i) == obj.MapTool;
                 b = obj.UI.ToolButtons(i);
@@ -5351,7 +5480,7 @@ classdef CellCurator < handle
         end
 
         function ensureMap(obj)
-            %ENSUREMAP  Create the centre map (and its action bars, over it): at the first idle moment
+            %ENSUREMAP  Create the center map (and its action bars, over it): at the first idle moment
             %   after a source is on screen, else on first use.
             if (~isempty(obj.Map) && isvalid(obj.Map)) || obj.CreatingMap, return; end
             obj.CreatingMap = true;     % an idle step must not start a second one meanwhile
@@ -5363,7 +5492,7 @@ classdef CellCurator < handle
             end
             obj.CreatingMap = false;
             obj.MapLaidOut = false;
-            if obj.CentreView == "map"
+            if obj.CenterView == "map"
                 % made on demand, or shown while it was being made: settle its size, load it
                 obj.settleMapLayout();
                 obj.loadMap();
@@ -5426,7 +5555,7 @@ classdef CellCurator < handle
             C = curation.UiText.colors();
             light = [0.95 0.95 0.95];
             dark = [0.1 0.1 0.1];
-            grey = [0.94 0.94 0.94];
+            gray = [0.94 0.94 0.94];
             % lasso
             [p, g] = obj.newActionBar('pn:lassoBar', {'fit', 82, 82, 104, 138, 140, 102, '1x'});
             obj.UI.LassoText = obj.barLabel(g, 'lbl:lassoBar');
@@ -5434,29 +5563,29 @@ classdef CellCurator < handle
             obj.UI.LassoBad = obj.barButton(g, 3, 'lassoBad', @() obj.lassoAction("bad"), C.Bad / 255, [1 1 1]);
             obj.UI.LassoUnc = obj.barButton(g, 4, 'lassoUncertain', @() obj.lassoAction("uncertain"), C.Uncertain / 255, dark);
             obj.UI.LassoExclude = obj.barButton(g, 5, 'lassoExclude', @() obj.lassoAction("exclude"), C.Exclude / 255, dark);
-            obj.UI.LassoMerge = obj.barButton(g, 6, 'lassoMerge', @() obj.lassoAction("merge"), grey, dark);
-            obj.barButton(g, 7, 'lassoCancel', @() obj.lassoAction("cancel"), grey, dark);
+            obj.UI.LassoMerge = obj.barButton(g, 6, 'lassoMerge', @() obj.lassoAction("merge"), gray, dark);
+            obj.barButton(g, 7, 'lassoCancel', @() obj.lassoAction("cancel"), gray, dark);
             obj.UI.LassoBar = p;
             % exclusion region
             [p, g] = obj.newActionBar('pn:regionBar', {'fit', 160, 110, '1x'});
             obj.UI.RegionText = obj.barLabel(g, 'lbl:regionBar');
             obj.barButton(g, 2, 'regionRemove', @() obj.removeSelectedRegion(), C.Exclude / 255, dark);
-            obj.barButton(g, 3, 'regionKeep', @() obj.deselectRegion(true), grey, dark);
+            obj.barButton(g, 3, 'regionKeep', @() obj.deselectRegion(true), gray, dark);
             obj.UI.RegionBar = p;
             % close pairs
             [p, g] = obj.newActionBar('pn:pairBar', {'fit', 300, 130, 90, 90, '1x'});
             obj.UI.PairText = obj.barLabel(g, 'lbl:pairBar');
             obj.UI.PairAccept = obj.barButton(g, 2, 'pairAcceptMerge', @() obj.pairAccept(), [0.80 0.88 0.98], dark);
             obj.UI.PairAccept.Tag = 'btn:pairAccept';
-            obj.UI.PairOther = obj.barButton(g, 3, 'pairOtherKeep', @() obj.pairOther(), grey, dark);
+            obj.UI.PairOther = obj.barButton(g, 3, 'pairOtherKeep', @() obj.pairOther(), gray, dark);
             obj.UI.PairOther.Tag = 'btn:pairOther';
-            obj.barButton(g, 4, 'pairSkip', @() obj.pairStep(1), grey, dark);
-            obj.barButton(g, 5, 'pairBack', @() obj.pairStep(-1), grey, dark);
+            obj.barButton(g, 4, 'pairSkip', @() obj.pairStep(1), gray, dark);
+            obj.barButton(g, 5, 'pairBack', @() obj.pairStep(-1), gray, dark);
             obj.UI.PairBar = p;
             % missed-cell sweep
             [p, g] = obj.newActionBar('pn:sweepBar', {'fit', 140, 140, 'fit', 70, '1x'});
             obj.UI.SweepText = obj.barLabel(g, 'lbl:sweepBar');
-            obj.barButton(g, 2, 'sweepPrev', @() obj.sweepStep(-1), grey, dark);
+            obj.barButton(g, 2, 'sweepPrev', @() obj.sweepStep(-1), gray, dark);
             obj.barButton(g, 3, 'sweepNext', @() obj.sweepStep(1), [0.80 0.88 0.98], dark);
             t = uilabel(g, 'Text', U('sweepWidth'), 'FontColor', light, 'HorizontalAlignment', 'right');
             t.Layout.Row = 1; t.Layout.Column = 4;
@@ -5541,7 +5670,7 @@ classdef CellCurator < handle
         end
 
         function loadMap(obj)
-            %LOADMAP  Bring the centre map in step with the source on screen: everything when it
+            %LOADMAP  Bring the center map in step with the source on screen: everything when it
             %   shows another source, else only what changed while it was hidden.
             m = obj.Map;
             sess = obj.Session;
@@ -5602,7 +5731,7 @@ classdef CellCurator < handle
 
         function syncMapIds(obj, ids)
             %SYNCMAPIDS  Make points IDS of the map match the store: added, removed (merged, stale,
-            %   gone with an undo), moved and recoloured as needed.
+            %   gone with an undo), moved and recolored as needed.
             m = obj.Map;
             st = obj.Store;
             ids = unique(uint32(ids(:)));
@@ -5639,7 +5768,7 @@ classdef CellCurator < handle
         end
 
         function [rgb, layer] = cellMarkers(obj, ids)
-            %CELLMARKERS  Colour (0-255) and marker layer of the map points of cells IDS (default:
+            %CELLMARKERS  Color (0-255) and marker layer of the map points of cells IDS (default:
             %   every row of the store), from their state and the reviewer's markers.
             st = obj.Store;
             if nargin < 2
@@ -5680,7 +5809,7 @@ classdef CellCurator < handle
         function R = regionList(obj, f)
             %REGIONLIST  What the map draws: the dataset's regions that apply to this source, the
             %   reference ROI, and the lasso or the selected region as an outline. F: page pixels per
-            %   view pixel (1 for the centre map; the locator's shrink factor).
+            %   view pixel (1 for the center map; the locator's shrink factor).
             R = struct('xy', {}, 'kind', {}, 'id', {});
             st = obj.Store;
             if isempty(st), return; end
@@ -5715,7 +5844,7 @@ classdef CellCurator < handle
         end
 
         function ensureInView(obj, xy)
-            %ENSUREINVIEW  Centre the map on XY (rows) when any of it is outside the view.
+            %ENSUREINVIEW  Center the map on XY (rows) when any of it is outside the view.
             r = obj.Map.viewRect();
             mx = 0.05 * (r(2) - r(1));
             my = 0.05 * (r(4) - r(3));
@@ -5732,12 +5861,12 @@ classdef CellCurator < handle
         end
 
         function fitMap(obj)
-            if obj.CentreView ~= "map", obj.showCentre("map"); end
+            if obj.CenterView ~= "map", obj.showCenter("map"); end
             if obj.mapShowing(), obj.Map.fit(); end
         end
 
         function showMapAt(obj, xy)
-            obj.showCentre("map");
+            obj.showCenter("map");
             if ~obj.mapShowing(), return; end
             if obj.Map.IsFit
                 obj.Map.centerOn(xy, 2 * CellCurator.ShowOnMapUm);
@@ -5858,7 +5987,7 @@ classdef CellCurator < handle
             %STARTWARMUP  While the empty window waits for a folder, run the code a first source
             %   opening needs once on a tiny dataset in a temporary folder (store, crops, queues,
             %   gallery page), so the first real source opens about as fast as the next ones. Once per
-            %   MATLAB session; cancelled by any input.
+            %   MATLAB session; canceled by any input.
             if ~obj.Options.WarmUp || CellCurator.warmedFlag(), return; end
             obj.stopWarmUp();
             t = timer('Name', 'CellCurator warm-up', 'ExecutionMode', 'singleShot', 'StartDelay', 0.3, ...
@@ -6009,7 +6138,7 @@ classdef CellCurator < handle
                 end
                 if kind == "lockLost"
                     obj.MapFull = obj.MapLoadedId == sess.Id;    % the change in progress was reverted
-                    if obj.CentreView == "map", obj.flushMap(); end
+                    if obj.CenterView == "map", obj.flushMap(); end
                     obj.onLockLost();
                     return
                 end
@@ -6030,11 +6159,11 @@ classdef CellCurator < handle
                     else
                         obj.MapPending = [obj.MapPending; ids(:)];
                     end
-                    if obj.CentreView == "map"
+                    if obj.CenterView == "map"
                         obj.flushMap();
                     end
                 end
-                if obj.CentreView == "map"
+                if obj.CenterView == "map"
                     obj.GalleryStale = true;
                 end
                 obj.locatorChanged();
@@ -6134,7 +6263,7 @@ classdef CellCurator < handle
                     end
                 case "+", obj.zoomMap(1.5);
                 case "-", obj.zoomMap(1 / 1.5);
-                case {"tab", "v"}, obj.toggleCentre();
+                case {"tab", "v"}, obj.toggleCenter();
                 case ".", obj.setStatus(M('onMapAlready'));
                 case "s", obj.setMapTool("select");
                 case "a", obj.setMapTool("add");
@@ -6302,7 +6431,7 @@ classdef CellCurator < handle
 
         function addCellAt(obj, xy)
             %ADDCELLAT  The Add tool: a new cell (Good, human, reviewed) at XY, snapped when Snap to
-            %   centre is on; inside an exclusion region the store excludes it at once.
+            %   center is on; inside an exclusion region the store excludes it at once.
             if ~obj.canEdit(), return; end
             [xy, posSrc, shift] = obj.refinePosition(xy);
             st = obj.Store;
@@ -6320,7 +6449,7 @@ classdef CellCurator < handle
         end
 
         function [p, posSrc, shift] = refinePosition(obj, xy)
-            %REFINEPOSITION  XY refined with snapToCellCentroid when Snap to centre is on (on a window
+            %REFINEPOSITION  XY refined with snapToCellCentroid when Snap to center is on (on a window
             %   of the target page around XY; CellType oval for nets, round for PV). POSSRC "snap" when
             %   the snap moved it, else "human"; SHIFT the distance moved (NaN: snapping is off).
             p = double(xy(1, 1:2));
@@ -6394,7 +6523,7 @@ classdef CellCurator < handle
                 src = "human";
                 if b, src = "blind"; end              % one audit cell, judged on its own: blind
             else
-                src = "human";                        % audit cells are labelled one at a time
+                src = "human";                        % audit cells are labeled one at a time
                 if any(b), skipped = M('blindSkipped', CellCurator.cellsText(nnz(b))); end
                 ids = ids(~b);
                 if isempty(ids)
@@ -6476,7 +6605,7 @@ classdef CellCurator < handle
         function labelAction(obj, label)
             %LABELACTION  The Good / Bad / Uncertain buttons: the selected map points on the map, the
             %   selected (else inspected) tiles in the gallery.
-            if obj.CentreView == "map"
+            if obj.CenterView == "map"
                 obj.labelMap(obj.mapTargets(), label);
             else
                 obj.labelTiles(obj.buttonTargets(), label);
@@ -6484,7 +6613,7 @@ classdef CellCurator < handle
         end
 
         function flagAction(obj)
-            if obj.CentreView == "map"
+            if obj.CenterView == "map"
                 obj.flagMap(obj.mapTargets());
             else
                 obj.flagTiles(obj.buttonTargets());
@@ -6492,7 +6621,7 @@ classdef CellCurator < handle
         end
 
         function clearAction(obj)
-            if obj.CentreView == "map"
+            if obj.CenterView == "map"
                 obj.clearMap(obj.mapTargets());
             else
                 obj.clearTiles(obj.buttonTargets());
@@ -6501,7 +6630,7 @@ classdef CellCurator < handle
 
         function showOnMap(obj, fromButton)
             %SHOWONMAP  [.] or the Show on map button: the pointed-at (or cursor, or inspected) cell
-            %   on the map, centred and selected.
+            %   on the map, centered and selected.
             if nargin < 2, fromButton = false; end
             M = @curation.UiText.msg;
             if isempty(obj.Store)
@@ -6517,7 +6646,7 @@ classdef CellCurator < handle
                 return
             end
             id = obj.Page.Ids(k);
-            obj.showCentre("map");
+            obj.showCenter("map");
             if ~obj.mapShowing(), return; end
             xy = [obj.Store.get('X', id), obj.Store.get('Y', id)];
             obj.Map.centerOn(xy, CellCurator.ShowOnMapUm);
@@ -6535,7 +6664,7 @@ classdef CellCurator < handle
                 obj.setStatus(curation.UiText.msg('noGalleryPage', double(id), why));
                 return
             end
-            obj.showCentre("gallery");
+            obj.showCenter("gallery");
             k = [];
             if obj.isTilePage() && obj.QueueName == queue
                 k = find(obj.Page.Ids == id, 1);
@@ -6571,7 +6700,7 @@ classdef CellCurator < handle
             elseif g('Label') == ""
                 queue = "review";
             else
-                why = "it is labelled but not reviewed";
+                why = "it is labeled but not reviewed";
             end
         end
 
@@ -6672,7 +6801,7 @@ classdef CellCurator < handle
             end
             if ~obj.canEdit(), return; end
             st = obj.Store;
-            b = obj.blindRole(ids);                  % audit cells are labelled one at a time
+            b = obj.blindRole(ids);                  % audit cells are labeled one at a time
             skipped = '';
             if any(b), skipped = curation.UiText.msg('blindSkipped', CellCurator.cellsText(nnz(b))); end
             ids = ids(~b);
@@ -6945,7 +7074,7 @@ classdef CellCurator < handle
 
         function startPairs(obj)
             obj.leaveMapTask();
-            obj.showCentre("map");
+            obj.showCenter("map");
             if ~obj.mapShowing(), return; end
             obj.cancelLasso(false);
             obj.deselectRegion(false);
@@ -7107,7 +7236,7 @@ classdef CellCurator < handle
             %   Add tool; it resumes at the field reached in this source.
             obj.leaveMapTask();
             wasShowing = obj.mapShowing();
-            obj.showCentre("map");
+            obj.showCenter("map");
             if ~obj.mapShowing(), return; end
             if ~wasShowing, drawnow; end          % sweepRects needs the map's real size
             obj.cancelLasso(false);
@@ -7165,7 +7294,7 @@ classdef CellCurator < handle
             end
             obj.Session.SweepField = 0;
             obj.leaveMapTask();
-            obj.showCentre("gallery");
+            obj.showCenter("gallery");
             obj.showQueue("review");
             obj.setStatus(curation.UiText.msg('sweepDone', n, obj.SourceKey));
         end
@@ -7227,7 +7356,7 @@ classdef CellCurator < handle
 
         function [nRev, nFlag, nAudit] = openCounts(obj)
             %OPENCOUNTS  Ordinary cells the Review queue still holds, flagged cells, and audit tiles
-            %   waiting for their blind judgement (active, not excluded).
+            %   waiting for their blind judgment (active, not excluded).
             st = obj.Store;
             act = st.get('State') == "active" & ~st.get('Excluded');
             flg = st.get('Flag') ~= "";
@@ -7336,7 +7465,7 @@ classdef CellCurator < handle
             for i = 1:size(items, 1)
                 [b, id, fmt, n, act] = items{i, :};
                 if n == 0
-                    % satisfied: clearly readable and visibly done (a disabled button greys its text)
+                    % satisfied: clearly readable and visibly done (a disabled button grays its text)
                     txt = M('finDone', M(fmt, M('finOk')));
                     tip = M('finDoneTip', T(id));
                     bgc = [0.17 0.30 0.23]; fc = [0.86 0.96 0.89];
@@ -7363,7 +7492,7 @@ classdef CellCurator < handle
             obj.setEnable(obj.UI.FinSweep, true, T('finishSweep'), T('finishSweep'));
             obj.refreshRescoreControls(F.Rescore);
             % the button stays readable in every state (a disabled button on the dark panel is not):
-            % complete = the done colour; blocked = what comes first, and a click says so
+            % complete = the done color; blocked = what comes first, and a click says so
             b = obj.UI.FinComplete;
             if F.Complete
                 obj.setText(b, M('finCompleted'));
@@ -7541,7 +7670,7 @@ classdef CellCurator < handle
 
         function refreshLocator(obj)
             %REFRESHLOCATOR  The locator shows the section of the source on screen, the cells of the
-            %   page (or the map selection) in colour, the others dimmed, the focus cell ringed.
+            %   page (or the map selection) in color, the others dimmed, the focus cell ringed.
             if ~obj.LocatorShown || isempty(obj.Session) || isempty(obj.Store), return; end
             obj.ensureLocator();
             L = obj.Locator;
@@ -7567,7 +7696,7 @@ classdef CellCurator < handle
             xy = xy(ok, :);
             rgb = rgb(ok, :);
             layer = layer(ok);
-            if obj.CentreView == "map"
+            if obj.CenterView == "map"
                 focusSet = obj.MapSelection;
             elseif obj.isTilePage()
                 focusSet = obj.Page.Ids;
@@ -7588,7 +7717,7 @@ classdef CellCurator < handle
 
         function id = locatorFocus(obj)
             id = zeros(0, 1, 'uint32');
-            if obj.CentreView == "map"
+            if obj.CenterView == "map"
                 if obj.MapHover > 0
                     id = obj.MapHover;
                 elseif ~isempty(obj.MapSelection)
@@ -7973,12 +8102,12 @@ classdef CellCurator < handle
         end
 
         function s = auditText(n)
-            %AUDITTEXT  "3 audit tiles (grey border)".
+            %AUDITTEXT  "3 audit tiles (gray border)".
             s = curation.UiText.msg('auditTiles', CellCurator.fmtInt(n), CellCurator.plural(n, 'tile', 'tiles'));
         end
 
         function s = needText(n)
-            %NEEDTEXT  "1 audit tile (grey border) needs" / "3 audit tiles (grey border) need".
+            %NEEDTEXT  "1 audit tile (gray border) needs" / "3 audit tiles (gray border) need".
             s = [CellCurator.auditText(n) ' ' CellCurator.plural(n, 'needs', 'need')];
         end
 

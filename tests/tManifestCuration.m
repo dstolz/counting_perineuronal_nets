@@ -84,7 +84,7 @@ classdef tManifestCuration < matlab.unittest.TestCase
         function discoverReportsCurationAndKeepsLegacyFields(tc)
             % Note: with the real naming (<x>_proj.tif + <x>_proj_ECM1_locs.csv) discover
             % returns the image and the locs as two datasets (bases <x> and <x>_proj).
-            % That is existing behaviour; here only the effect of curation files matters.
+            % That is existing behavior; here only the effect of curation files matters.
             before = CellDatasetManifest.discover(tc.Folder, struct('WriteManifest', false));
             basesBefore = sort(string({before.Base}));
 

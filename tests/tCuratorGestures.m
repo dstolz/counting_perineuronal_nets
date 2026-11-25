@@ -35,7 +35,7 @@ classdef tCuratorGestures < matlab.uitest.TestCase
         end
 
         function fp = tilePoint(~, app, k)
-            %tilePoint  Figure-pixel point at the centre of tile K.
+            %tilePoint  Figure-pixel point at the center of tile K.
             fp = app.Gallery.mosaicToFigure(app.Gallery.tileCenter(k));
         end
     end
@@ -121,16 +121,16 @@ classdef tCuratorGestures < matlab.uitest.TestCase
             tc.press(app.Figure, tc.tilePoint(app, 2));
             drawnow;
             tc.verifyEqual(st.get('Label', P.Ids(2)), "", 'clicked again: untouched');
-            % the border in the shown mosaic is the label's colour
+            % the border in the shown mosaic is the label's color
             C = curation.UiText.colors();
             L = app.Gallery.Layout;
             r = L.Rect(3, :);
             px = double(squeeze(app.Gallery.Mosaic(r(2) + r(4) / 2, r(1), :)))';
-            tc.verifyEqual(px, C.Uncertain, 'the decided tile wears its label colour');
+            tc.verifyEqual(px, C.Uncertain, 'the decided tile wears its label color');
             r = L.Rect(1, :);
             px = double(squeeze(app.Gallery.Mosaic(r(2) + r(4) / 2, r(1), :)))';
             if P.Default == "Good", want = C.ProposedGood; else, want = C.ProposedBad; end
-            tc.verifyEqual(px, want, 'an untouched tile wears the muted proposed colour');
+            tc.verifyEqual(px, want, 'an untouched tile wears the muted proposed color');
         end
 
         function dragPaintsTheSameChange(tc)
@@ -279,7 +279,7 @@ classdef tCuratorGestures < matlab.uitest.TestCase
         end
 
         function mapScreenshots(tc)
-            % the map with every point colour, an exclusion region, the reference strip, the locator,
+            % the map with every point color, an exclusion region, the reference strip, the locator,
             % the lasso bar, a close pair, a sweep field and the finish checklist
             dir0 = tCuratorGestures.screensDir();
             roi = fullfile(tc.Folder, [tc.Truth.baseName '_proj_roi.roi']);
@@ -294,7 +294,7 @@ classdef tCuratorGestures < matlab.uitest.TestCase
             app.handleKey('return', {});
             app.handleKey('return', {});
             app.handleKey('tab', {});
-            tc.assertEqual(app.CentreView, "map");
+            tc.assertEqual(app.CenterView, "map");
             app.mapLasso([480 80; 700 80; 700 200; 480 200]);
             app.lassoAction('exclude');
             app.showRightTab('map');
@@ -381,16 +381,16 @@ classdef tCuratorGestures < matlab.uitest.TestCase
             %   hidden again): the gallery's key path must not pay for keeping it in step
             [tA, tCallA, okA] = tCuratorGestures.labelKeySeries(app, 30, 4);
             t1 = tic;
-            app.showCentre("map");
+            app.showCenter("map");
             drawnow;
             tMap = 1000 * toc(t1);
-            app.showCentre("gallery");
+            app.showCenter("gallery");
             drawnow;
             tc.assertEqual(app.Counters.MapLoads, 1);
             fprintf('[curator-perf] map shown for ECM1 in %.0f ms and hidden again; the budgets below run with it loaded\n', tMap);
-            [t, tCall, okColour] = tCuratorGestures.labelKeySeries(app, 30, 4);
+            [t, tCall, okColor] = tCuratorGestures.labelKeySeries(app, 30, 4);
             R.LabelKey = t;
-            tc.verifyTrue(okA && okColour, 'the border shows the new label');
+            tc.verifyTrue(okA && okColor, 'the border shows the new label');
             fprintf(['[curator-perf] label key -> border changed, median: %.1f ms before the map was loaded ' ...
                 '(call %.1f ms), %.1f ms with it loaded (call %.1f ms)\n'], median(tA), median(tCallA), ...
                 median(t), median(tCall));

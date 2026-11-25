@@ -1,6 +1,6 @@
 classdef tStoreReconcile < matlab.unittest.TestCase
 %tStoreReconcile  Specification tests of curation.Store reconcile: matching a new detector output to the store.
-%   Written from the contract (one-to-one passes: exact, mutual nearest neighbour within TolUm, effective
+%   Written from the contract (one-to-one passes: exact, mutual nearest neighbor within TolUm, effective
 %   position for human/added rows; what happens to rows that are not matched), not from the implementation.
 %   Fixture: tests\fixtures\makeSyntheticDataset (1.657 um/px, so the 8 um tolerance is about 4.83 px).
 
@@ -126,7 +126,7 @@ classdef tStoreReconcile < matlab.unittest.TestCase
         function twoOldPointsCompetingForOneNewPointNearestWins(tc)
             % Both rows unreviewed, i.e. of the same priority: the nearer one wins. (Review finding
             % 5: a reviewed row now gets the detection first, whatever the distance; that case is
-            % tStoreReconcilePriority/reviewedRowGetsTheDetectionBeforeAnUnreviewedNeighbour.)
+            % tStoreReconcilePriority/reviewedRowGetsTheDetectionBeforeAnUnreviewedNeighbor.)
             s = tc.memStore([100 100; 106 100]);
             idA = rowAtXY(s.T, 100, 100).CellID;
             idB = rowAtXY(s.T, 106, 100).CellID;
@@ -310,11 +310,11 @@ classdef tStoreReconcile < matlab.unittest.TestCase
 
     %% ---- re-detection of the fixture -----------------------------------------------------------
     methods (Test)
-        function redetectedFileReconcilesOnOpenAllRowsLabelled(tc)
+        function redetectedFileReconcilesOnOpenAllRowsLabeled(tc)
             tc.redetectRoundTrip(1);
         end
 
-        function redetectedFileReconcilesOnOpenHalfRowsLabelled(tc)
+        function redetectedFileReconcilesOnOpenHalfRowsLabeled(tc)
             tc.redetectRoundTrip(2);
         end
 
@@ -337,9 +337,9 @@ classdef tStoreReconcile < matlab.unittest.TestCase
             L0 = tc.readLocs('ECM1');
             n = height(L0);
             ids = idsOfRows(s.T, L0);
-            labelled = mod((1:n)', labelEvery) == 0;
-            if labelEvery == 1; labelled(:) = true; end
-            for r = find(labelled)'
+            labeled = mod((1:n)', labelEvery) == 0;
+            if labelEvery == 1; labeled(:) = true; end
+            for r = find(labeled)'
                 if det.Kind(r) == "tp"
                     s.setLabel(ids(r), 'Good', 'human');
                 else
@@ -369,9 +369,9 @@ classdef tStoreReconcile < matlab.unittest.TestCase
                 row = s.T(s.T.CellID == ids(d), :);
                 tc.assertEqual(height(row), 1, "dropped old row " + d + " vanished from the store");
                 tc.verifyFalse(row.InLocs);
-                if labelled(d) && det.Kind(d) == "tp"
+                if labeled(d) && det.Kind(d) == "tp"
                     tc.verifyEqual([row.State row.Label], ["active" "Good"], 'reviewed Good must survive a vanished detection');
-                elseif labelled(d)
+                elseif labeled(d)
                     tc.verifyEqual(row.Label, "Bad");
                     tc.verifyNotEqual(row.State, "stale");
                 else
@@ -387,7 +387,7 @@ classdef tStoreReconcile < matlab.unittest.TestCase
                 tc.verifyFalse(row.Reviewed);
             end
             % report and counts versus truth
-            dl = labelled(dropped);
+            dl = labeled(dropped);
             dk = det.Kind(dropped);
             tc.verifyEqual(rep.nOld, n);
             tc.verifyEqual(rep.nNew, height(R));
@@ -398,7 +398,7 @@ classdef tStoreReconcile < matlab.unittest.TestCase
             tc.verifyEqual(rep.nStale, nnz(~dl));
             tc.verifyEqual(rep.nPurged, 0);
             c = s.counts();
-            goodRows = labelled & det.Kind == "tp";
+            goodRows = labeled & det.Kind == "tp";
             tc.verifyEqual(c.good, nnz(goodRows));
             tc.verifyEqual(c.kept, nnz(goodRows), 'vanished Good rows are still kept');
             tc.verifyEqual(c.vanishedGood, nnz(dl & dk == "tp"));

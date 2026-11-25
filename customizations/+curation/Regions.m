@@ -6,7 +6,7 @@ classdef Regions
 %       kind   string: "exclude" | "analysis" | "reference"
 %       scope  string: "image" (every channel of the dataset) or a source key such as "ECM1"
 %       xy     M x 2 polygon vertices [X Y], full-resolution image pixels in MATLAB's
-%              convention (pixel centres at integers, first pixel = 1), not closed
+%              convention (pixel centers at integers, first pixel = 1), not closed
 %       note   string
 %   A region list is an N x 1 struct array of these (0 x 1 when empty).
 %
@@ -21,9 +21,9 @@ classdef Regions
 %   a       = curation.Regions.areaUm2(region, umPerPx)
 %
 %   ImageJ -> MATLAB coordinates: ImageJ coordinates are 0-based and continuous, pixel i
-%   covering [i, i+1]; its centre is i+0.5. MATLAB's pixel k has its centre at k, so
+%   covering [i, i+1]; its center is i+0.5. MATLAB's pixel k has its center at k, so
 %   x_matlab = x_imagej + 0.5 (same for y). A rect ROI left=10 width=20 therefore becomes
-%   the polygon with x from 10.5 to 30.5, which in MATLAB covers pixel centres 11..30.
+%   the polygon with x from 10.5 to 30.5, which in MATLAB covers pixel centers 11..30.
 
     methods (Static)
 
@@ -148,7 +148,7 @@ classdef Regions
         %   opts (struct, optional): kind (default "reference"), scope (default "image"),
         %   note (default the file name), id (default 0). Supported: rect, oval (64-gon in
         %   the bounding box), polygon / freehand / traced, and a line with stroke width > 1,
-        %   which becomes the rotated rectangle ("strip") of that width centred on the line
+        %   which becomes the rotated rectangle ("strip") of that width centered on the line
         %   (corner order: start+n, end+n, end-n, start-n with n = (-dy, dx)/length*width/2).
         %   Coordinates are converted to MATLAB's convention by adding 0.5 (see class help).
         %   A line of width <= 1, or any other type, raises curation:Regions:unsupportedRoi
@@ -232,7 +232,7 @@ classdef Regions
         end
 
         function a = areaUm2(region, umPerPx)
-        %AREAUM2  Polygon area of one region in square micrometres: polyarea(xy) * umPerPx^2.
+        %AREAUM2  Polygon area of one region in square micrometers: polyarea(xy) * umPerPx^2.
             a = polyarea(region.xy(:, 1), region.xy(:, 2)) * umPerPx^2;
         end
 

@@ -5,22 +5,22 @@ classdef Features
 %       pageT    target page (H x W, any numeric class, any intensity scale)
 %       pageC    companion page of the same size (the other channel), or [] for none
 %       T        table (or struct of columns) with X, Y (full-resolution pixels; X the column,
-%                Y the row, pixel centres at integers) and optionally score, rescore
-%       umPerPx  page pixel size in micrometres (read it per source)
+%                Y the row, pixel centers at integers) and optionally score, rescore
+%       umPerPx  page pixel size in micrometers (read it per source)
 %       opts     struct, every field optional:
-%                  NeighbourMask  N x 1 logical: rows that count as neighbours for nnUm and
+%                  NeighborMask  N x 1 logical: rows that count as neighbors for nnUm and
 %                                 densityN (default all rows). curation.ProjectIndex passes
 %                                 InLocs (every detection in the current locs, whatever its
 %                                 curation state), so the features never depend on curation
 %                                 decisions such as merges.
 %                  PageStats, PageStatsC   precomputed curation.Features.pageStats(page)
-%                  Chunk          candidates per vectorised pass (default 512; bounds memory)
+%                  Chunk          candidates per vectorized pass (default 512; bounds memory)
 %       F        N x K double, row i belongs to row i of T; NaN = not available
 %       names    1 x K string, the column names (= curation.Features.names())
 %
 %   names = curation.Features.names()
 %   D = curation.Features.describe()       table Name, Meaning (one line per feature)
-%   s = curation.Features.pageStats(page)  robust page statistics used for the normalisation
+%   s = curation.Features.pageStats(page)  robust page statistics used for the normalization
 %
 %   INTENSITY SCALE. Pages are float32 on a scale that differs between sections. Every
 %   image-derived feature is a ratio of intensity DIFFERENCES (local z-scores, or differences
@@ -39,9 +39,9 @@ classdef Features
 %   value moves with it). Caveat: an integer page whose dark background is clipped at its
 %   minimum over more than 2% of the frame has those pixels treated as padding too.
 %
-%   GEOMETRY (micrometres, measured from the exact sub-pixel position of the candidate; the
+%   GEOMETRY (micrometers, measured from the exact sub-pixel position of the candidate; the
 %   image is sampled at integer pixels with a stride of max(1, round(1 / umPerPx)) px)
-%     centre      d <= 3                    the hole of a net / the core of a soma
+%     center      d <= 3                    the hole of a net / the core of a soma
 %     annulus     5 <= d <= 10              the wall of a net (~18 um diameter)
 %     background  14 <= d <= 22            local background ring (membership by integer offset)
 %     profile     8 bins of 2.75 um from 0 to 22
@@ -51,17 +51,17 @@ classdef Features
 %   gives NaN. Interior candidates never get NaN image features.
 %
 %   FEATURES (see describe() for the one-line meaning of each)
-%     score, rescore, scoreRank, rescoreRank, centreZ, annulusZ, contrast, prof1..prof8,
+%     score, rescore, scoreRank, rescoreRank, centerZ, annulusZ, contrast, prof1..prof8,
 %     ringRatio, angUniformity, peakRadiusUm, blobAreaUm2, blobCompactness, bgLevel, bgNoise,
-%     compContrast, compCentreZ, borderUm, nnUm, densityN
+%     compContrast, compCenterZ, borderUm, nnUm, densityN
 %   rescore may be NaN (kept as NaN; the model handles missing values); compContrast and
-%   compCentreZ are NaN without a companion page.
+%   compCenterZ are NaN without a companion page.
 %
 %   See also curation.AssistModel, curation.ProjectIndex, curation.CropCache.
 
     properties (Constant)
         VERSION = "features/2"     % 2: page statistics and windows leave the padding out
-        CENTRE_UM = 3
+        CENTER_UM = 3
         ANNULUS_UM = [5 10]
         BG_UM = [14 22]
         PROFILE_UM = 22
@@ -79,10 +79,10 @@ classdef Features
         function names = names()
             %NAMES  Feature names, in column order of F.
             names = ["score", "rescore", "scoreRank", "rescoreRank", ...
-                "centreZ", "annulusZ", "contrast", ...
+                "centerZ", "annulusZ", "contrast", ...
                 "prof" + (1:curation.Features.NBINS), ...
                 "ringRatio", "angUniformity", "peakRadiusUm", "blobAreaUm2", "blobCompactness", ...
-                "bgLevel", "bgNoise", "compContrast", "compCentreZ", ...
+                "bgLevel", "bgNoise", "compContrast", "compCenterZ", ...
                 "borderUm", "nnUm", "densityN"];
         end
 
@@ -96,19 +96,19 @@ classdef Features
                 "ordinal scorer output (NaN when missing)"; ...
                 "rank of score within the source, 0 (lowest) to 1"; ...
                 "rank of rescore within the source, 0 to 1 (NaN when rescore is NaN)"; ...
-                "(centre mean - local background) / local noise"; ...
+                "(center mean - local background) / local noise"; ...
                 "(annulus mean - local background) / local noise"; ...
-                "(centre mean - annulus mean) / local noise: > 0 solid blob, < 0 ring"; ...
+                "(center mean - annulus mean) / local noise: > 0 solid blob, < 0 ring"; ...
                 prof; ...
-                "(annulus peak - centre) / max(annulus peak - bg, centre - bg, noise): ~1 net, < 0 blob"; ...
+                "(annulus peak - center) / max(annulus peak - bg, center - bg, noise): ~1 net, < 0 blob"; ...
                 "angular uniformity of the annulus over 8 sectors, (m - sd) / (|m| + sd + noise/2)"; ...
-                "radius of the brightest profile bin within 16.5 um (bin centre, um)"; ...
+                "radius of the brightest profile bin within 16.5 um (bin center, um)"; ...
                 "area above the local threshold within 13 um (um^2)"; ...
-                "(2/3) sqrt(area/pi) / mean distance of the above-threshold pixels: 1 centred disk"; ...
+                "(2/3) sqrt(area/pi) / mean distance of the above-threshold pixels: 1 centered disk"; ...
                 "(local background - page median) / page noise"; ...
                 "local noise / page noise"; ...
-                "companion channel (centre - annulus) / its local noise (NaN without companion)"; ...
-                "companion channel (centre - background) / its local noise (NaN without companion)"; ...
+                "companion channel (center - annulus) / its local noise (NaN without companion)"; ...
+                "companion channel (center - background) / its local noise (NaN without companion)"; ...
                 "distance to the nearest page edge (um; the page spans 0.5 .. W+0.5 px)"; ...
                 "distance to the nearest other candidate (um, capped at 200)"; ...
                 "number of other candidates within 50 um"];
@@ -139,10 +139,10 @@ classdef Features
                 error('curation:Features:badPosition', 'X and Y must be finite.');
             end
             nbMask = true(n, 1);
-            if isfield(opts, 'NeighbourMask') && ~isempty(opts.NeighbourMask)
-                nbMask = logical(opts.NeighbourMask(:));
+            if isfield(opts, 'NeighborMask') && ~isempty(opts.NeighborMask)
+                nbMask = logical(opts.NeighborMask(:));
                 if numel(nbMask) ~= n
-                    error('curation:Features:badArgument', 'NeighbourMask needs one entry per row.');
+                    error('curation:Features:badArgument', 'NeighborMask needs one entry per row.');
                 end
             end
             chunk = 512;
@@ -163,7 +163,7 @@ classdef Features
             end
             G = curation.Features.geometry(umPerPx);
             A = curation.Features.imageBlock(pageT, X, Y, G, st, false, chunk);
-            F(:, 5) = A.centreZ;
+            F(:, 5) = A.centerZ;
             F(:, 6) = A.annulusZ;
             F(:, 7) = A.contrast;
             F(:, 8:15) = A.prof;
@@ -175,7 +175,7 @@ classdef Features
             F(:, 21) = A.bgLevel;
             F(:, 22) = A.bgNoise;
 
-            % companion channel: centre/annulus contrast only
+            % companion channel: center/annulus contrast only
             if ~isempty(pageC)
                 if isfield(opts, 'PageStatsC') && ~isempty(opts.PageStatsC)
                     stc = opts.PageStatsC;
@@ -184,13 +184,13 @@ classdef Features
                 end
                 B = curation.Features.imageBlock(pageC, X, Y, G, stc, true, chunk);
                 F(:, 23) = B.contrast;
-                F(:, 24) = B.centreZ;
+                F(:, 24) = B.centerZ;
             end
 
-            % context: border, nearest neighbour, density
+            % context: border, nearest neighbor, density
             [H, W] = size(pageT);
             F(:, 25) = min([X - 0.5, W + 0.5 - X, Y - 0.5, H + 0.5 - Y], [], 2) * umPerPx;
-            [nnUm, dens] = curation.Features.neighbours(X, Y, nbMask, umPerPx);
+            [nnUm, dens] = curation.Features.neighbors(X, Y, nbMask, umPerPx);
             F(:, 26) = nnUm;
             F(:, 27) = dens;
         end
@@ -259,7 +259,7 @@ classdef Features
             % Image features of one channel for all candidates, in chunks of CHUNK.
             n = numel(X);
             nb = curation.Features.NBINS;
-            A = struct('centreZ', nan(n, 1), 'annulusZ', nan(n, 1), 'contrast', nan(n, 1), ...
+            A = struct('centerZ', nan(n, 1), 'annulusZ', nan(n, 1), 'contrast', nan(n, 1), ...
                 'prof', nan(n, nb), 'ringRatio', nan(n, 1), 'angUniformity', nan(n, 1), ...
                 'peakRadiusUm', nan(n, 1), 'blobAreaUm2', nan(n, 1), 'blobCompactness', nan(n, 1), ...
                 'bgLevel', nan(n, 1), 'bgNoise', nan(n, 1));
@@ -302,13 +302,13 @@ classdef Features
             mad = median(abs(Vb - bg), 1, 'omitnan');
             noiseLoc = max(1.4826 * mad, curation.Features.NOISE_FLOOR * st.Noise);
 
-            cenM = valid & d <= curation.Features.CENTRE_UM;
+            cenM = valid & d <= curation.Features.CENTER_UM;
             annM = valid & d >= curation.Features.ANNULUS_UM(1) & d <= curation.Features.ANNULUS_UM(2);
             cen = sum(V .* cenM, 1) ./ sum(cenM, 1);
             ann = sum(V .* annM, 1) ./ sum(annM, 1);
 
             B = struct();
-            B.centreZ = ((cen - bg) ./ noiseLoc)';
+            B.centerZ = ((cen - bg) ./ noiseLoc)';
             B.annulusZ = ((ann - bg) ./ noiseLoc)';
             B.contrast = ((cen - ann) ./ noiseLoc)';
             if lite, return; end
@@ -365,8 +365,8 @@ classdef Features
             B.bgNoise = (noiseLoc / st.Noise)';
         end
 
-        function [nnUm, dens] = neighbours(X, Y, nbMask, umPerPx)
-            % Nearest other neighbour (um, capped) and count within DENSITY_UM, by exact
+        function [nnUm, dens] = neighbors(X, Y, nbMask, umPerPx)
+            % Nearest other neighbor (um, capped) and count within DENSITY_UM, by exact
             % distances in chunks. A row never counts itself; exact duplicates count (distance 0).
             n = numel(X);
             nnUm = repmat(curation.Features.MAX_NN_UM, n, 1);

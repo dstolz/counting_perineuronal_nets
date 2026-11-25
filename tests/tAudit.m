@@ -119,7 +119,7 @@ classdef tAudit < matlab.unittest.TestCase
             [~, info] = curation.Audit.rejectThreshold(p, g, blind, sec2);
             tc.verifyEqual(info.Reason, "Auto-reject needs 1,500 labels from 8 sections; you have 2,000 from 7.");
             tc.verifyEqual(info.Gate, "labels");
-            % unlabelled rows (NaN) do not count as labels
+            % unlabeled rows (NaN) do not count as labels
             g2 = g; g2(1:600) = NaN;
             [~, info] = curation.Audit.rejectThreshold(p, g2, false(n, 1), sec);
             tc.verifyEqual(info.NumLabels, 1400);
@@ -147,7 +147,7 @@ classdef tAudit < matlab.unittest.TestCase
                 tc.verifyTrue(all(C.UpperClustered >= C.UpperBinomial - 1e-12), 'clustered never below binomial');
                 tc.verifyTrue(all(C.Deff >= 1));
             end
-            % unlabelled candidates spread like the blind rows: FracRejected is over them, and the
+            % unlabeled candidates spread like the blind rows: FracRejected is over them, and the
             % post-stratification weights are about equal, so the answer is the same
             pc = [linspace(0.0005, 0.4, 2000)'; linspace(0.6, 1, 1000)'];
             P = [p; pc];
@@ -219,7 +219,7 @@ classdef tAudit < matlab.unittest.TestCase
             expected = false(17, 1); expected([1 2]) = true;
             tc.verifyEqual(curation.Audit.autoRejectMask(T, p, 0.2), expected);
             tc.verifyFalse(any(curation.Audit.autoRejectMask(T, p, NaN)), 'no threshold: nothing');
-            % and the Store agrees: an auto label never lands on a row a person labelled
+            % and the Store agrees: an auto label never lands on a row a person labeled
             L = table((1:4)', (1:4)', rand(4, 1), 'VariableNames', {'X', 'Y', 'score'});
             s = curation.Store.fromTable(L, struct('UmPerPixel', 1));
             s.setLabel(1, "Good", "human");
@@ -396,7 +396,7 @@ classdef tAudit < matlab.unittest.TestCase
         end
 
         function autoRejectIsMarkedExperimental(tc)
-            % Scope: CellCurator does not auto-reject. The functions that would are labelled so.
+            % Scope: CellCurator does not auto-reject. The functions that would are labeled so.
             for f = ["rejectThreshold" "checkSuspend" "sampleRejectAudit" "autoRejectMask"]
                 h = evalc(sprintf('help curation.Audit.%s', f));
                 tc.verifySubstring(h, 'EXPERIMENTAL', f);
@@ -429,7 +429,7 @@ classdef tAudit < matlab.unittest.TestCase
             [tau, info] = curation.Audit.rejectThreshold(p, g, true(1600, 1), sec);
             tc.verifyTrue(isnan(tau), sprintf('no blind tile is a cell: tau must be NaN (got %g)', tau));
             tc.verifyEqual(info.Gate, "goods");
-            tc.verifySubstring(char(info.Reason), 'no blind tile labelled Good');
+            tc.verifySubstring(char(info.Reason), 'no blind tile labeled Good');
             % a passing case never offers a threshold above the largest blind P
             p = [linspace(0.001, 0.4, 1000)'; linspace(0.6, 1, 500)'];
             g = [false(1000, 1); true(500, 1)];
@@ -496,7 +496,7 @@ classdef tAudit < matlab.unittest.TestCase
                 '(only 6 blind holdout labels exist)'], s.HoldoutAUCModel));
             tc.verifyEqual(s.HoldoutN, 6, 'only blind holdout labels count');
             tc.verifySubstring(char(s.HoldoutNote), 'too few');
-            tc.verifyEqual(s.RejectAuditN, 0, 'a reject-audit row labelled openly is not audit evidence');
+            tc.verifyEqual(s.RejectAuditN, 0, 'a reject-audit row labeled openly is not audit evidence');
             % with enough blind labels the AUC is theirs alone (here the model is always wrong)
             T.LabelSource(1:40) = "blind";
             s = curation.Audit.report(T).Kinds(1);
@@ -558,7 +558,7 @@ classdef tAudit < matlab.unittest.TestCase
             ho = T.AuditRole == "holdout" & T.LabelSource == "blind";
             y = T.Label(ho) == "Good";
             tc.verifyEqual(s.HoldoutN, nnz(ho));
-            tc.verifyEqual(s.HoldoutPending, 6, '4 unlabelled + 2 labelled openly: all still to be judged blind');
+            tc.verifyEqual(s.HoldoutPending, 6, '4 unlabeled + 2 labeled openly: all still to be judged blind');
             tc.verifyEqual(s.HoldoutAUCModel, curation.AssistModel.auc(T.ModelP(ho), y), 'AbsTol', 1e-12);
             tc.verifyEqual(s.HoldoutAUCRescore, curation.AssistModel.auc(T.rescore(ho), y), 'AbsTol', 1e-12);
             % DeLong variance by brute force
@@ -690,7 +690,7 @@ classdef tAudit < matlab.unittest.TestCase
             tc.verifySubstring(char(txt(1)), 'of 3 tiles first confirmed by default and later shown again blind, 1 got a different label');
             tc.verifySubstring(char(txt(1)), '1 of 2 known non-cells');
             tc.verifySubstring(char(txt(1)), 'AUC 1.000 (95% CI 1.000 to 1.000), raw rescore 0.750');
-            tc.verifySubstring(char(txt(2)), 'No audited reject has been labelled yet');
+            tc.verifySubstring(char(txt(2)), 'No audited reject has been labeled yet');
             fprintf('\n[report text]\n%s\n%s\n', txt(1), txt(2));
         end
     end

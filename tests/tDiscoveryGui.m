@@ -116,6 +116,63 @@ classdef tDiscoveryGui < matlab.unittest.TestCase
     end
 
     methods (Test)
+        function theFileListIsNarrowedBySubjectTags(tc)
+            % Subject tags: only the files whose subject carries the lab database tags typed; the
+            % tags come from this computer's cache, Check subjects asks the (fake) server
+            tc.assumeNotEqual(string(getenv('CELLDB_NO_CLIENT')), "1", 'run without the client');
+            [ok, why] = celldb.available('Refresh', true);
+            tc.assumeTrue(ok, "The lab database client is not usable here: " + why);
+            [ok, why] = labclient.Api.atLeast(4);
+            tc.assumeTrue(ok, "The lab database client here keeps no tags: " + string(why));
+            [fake, restore, top] = celldb_test_client();
+            tc.addTeardown(@() tDiscoveryGui.restoreClient(restore, top));
+            celldb.available('Refresh', true);
+            tCelldbFacts.seed(fake);
+
+            a = 'SUBJ-ID-9001IHC_ECM26A260519S2_1A_L_WFA-PV_Z3_260511_1_proj.tif';   % cohort:a, pilot
+            b = 'SUBJ-ID-9002IHC_ECM26A260519S2_1A_L_WFA-PV_Z3_260511_1_proj.tif';   % cohort:b
+            c = 'SUBJ-ID-4040IHC_ECM26A260519S2_1A_L_WFA-PV_Z3_260511_1_proj.tif';   % not in the database
+            tc.makeTiffs({fullfile('one', a), fullfile('two', b), fullfile('three', c), 'no_subject.tif'});
+            app = tc.openApp();
+            fig = tc.figureOf(app);
+            app.setSearchDir(tc.Dir);
+            lbl = findall(fig, 'Tag', 'fileCountLabel');
+            names = @() sort(cellfun(@(f) string(tDiscoveryGui.nameOf(f)), app.listedFiles()))';
+            tc.verifyNumElements(app.listedFiles(), 4);
+            tc.verifyTrue(startsWith(string(lbl.Text), "4 files found"));
+
+            % nothing was asked yet: a filter lists nothing rather than everything, and says why
+            app.setTagFilter('cohort:a');
+            tc.verifyEmpty(app.listedFiles());
+            tc.verifySubstring(lbl.Text, '4 left out by tags');
+            tc.verifySubstring(lbl.Tooltip, 'never checked');
+            tc.verifyEmpty(fake.Calls(ismember(string(fake.Calls), ["subjectCurrent" "entityTags"])), ...
+                'a filter reads the cache, never the server');
+
+            r = app.checkSubjects();
+            tc.verifyTrue(r.ok && r.tagsRead, r.message);
+            tc.verifyEqual(names(), string(a), 'the filter that was set now has tags to go by');
+            tc.verifySubstring(lbl.Text, '1 file found');
+            tc.verifySubstring(lbl.Text, '3 left out by tags');
+            tc.verifyEqual(numel(findall(fig, 'Tag', 'fileList').Items), 1);
+
+            app.setTagFilter('cohort:* -pilot');
+            tc.verifyEqual(names(), string(b));
+            app.setTagFilter('-qc:fial');
+            tc.verifyEqual(names(), sort([string(a) string(b)]), ...
+                'a file without a subject, and a subject the database lacks, are not listed by a filter');
+            tc.verifySubstring(lbl.Tooltip, 'qc:fial');
+            app.setTagFilter('');
+            tc.verifyNumElements(app.listedFiles(), 4);
+            tc.verifyTrue(startsWith(string(lbl.Text), "4 files found"));
+            tc.verifyEqual(findall(fig, 'Tag', 'tagsEdit').Value, '');
+
+            % a new search keeps the filter
+            app.setTagFilter('cohort:b');
+            app.setSearchDir(tc.Dir);
+            tc.verifyEqual(names(), string(b));
+        end
+
 
         %% Tooltips
 
@@ -354,6 +411,19 @@ classdef tDiscoveryGui < matlab.unittest.TestCase
     end
 
     methods (Static)
+        function restoreClient(restore, top)
+            for k = numel(restore):-1:1
+                delete(restore{k});   % onCleanup objects: put back now, the last first
+            end
+            if isfolder(top), rmdir(top, 's'); end
+            try celldb.available('Refresh', true); catch, end
+        end
+
+        function n = nameOf(f)
+            [~, n, e] = fileparts(char(f));
+            n = [n e];
+        end
+
         function [h, tips, names] = controls(fig)
             %controls  Every interactive component of the window, its tooltip and a readable name.
             all = findall(fig);

@@ -173,10 +173,15 @@ classdef tCuratorHeadlessFlow < matlab.unittest.TestCase
             want = k + app.Gallery.Layout.NCols;
             if want > K, want = k; end
             tc.verifyEqual(k2, want, 'down moves one row (stays on the last row)');
-            app.handleKey('rightarrow', {'shift'});
+            app.handleKey('rightarrow', {});
             want = k2 + 1;
             if want > K, want = k2; end
-            tc.verifyEqual(app.Cursor, want, 'Shift+right moves one tile');
+            tc.verifyEqual(app.Cursor, want, 'right moves one tile');
+            app.handleKey('leftarrow', {});
+            tc.verifyEqual(app.Cursor, max(want - 1, 1), 'left moves one tile back');
+            app.handleKey('rightarrow', {});
+            tc.verifyEqual(app.Cursor, want, 'and right again');
+            tc.verifyEqual(app.Page.Kind, "active", 'the arrows never turn the page');
             k3 = app.Cursor;
             app.handleKey('u', {});
             tc.verifyEqual(st.get('Label', P.Ids(k3)), "Uncertain", 'no hover: the cursor tile');
@@ -245,20 +250,17 @@ classdef tCuratorHeadlessFlow < matlab.unittest.TestCase
             P1 = app.Page;
             app.handleKey('return', {});
             P2 = app.Page;
-            app.handleKey('leftarrow', {});
+            app.handleKey('pageup', {});
             tc.verifyEqual(app.Page.Kind, "history");
-            tc.verifyEqual(app.Page.PageId, P1.PageId, 'Left shows the previous page');
+            tc.verifyEqual(app.Page.PageId, P1.PageId, 'PgUp shows the previous page');
             % a click on a history page switches Good <-> Bad as a human decision
             lab = app.Store.get('Label', P1.Ids(1));
             app.galleryClick(1, 'normal');
             tc.verifyEqual(app.Store.get('Label', P1.Ids(1)), tCuratorHeadlessFlow.opposite(lab));
             tc.verifyEqual(app.Store.get('LabelSource', P1.Ids(1)), "human");
-            app.handleKey('rightarrow', {});
-            tc.verifyEqual(app.Page.PageId, P2.PageId, 'Right goes forward to the live page');
+            app.handleKey('pagedown', {});
+            tc.verifyEqual(app.Page.PageId, P2.PageId, 'PgDn goes forward to the live page');
             tc.verifyEqual(app.Page.Kind, "active");
-            app.handleKey('rightarrow', {});
-            tc.verifyEqual(app.Page.PageId, P2.PageId, 'Right does not skip a page that has a default');
-            tc.verifySubstring(char(app.StatusText), 'press Enter');
             app.showQueue('browseGood');
             tc.verifyEqual(app.QueueName, "browseGood");
             if app.Page.Kind == "list"
@@ -268,6 +270,66 @@ classdef tCuratorHeadlessFlow < matlab.unittest.TestCase
             app.showQueue('review');
             tc.verifyEqual(app.Page.Kind, "active");
             tc.verifyEmpty(intersect(app.Page.Ids, P1.Ids), 'reviewed cells are not proposed again');
+        end
+
+        function pageKeysMoveFreelyAndLabelNothing(tc)
+            % PgDn leaves a page unconfirmed (nothing is labeled, its tiles stay in the queue) and
+            % PgUp comes back to it; Enter confirms only the page on screen
+            app = tc.openApp();
+            st = app.Store;
+            P1 = app.Page;
+            tc.assumeGreaterThanOrEqual(P1.Total, 3, 'the fixture has three review pages');
+            nLab = nnz(st.get('Label') ~= "");
+            app.handleKey('pagedown', {});
+            P2 = app.Page;
+            tc.verifyEqual(P2.Kind, "active");
+            tc.verifyEmpty(intersect(P2.Ids, P1.Ids), 'PgDn shows the next page');
+            tc.verifyEqual(P2.Number, P1.Number + 1);
+            tc.verifyEqual(P2.Total, P1.Total, 'the queue is as long as before');
+            tc.verifyEqual(nnz(st.get('Label') ~= ""), nLab, 'PgDn labels nothing');
+            tc.verifySubstring(char(app.StatusText), 'left unconfirmed');
+            app.handleKey('pageup', {});
+            tc.verifyEqual(app.Page.Kind, "active");
+            tc.verifyEqual(sort(app.Page.Ids), sort(P1.Ids), 'PgUp comes back to the page that was left');
+            tc.verifyEqual(nnz(st.get('Label') ~= ""), nLab, 'PgUp labels nothing');
+            % the buttons do the same
+            nextBtn = findall(app.Figure, 'Tag', 'btn:next');
+            prevBtn = findall(app.Figure, 'Tag', 'btn:prev');
+            tc.assertNumElements(nextBtn, 1);
+            tc.verifyEqual(nextBtn.Text, 'Next page [PgDn]');
+            tc.verifyEqual(nextBtn.Layout.Row, prevBtn.Layout.Row, 'Previous page and Next page share a row');
+            tc.verifyEqual([prevBtn.Layout.Column nextBtn.Layout.Column], [1 2], 'previous on the left, next on the right');
+            tc.verifyGreaterThan(strlength(string(nextBtn.Tooltip)), 40);
+            app.nextPage();
+            tc.verifyEqual(sort(app.Page.Ids), sort(P2.Ids), 'the same second page');
+            % Enter confirms the page on screen only; the page left behind still waits
+            app.handleKey('return', {});
+            tc.verifyTrue(all(st.get('Label', P2.Ids) ~= ""), 'the second page is confirmed');
+            tc.verifyTrue(all(st.get('Label', P1.Ids) == ""), 'the first page was not touched');
+            P3 = app.Page;
+            tc.verifyEqual(P3.Kind, "active");
+            tc.verifyEmpty(intersect(P3.Ids, [P1.Ids; P2.Ids]), 'then the page after it');
+            app.handleKey('pageup', {});
+            tc.verifyEqual(sort(app.Page.Ids), sort(P1.Ids), 'PgUp: the page that still waits');
+            app.handleKey('pageup', {});
+            tc.verifyEqual(app.Page.Kind, "history", 'before it: the page confirmed in this session');
+            tc.verifyEqual(sort(app.Page.Ids), sort(P2.Ids));
+            app.handleKey('pagedown', {});
+            tc.verifyEqual(sort(app.Page.Ids), sort(P1.Ids), 'and forward again');
+            % PgDn stops at the last page and says so
+            nLab = nnz(st.get('Label') ~= "");
+            for i = 1:P1.Total + 2
+                app.handleKey('pagedown', {});
+            end
+            tc.verifyEqual(app.Page.Kind, "active");
+            tc.verifySubstring(char(app.StatusText), 'last page');
+            tc.verifyEqual(nnz(st.get('Label') ~= ""), nLab, 'paging to the end labels nothing');
+            last = app.Page;
+            % confirming the last page brings back what was left behind
+            app.handleKey('return', {});
+            tc.verifyTrue(all(st.get('Label', last.Ids) ~= ""));
+            tc.verifyEqual(app.Page.Kind, "active", 'pages left behind are still to review');
+            tc.verifyTrue(all(st.get('Label', app.Page.Ids) == ""));
         end
 
         function finishingTheQueueOffersTheNextSource(tc)

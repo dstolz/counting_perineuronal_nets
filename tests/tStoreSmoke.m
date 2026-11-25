@@ -467,7 +467,7 @@ classdef tStoreSmoke < matlab.unittest.TestCase
             qc.QCReviewed = false(20, 1);
             qc.QCLabel([2 5 9]) = ["Good"; "Good"; "Uncertain"];
             qc.QCReviewed([2 5 9]) = true;
-            qc.X(5) = qc.X(5) + 30;     % re-centred in QC, beyond the 8 um tolerance
+            qc.X(5) = qc.X(5) + 30;     % re-centered in QC, beyond the 8 um tolerance
             writetable(qc, fullfile(tc.Dir, [name '_locs_QC.csv']));
             s = curation.Store.openCsv(path, struct('AutosaveDelay', 0));
             tc.addTeardown(@() delete(s));
@@ -706,7 +706,7 @@ classdef tStoreSmoke < matlab.unittest.TestCase
             e.cancelBatch();
             tc.verifyEqual(numel(e.regions()), 3);
             p.reloadRegions();
-            tc.verifyEqual(numel(p.regions()), 3, 'a cancelled batch writes nothing');
+            tc.verifyEqual(numel(p.regions()), 3, 'a canceled batch writes nothing');
 
             tc.verifyTrue(e.removeRegion(1));
             tc.verifyFalse(any([e.regions().id] == 1));

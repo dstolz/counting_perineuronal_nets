@@ -136,7 +136,7 @@ classdef tAssistModel < matlab.unittest.TestCase
             %ANCHOREDLABELS  A reviewer confirming pages by default: the cold-start proposal
             %   sets each tile's page default; a tile whose truth differs from its default is caught
             %   with probability 0.75 (likely bad), 0.9 (middle), 0.8 (likely good), else it keeps
-            %   the default; a tile that agrees is labelled right 99.5% of the time.
+            %   the default; a tile that agrees is labeled right 99.5% of the time.
             f2 = S.F(rows, 2);
             p0 = 1 ./ (1 + exp(-2 * (f2 - S.mu / 2)));
             p0(isnan(p0)) = 0.5;
@@ -210,7 +210,7 @@ classdef tAssistModel < matlab.unittest.TestCase
             ps = p(o);
             distinct = diff(rs) > 0;
             nTie = nnz(diff(ps) <= 0 & distinct);
-            tc.verifyEqual(nTie, 0, sprintf(['%d neighbouring pairs of rows with different raw scores ' ...
+            tc.verifyEqual(nTie, 0, sprintf(['%d neighboring pairs of rows with different raw scores ' ...
                 'have the same (or reversed) P'], nTie));
             [p2, raw2] = m.predict(F);
             tc.verifyEqual(raw2, raw, '[p, raw] = predict(F)');
@@ -380,7 +380,7 @@ classdef tAssistModel < matlab.unittest.TestCase
 
         function tailPoolingUnit(tc)
             % isotonicFit(x, y, [], minTail): the extreme blocks are pooled until the lowest holds
-            % minTail Good and the highest minTail Bad, only with neighbours below 0.15 / above
+            % minTail Good and the highest minTail Bad, only with neighbors below 0.15 / above
             % 0.85; a tail that cannot reach minTail takes the Jeffreys value. Always monotone.
             x = (1:200)';
             y = zeros(200, 1);

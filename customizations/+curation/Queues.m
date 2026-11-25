@@ -32,8 +32,8 @@ classdef Queues
 %
 %   BLIND TILES (review queue only). A row whose AuditRole is one of opts.BlindRoles and that
 %   has not been decided blind yet (LabelSource ~= "blind"; State active, not Excluded, Flag "")
-%   is a blind tile, whatever its Reviewed / Label: holdout rows (unlabelled) and confirm-audit
-%   rows (labelled earlier by bulk confirmation) alike. Rows with any other non-empty AuditRole
+%   is a blind tile, whatever its Reviewed / Label: holdout rows (unlabeled) and confirm-audit
+%   rows (labeled earlier by bulk confirmation) alike. Rows with any other non-empty AuditRole
 %   are never ordinary tiles. Blind tiles are interleaved into the ordinary pages, front-loaded
 %   (the first pages of the queue take them first, so the audit fills early), at most
 %   floor(MaxBlindFraction * PageSize) per page and never more than MaxBlindFraction of a page,
@@ -69,7 +69,7 @@ classdef Queues
         %   bad by P ascending, ties by opts.Raw (same direction), then CellID. If a band's last
         %   page would hold fewer than 25% of PageSize and the band has at least two pages, the
         %   ids of its last two pages are split evenly between them. Blind tiles: see the class
-        %   help. Vectorised; ~ms for 3,000 rows.
+        %   help. Vectorized; ~ms for 3,000 rows.
             opts = curation.Queues.fillOpts(opts);
             ps = opts.PageSize;
             b = opts.Bands(:)';

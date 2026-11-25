@@ -9,7 +9,7 @@ classdef GalleryView < handle
     %     Options
     %       TilePx          tile side used by capacity() before a cache is set (default 80)
     %       Zoom            screen pixels per mosaic pixel (default 1: pixel-exact, no resampling)
-    %       Background      panel colour, [r g b] 0-1 (default [0.09 0.09 0.09])
+    %       Background      panel color, [r g b] 0-1 (default [0.09 0.09 0.09])
     %       MaxPixels       largest mosaic capacity() offers, in pixels (default 1.5e6)
     %       MaxTiles        largest page capacity() offers (default Inf)
     %       AxesKind        "axes" (default) or "uiaxes"
@@ -196,7 +196,7 @@ classdef GalleryView < handle
             P = obj.Prefetched;
             obj.Prefetched = [];
             hit = ~isempty(P) && P.Version == obj.Cache.Version && isequal(P.Grid, grid) && ...
-                isequal(P.Ids, ids) && isequaln(P.Style, style);    % NaN colours mean "none"
+                isequal(P.Ids, ids) && isequaln(P.Style, style);    % NaN colors mean "none"
             if hit
                 mosaic = P.Mosaic;
                 layout = P.Layout;
@@ -307,7 +307,7 @@ classdef GalleryView < handle
         end
 
         function c = tileCenter(obj, k)
-            %tileCenter  Mosaic coordinates [x y] of the centre of tiles K.
+            %tileCenter  Mosaic coordinates [x y] of the center of tiles K.
             r = obj.Layout.Rect(k(:), :);
             c = [r(:, 1) + (r(:, 3) - 1) / 2, r(:, 2) + (r(:, 4) - 1) / 2];
         end
@@ -433,7 +433,7 @@ classdef GalleryView < handle
         end
 
         function placeAxes(obj)
-            %placeAxes  Centre the mosaic in the panel at Zoom screen pixels per mosaic pixel (top-aligned
+            %placeAxes  Center the mosaic in the panel at Zoom screen pixels per mosaic pixel (top-aligned
             %   when it is taller than the panel).
             p = obj.panelPixels();
             sz = obj.layoutSize() * obj.Zoom;

@@ -9,30 +9,32 @@ classdef DisplayDefaults
 %       ([target companion]):
 %         Gain   255 / the opts.Percentile-th percentile of the pixels INSIDE the source's crops
 %                (cells and their surroundings, all crops pooled), clamped to opts.GainLimits:
-%                lifts a page whose brightest pixels lie outside the cells.
+%                lifts a page whose brightest pixels lie outside the cells. A gain below
+%                MIN_GAIN_STEP (the percentile is within 2% of full scale) is left at 1: it would
+%                brighten nothing a person can see and would clip the few pixels above it.
 %         Gamma  the gamma that shows the typical cell at opts.Target of full brightness: the
 %                median over the cells (opts.Ids, e.g. the middle-band candidates; default all) of
-%                each crop's centre brightness (the 95th percentile within CentreUm of the
-%                centre), after Gain; clamped to opts.GammaLimits. Below 1 it lifts the dim
+%                each crop's center brightness (the 95th percentile within CenterUm of the
+%                center), after Gain; clamped to opts.GammaLimits. Below 1 it lifts the dim
 %                mid-tones far more than the bright ones, so a dim net becomes visible while a
 %                bright one keeps its structure (gamma does not saturate anything the page limits
 %                did not).
 %       d: struct Gain (1 x 2), Gamma (1 x 2), Level (1 x 2: the percentile, crop units 0-255),
-%       Typical (1 x 2: the typical cell's centre level before Gamma, 0-255), Note.
+%       Typical (1 x 2: the typical cell's center level before Gamma, 0-255), Note.
 %       The window's brightness and gamma keys multiply these defaults; [0] returns to them.
 %
 %   OPTIONS (struct, every field optional)
 %     Percentile  99.5     of the crop pixels
-%     Target      0.6      where the typical cell's centre is shown (0-1)
+%     Target      0.6      where the typical cell's center is shown (0-1)
 %     GammaLimits [0.45 1] never darker than the page limits; never flatter than 0.45
 %     GainLimits  [1 6]
-%     CentreUm    15       radius of a crop's centre (a net is about 20-30 um across)
+%     CenterUm    15       radius of a crop's center (a net is about 20-30 um across)
 %     Ids         []       the cells that define "typical" (CellIDs of the cache); [] = all
 %     MaxSamples  2e5      crop pixels sampled for the percentile (a regular subsample)
 %
 %   Measured on the three real sections of tests\tCuratorReal (WFA and PV, float32 pages; the
 %   integration pass C report has the numbers and the mosaics): at the page limits the
-%   middle-band cells' centres sit at a median 90-131 of 255 (dark grey), the crop pixels'
+%   middle-band cells' centers sit at a median 90-131 of 255 (dark gray), the crop pixels'
 %   99.5th percentile is already 252-255 (so Gain stays 1 there), and the adaptive gamma (0.49 to
 %   0.77) brings them to about 150 without saturating more pixels.
 %
@@ -43,7 +45,8 @@ classdef DisplayDefaults
         TARGET = 0.6
         GAMMA_LIMITS = [0.45 1]
         GAIN_LIMITS = [1 6]
-        CENTRE_UM = 15
+        CENTER_UM = 15
+        MIN_GAIN_STEP = 1.02        % a smaller gain is not applied
     end
 
     methods (Static)
@@ -54,7 +57,7 @@ classdef DisplayDefaults
             target = O('Target', curation.DisplayDefaults.TARGET);
             glim = O('GammaLimits', curation.DisplayDefaults.GAMMA_LIMITS);
             lim = O('GainLimits', curation.DisplayDefaults.GAIN_LIMITS);
-            cum = O('CentreUm', curation.DisplayDefaults.CENTRE_UM);
+            cum = O('CenterUm', curation.DisplayDefaults.CENTER_UM);
             ids = O('Ids', []);
             ns = O('MaxSamples', 2e5);
             d = struct('Gain', [1 1], 'Gamma', [1 1], 'Level', [NaN NaN], 'Typical', [NaN NaN], 'Note', "");
@@ -85,6 +88,9 @@ classdef DisplayDefaults
                 q = curation.DisplayDefaults.level(A, pc, ns);
                 d.Level(k) = q;
                 g = min(max(255 / max(q, 1), lim(1)), lim(2));
+                if g < curation.DisplayDefaults.MIN_GAIN_STEP
+                    g = lim(1);             % (GainLimits(1) is 1 unless the caller asked otherwise)
+                end
                 d.Gain(k) = g;
                 typ = curation.DisplayDefaults.typical(A(:, :, rows), disc);
                 d.Typical(k) = typ;
@@ -109,7 +115,7 @@ classdef DisplayDefaults
         end
 
         function m = typical(A, disc)
-            %TYPICAL  Median over the crops of A of their centre's 95th percentile (0-255).
+            %TYPICAL  Median over the crops of A of their center's 95th percentile (0-255).
             n = size(A, 3);
             P = reshape(A, [], n);
             P = sort(P(disc(:), :), 1);

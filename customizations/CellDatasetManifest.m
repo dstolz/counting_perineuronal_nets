@@ -13,6 +13,26 @@ classdef CellDatasetManifest < handle
 %   One instance == one dataset. The on-disk form is a sidecar JSON next to the
 %   image, "<base>.celldataset.json", schema "celldataset/2.0".
 %
+%   The base of a dataset
+%   ---------------------
+%   CellDiscovery names what it writes after the image it read, suffix included
+%   ("<x>_proj.tif" -> "<x>_proj_ECM1_locs.csv"), so the base of a dataset is
+%   the stem its localization files start with: forCsv is the authority. An
+%   image whose name ends in a role suffix (_proj, _resized, _preprocessed) is
+%   therefore settled by the same three rules in forImage and in discover:
+%     1. localization files named after the image exist -> it is THE image of
+%        the dataset with its own name as base ("<x>_proj");
+%     2. else the name without the suffix has an image of its own or
+%        localization files -> it is that dataset's companion (base "<x>");
+%     3. else a projection alone is a dataset of its own ("<x>_proj"), so its
+%        base does not change when detections are added; a resized image alone
+%        stays with the base without the suffix.
+%   Until 2026-11-24 rule 2 was the only one: a section stored as "<x>_proj.tif"
+%   beside "<x>_proj_ECM1_locs.csv" was listed twice (bases "<x>" and
+%   "<x>_proj"), and CellDiscovery recorded its detection in "<x>" where no
+%   reader looked. discover adopts what such a stray manifest recorded
+%   (adoptStrayFacts).
+%
 %   Factories
 %   ---------
 %       mf = CellDatasetManifest.forImage(imagePath);   % by image
@@ -36,8 +56,11 @@ classdef CellDatasetManifest < handle
 %       mf.recordDetection(key, struct('image',img,'page',pg,'locs',csv, ...
 %                                      'tool','CellDiscovery','model',m,'count',n));
 %       mf.recordResized(key, resizedCsv, resizedTif);
+%       mf.recordRescore(key, struct('tool','CellDiscovery','model',m));
+%       mf.recordCuration(key, curationCsv, counts);
+%       % recordResolve / recordQc: no caller since the legacy Neighbor Resolver
+%       % and QC apps were removed; their stages are still derived from old files.
 %       mf.recordResolve(key, struct('tool','CellNeighborResolution'));
-%       mf.recordRescore(key, struct('tool','CellNeighborResolution','model',m));
 %       mf.recordQc(key, qcPath, struct('reviewed',r,'good',g,'bad',b,'uncertain',u));
 %       mf.setActiveLocs(key, csvPath, 'resized');   % user re-points the active file
 %       mf.save();
@@ -109,7 +132,7 @@ classdef CellDatasetManifest < handle
             % Manifest for the dataset a (possibly suffixed) image belongs to.
             imagePath = char(imagePath);
             [folder, name, ~] = fileparts(imagePath);
-            base = CellDatasetManifest.baseFromImageName(name);
+            base = CellDatasetManifest.baseForImage(folder, name);
             mf = CellDatasetManifest(folder, base);
             % Seed the image filename when this is the raw/representative image
             % and none is recorded yet.
@@ -193,6 +216,8 @@ classdef CellDatasetManifest < handle
                 groups(gkey) = g;
             end
 
+            groups = CellDatasetManifest.settleImages(groups);
+
             keys = groups.keys;
             nKeys = numel(keys);
             built = {};
@@ -206,6 +231,7 @@ classdef CellDatasetManifest < handle
                 end
                 mf = CellDatasetManifest(g.folder, g.base);
                 mf.seedFromGroup(g);
+                mf.adoptStrayFacts();
                 mf.reconcileFromDisk(opts);
                 if opts.WriteManifest
                     mf.save();
@@ -694,6 +720,67 @@ classdef CellDatasetManifest < handle
             end
             s.stages.(stage) = st;
             obj.Data.sources.(key) = s;
+        end
+
+        function n = adoptStrayFacts(obj)
+            % Take over what a stray manifest recorded for this dataset's
+            % sources. Until 2026-11-24 CellDiscovery recorded a detection of
+            % "<x>_proj.tif" in "<x>.celldataset.json" (forImage dropped the
+            % suffix), while every reader asks for the manifest of the locs
+            % file, "<x>_proj.celldataset.json": the tool, the model and the
+            % model-input facts (resize, background radius, normalization, ...)
+            % were recorded where nothing read them. For each source of this
+            % dataset that the stray manifest lists WITH THE SAME locs file,
+            % the detection, resized and rescore stages it recorded (a stage
+            % with a tool, or model-input facts) are copied when this manifest
+            % has none recorded. The stray file is left as it is. Returns the
+            % number of stages adopted; never throws.
+            n = 0;
+            try
+                if isempty(regexpi(obj.Base, '_proj$', 'once')) || ~isstruct(obj.Data.sources)
+                    return;
+                end
+                strayPath = CellDatasetManifest.pathFor(obj.Folder, ...
+                    regexprep(obj.Base, '_proj$', '', 'ignorecase'));
+                if ~isfile(strayPath)
+                    return;
+                end
+                stray = CellDatasetManifest.readManifestFile(strayPath);
+                if ~isstruct(stray.sources)
+                    return;
+                end
+                keys = fieldnames(obj.Data.sources);
+                for i = 1:numel(keys)
+                    key = keys{i};
+                    if ~isfield(stray.sources, key) || ~isstruct(stray.sources.(key))
+                        continue;
+                    end
+                    theirs = stray.sources.(key);
+                    mine   = obj.Data.sources.(key);
+                    if isempty(CellDatasetManifest.fieldChar(mine, 'locs')) || ~strcmpi( ...
+                            CellDatasetManifest.fieldChar(theirs, 'locs'), ...
+                            CellDatasetManifest.fieldChar(mine, 'locs'))
+                        continue;   % not the same file: nothing to say about it
+                    end
+                    for stage = {'detection', 'resized', 'rescore'}
+                        st = CellDatasetManifest.stageStruct(theirs, stage{1});
+                        if CellDatasetManifest.isRecordedStage(st) && ...
+                                ~CellDatasetManifest.isRecordedStage( ...
+                                CellDatasetManifest.stageStruct(mine, stage{1}))
+                            if ~isfield(mine, 'stages') || ~isstruct(mine.stages)
+                                mine.stages = struct();
+                            end
+                            mine.stages.(stage{1}) = st;
+                            n = n + 1;
+                        end
+                    end
+                    if isempty(CellDatasetManifest.fieldChar(mine, 'locsResized'))
+                        mine.locsResized = CellDatasetManifest.fieldChar(theirs, 'locsResized');
+                    end
+                    obj.Data.sources.(key) = mine;
+                end
+            catch
+            end
         end
 
         function ok = save(obj)
@@ -1191,13 +1278,23 @@ classdef CellDatasetManifest < handle
         end
 
         function ok = writeManifestFile(manifestPath, m)
+            % A manifest that says what the file already says is not written
+            % again (a scan of a folder where nothing changed touches no file:
+            % no writes on the NAS, and updatedUtc stays the time of the last
+            % real change).
             ok = false;
-            m.updatedUtc = CellDatasetManifest.nowIso();
             try
-                txt = jsonencode(m, 'PrettyPrint', true);
+                if isfile(manifestPath)
+                    was = fileread(char(manifestPath));
+                    if strcmp(was, CellDatasetManifest.encode(m))
+                        ok = true;
+                        return;
+                    end
+                end
             catch
-                txt = jsonencode(m);
             end
+            m.updatedUtc = CellDatasetManifest.nowIso();
+            txt = CellDatasetManifest.encode(m);
             fid = fopen(char(manifestPath), 'w');
             if fid == -1
                 return;
@@ -1205,6 +1302,15 @@ classdef CellDatasetManifest < handle
             cleaner = onCleanup(@() fclose(fid));
             fwrite(fid, txt, 'char');
             ok = true;
+        end
+
+        function txt = encode(m)
+            % The manifest's text on disk.
+            try
+                txt = jsonencode(m, 'PrettyPrint', true);
+            catch
+                txt = jsonencode(m);
+            end
         end
 
         function s = nowIso()
@@ -1293,10 +1399,103 @@ classdef CellDatasetManifest < handle
             end
         end
 
-        function base = baseFromImageName(name)
-            % Dataset base for an image name, stripping a role suffix.
-            base = regexprep(name, '_(resized|preprocessed)$', '', 'ignorecase');
-            base = regexprep(base, '_proj$', '', 'ignorecase');
+        function base = baseForImage(folder, name)
+            % Dataset base of the image "<name>.<ext>" in folder: the three
+            % rules of the class help ("The base of a dataset"), asked of the
+            % files in the folder. Agrees with what discover makes of the same
+            % folder, and with forCsv for the files CellDiscovery writes.
+            name = char(name);
+            info = CellDatasetManifest.classifyFile(folder, name, '.tif');
+            base = info.base;
+            if strcmp(info.role, 'raw')
+                return;                                   % no role suffix
+            end
+            if CellDatasetManifest.hasLocsFor(folder, name)
+                base = name;                              % rule 1
+                return;
+            end
+            if strcmp(info.role, 'proj') ...
+                    && isempty(CellDatasetManifest.findCompanion(folder, info.base, '')) ...
+                    && ~CellDatasetManifest.hasLocsFor(folder, info.base)
+                base = name;                              % rule 3
+            end
+        end
+
+        function tf = hasLocsFor(folder, base)
+            % True when folder holds a localization CSV of the dataset BASE
+            % ("<base>[_<channel><page>]<token>[_resized].csv").
+            tf = false;
+            token = CellDatasetManifest.locsToken();
+            d = dir(fullfile(char(folder), [char(base) '*' token '*.csv']));
+            for k = 1:numel(d)
+                [~, nm, ext] = fileparts(d(k).name);
+                info = CellDatasetManifest.classifyFile(folder, nm, lower(ext), token);
+                if ~isempty(info) && strcmp(info.kind, 'locs') && strcmpi(info.base, base)
+                    tf = true;
+                    return;
+                end
+            end
+        end
+
+        function groups = settleImages(groups)
+            % Give every image with a role suffix to the dataset it belongs to
+            % (the three rules of the class help), and drop the groups left
+            % without a file. GROUPS maps lower(fullfile(folder, base)) to a
+            % struct folder, base, files {struct full, info}; classifyFile put
+            % each suffixed image with the base without its suffix (rule 2).
+            keys = groups.keys;
+            hasLocs = containers.Map('KeyType', 'char', 'ValueType', 'logical');
+            hasAnchor = containers.Map('KeyType', 'char', 'ValueType', 'logical');
+            for k = 1:numel(keys)
+                g = groups(keys{k});
+                isLocs = cellfun(@(f) strcmp(f.info.kind, 'locs'), g.files);
+                isRaw  = cellfun(@(f) strcmp(f.info.kind, 'image') && strcmp(f.info.role, 'raw'), g.files);
+                hasLocs(keys{k}) = any(isLocs);
+                hasAnchor(keys{k}) = any(isLocs) || any(isRaw);
+            end
+            for k = 1:numel(keys)
+                g = groups(keys{k});
+                stay = true(1, numel(g.files));
+                for i = 1:numel(g.files)
+                    f = g.files{i};
+                    if ~strcmp(f.info.kind, 'image') || strcmp(f.info.role, 'raw')
+                        continue;
+                    end
+                    [~, own] = fileparts(f.full);
+                    ownKey = lower(fullfile(g.folder, own));
+                    ownHasLocs = isKey(hasLocs, ownKey) && hasLocs(ownKey);
+                    alone = strcmp(f.info.role, 'proj') && ~hasAnchor(keys{k});
+                    if ~(ownHasLocs || alone)
+                        continue;                         % rule 2: a companion
+                    end
+                    f.info.base = own;                    % rules 1 and 3: THE image
+                    f.info.role = 'raw';
+                    if isKey(groups, ownKey)
+                        t = groups(ownKey);
+                    else
+                        t = struct('folder', g.folder, 'base', own, 'files', {{}});
+                    end
+                    t.files{end+1} = f;
+                    groups(ownKey) = t;
+                    stay(i) = false;
+                end
+                if ~all(stay)
+                    g.files = g.files(stay);
+                    if isempty(g.files)
+                        remove(groups, keys{k});
+                    else
+                        groups(keys{k}) = g;
+                    end
+                end
+            end
+        end
+
+        function tf = isRecordedStage(st)
+            % True for a stage a tool recorded (it names its tool, or carries
+            % model-input facts), false for one only derived from the files.
+            tf = isstruct(st) && isfield(st, 'done') && isequal(st.done, true) && ...
+                (CellDatasetManifest.has(st, 'tool') || CellDatasetManifest.has(st, 'model') ...
+                 || isfield(st, 'resize') || isfield(st, 'normalized'));
         end
 
         function p = findImageForBase(folder, base)
@@ -1322,7 +1521,7 @@ classdef CellDatasetManifest < handle
         end
 
         function um = pixelSizeUm(imgPath)
-            % Micrometres-per-pixel from a TIFF's resolution tags, else default.
+            % Micrometers-per-pixel from a TIFF's resolution tags, else default.
             % Reads ImageJ ("unit=micron") as well as plain TIFF calibration.
             um = CellToolkit.tiffPixelSizeUm(imgPath, 1);
             if ~isfinite(um)

@@ -36,7 +36,7 @@ classdef tQueues < matlab.unittest.TestCase
             T.Excluded(5) = true;
             tc.verifyEqual(curation.Queues.eligible(T), uint32([1; 6]));
             T = tQueues.makeT(6);
-            T.Label(1) = "Bad";       % auto-rejected or labelled
+            T.Label(1) = "Bad";       % auto-rejected or labeled
             T.Flag(2) = "later";
             tc.verifyEqual(curation.Queues.eligible(T), uint32((3:6)'));
             tc.verifyClass(curation.Queues.eligible(T), 'uint32');
@@ -119,7 +119,7 @@ classdef tQueues < matlab.unittest.TestCase
             end
         end
 
-        function orderOptionHonoured(tc)
+        function orderOptionHonored(tc)
             T = tQueues.makeT(4);
             p = [0.95; 0.6; 0.3; 0.05];
             opts = tQueues.o(10);

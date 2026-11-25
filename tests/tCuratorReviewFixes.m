@@ -220,7 +220,7 @@ classdef tCuratorReviewFixes < matlab.unittest.TestCase
                 app.handleKey(k, {});
                 if k == "tab", app.handleKey('tab', {}); end         % to the map and back
                 app.handleKey('b', {});
-                tc.verifyTrue(all(st.get('Label', P.Ids) == ""), "after " + k + ": no tile was labelled");
+                tc.verifyTrue(all(st.get('Label', P.Ids) == ""), "after " + k + ": no tile was labeled");
                 tc.verifySubstring(char(app.StatusText), 'Point at a tile', "after " + k);
             end
         end
@@ -243,7 +243,7 @@ classdef tCuratorReviewFixes < matlab.unittest.TestCase
             tc.assertEqual(app.Page.PageId, P.PageId, 'held for the holdout tile');
             drawn = ids(st.get('AuditRole') == "confirm-audit");
             tc.verifyEmpty(intersect(drawn, P.Ids), ...
-                'none of the confirm audit from the page on screen (its tiles would turn grey under the reviewer)');
+                'none of the confirm audit from the page on screen (its tiles would turn gray under the reviewer)');
             % the audit tile judged, the page left: the confirm audit is drawn then, from those tiles
             b = find(P.Blind, 1);
             app.hoverTile(b);
@@ -263,18 +263,18 @@ classdef tCuratorReviewFixes < matlab.unittest.TestCase
             ids = st.get('CellID');
             st.setLabel(ids(5), "Good", "confirmed");
             st.setAuditRole(ids(5), "confirm-audit");
-            app.showCentre("map");
+            app.showCenter("map");
             app.mapClick([st.get('X', ids(5)) st.get('Y', ids(5))]);
             tc.assertEqual(app.MapSelection, ids(5));
             tc.verifyEmpty(strfind(char(app.ContextText), 'Good'), 'no earlier label');
             tc.verifySubstring(char(app.ContextText), 'audit cell');
         end
 
-        %% 8 a key processed during the lasso bar's relayout relabelled the whole lasso
+        %% 8 a key processed during the lasso bar's relayout relabeled the whole lasso
         function aKeyWhileTheLassoClosesLabelsNothing(tc)
             app = tc.openApp();
             st = app.Store;
-            app.showCentre("map");
+            app.showCenter("map");
             x = st.get('X'); y = st.get('Y');
             c = [median(x) median(y)];
             poly = c + 60 * [-1 -1; 1 -1; 1 1; -1 1];
@@ -327,7 +327,7 @@ classdef tCuratorReviewFixes < matlab.unittest.TestCase
             final = st.Paths.final;
             stale = strrep(final, '_final.csv', '_final.stale.csv');
             tc.assertTrue(logical(st.Meta.Complete) && isfile(final));
-            % a kept cell relabelled Bad (Browse Good: a click switches it)
+            % a kept cell relabeled Bad (Browse Good: a click switches it)
             app.showQueue('browseGood');
             id = app.Page.Ids(1);
             app.galleryClick(1, 'normal');
@@ -423,7 +423,7 @@ classdef tCuratorReviewFixes < matlab.unittest.TestCase
             g = app.Gallery;
             g.onButtonDown(struct('AxesPoint', g.tileCenter(1), 'SelectionType', 'normal'));
             app.handleKey('rightarrow', {'shift'});                    % any key
-            g.onMotion(struct('AxesPoint', g.tileCenter(3)));         % plain motion afterwards
+            g.onMotion(struct('AxesPoint', g.tileCenter(3)));         % plain motion afterward
             tc.verifyEqual(st.get('Label', P.Ids(3)), "", 'the missed drag paints nothing more');
             % a Move drag on the map
             app.setMapTool("move", true);

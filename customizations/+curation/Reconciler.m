@@ -6,7 +6,7 @@ classdef Reconciler
 %   [iOld, iNew, dist] = curation.Reconciler.match(oldXY, newXY, tolPx)
 %       One-to-one matching of two point sets within tolPx (inclusive), greedy by ascending
 %       distance: the closest remaining pair is accepted first, so every accepted pair is a
-%       mutual nearest neighbour among the points still unmatched at that moment. Ties are
+%       mutual nearest neighbor among the points still unmatched at that moment. Ties are
 %       broken by iOld, then iNew (deterministic). Points with a non-finite coordinate never
 %       match. Returns column vectors in acceptance order; dist in pixels.
 %
@@ -25,7 +25,7 @@ classdef Reconciler
 %            (unreviewed, auto-rejected, stale)
 %         6  safety net: a detection still unmatched within tolPx (DET or X/Y) of an active
 %            Reviewed row that is still unmatched is linked to it
-%       So a person's cell always gets its detection before an unreviewed neighbour can take it,
+%       So a person's cell always gets its detection before an unreviewed neighbor can take it,
 %       and a cell is never left "vanished" while its re-detection becomes a second candidate.
 %       P fields: RowNew (n x 1 index into newXY, 0 = unmatched), DistPx (n x 1, NaN when
 %       unmatched), Pass (n x 1, 0 = unmatched), NewUnmatched (indices of unmatched detections),
@@ -253,27 +253,37 @@ classdef Reconciler
         end
 
         function s = mtimeUtcText(file, d)
-            % 'yyyy-mm-ddTHH:MM:SSZ': the file's last write time in UTC.
-            t = NaT;
+            % 'yyyy-mm-ddTHH:MM:SSZ': the file's last write time in UTC (whole seconds, cut off).
+            % Built with sprintf from the file system's own UTC time. This runs when the first
+            % source opens, so it avoids what is slow the first time in a MATLAB session: a call
+            % into Java (about 1.9 s, measured 2026-11-25) and a datetime with a time zone. .NET
+            % is already loaded by then (curation.AtomicIO takes the lock file with it).
+            F = '%04d-%02d-%02dT%02d:%02d:%02dZ';
             try
-                ms = java.io.File(file).lastModified();
-                if ms > 0
-                    t = datetime(double(ms) / 1000, 'ConvertFrom', 'posixtime', 'TimeZone', 'UTC');
+                if ispc && NET.isNETSupported
+                    u = System.IO.File.GetLastWriteTimeUtc(file);
+                    if double(u.Year) > 1601            % 1601: .NET's answer for a missing file
+                        s = sprintf(F, double(u.Year), double(u.Month), double(u.Day), ...
+                            double(u.Hour), double(u.Minute), double(u.Second));
+                        return
+                    end
                 end
             catch
             end
-            if isnat(t)
-                try
-                    u = System.IO.File.GetLastWriteTimeUtc(file);
-                    t = datetime(double(u.Year), double(u.Month), double(u.Day), double(u.Hour), ...
-                        double(u.Minute), double(u.Second), 'TimeZone', 'UTC');
-                catch
+            try
+                ms = double(java.io.File(file).lastModified());
+                if ms > 0
+                    sec = floor(ms / 1000);
+                    day = floor(sec / 86400);
+                    r = sec - 86400 * day;
+                    v = datevec(719529 + day);              % 719529: datenum of 1970-01-01
+                    s = sprintf(F, v(1), v(2), v(3), floor(r / 3600), floor(mod(r, 3600) / 60), mod(r, 60));
+                    return
                 end
+            catch
             end
-            if isnat(t)
-                t = datetime(d.datenum, 'ConvertFrom', 'datenum', 'TimeZone', 'local');
-                t.TimeZone = 'UTC';
-            end
+            t = datetime(d.datenum, 'ConvertFrom', 'datenum', 'TimeZone', 'local');
+            t.TimeZone = 'UTC';
             s = [char(t, 'yyyy-MM-dd''T''HH:mm:ss') 'Z'];
         end
 

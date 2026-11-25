@@ -5,7 +5,7 @@ classdef Pairs
 %   n        = curation.Pairs.count(T, umPerPx, opts)
 %   K        = curation.Pairs.normalizeKeptPairs(x)
 %
-%   Pixel coordinates in T (X, Y) are converted to micrometres with umPerPx.
+%   Pixel coordinates in T (X, Y) are converted to micrometers with umPerPx.
 
     methods (Static)
 
@@ -13,7 +13,7 @@ classdef Pairs
         %FIND  Clusters of cells linked by distance <= opts.RadiusUm (connected components).
         %   T       curation table: CellID, X, Y, score, rescore, State, Label, Reviewed,
         %           Excluded (missing score/rescore/Excluded columns are tolerated).
-        %   umPerPx micrometres per pixel.
+        %   umPerPx micrometers per pixel.
         %   opts    struct, all optional:
         %     RadiusUm     16.6   link two cells when their distance is <= this
         %     MergeBelowUm 8.3    Proposal "merge" when MinDistUm < this, else "keepBoth"
@@ -53,7 +53,7 @@ classdef Pairs
             idx = find(ok);
             if numel(idx) < 2, return; end
 
-            % Sweep over x-sorted points: only neighbours within the x window are compared.
+            % Sweep over x-sorted points: only neighbors within the x window are compared.
             px = x(idx); py = y(idx);
             rpx = radius / umPerPx * (1 + 1e-9);
             [px, ord] = sort(px); py = py(ord); idx = idx(ord);

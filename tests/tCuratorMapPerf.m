@@ -5,7 +5,7 @@ classdef (TestTags = {'Benchmark'}) tCuratorMapPerf < matlab.unittest.TestCase
     %     chooses a folder; the warm-up runs then unless CURATOR_WARMUP=0)        2000 ms
     %     first Map show of a source (map created / map exists)                     500 ms
     %     Gallery <-> Map for a loaded source                                       150 ms
-    %     label key on a selected map point -> colour changed                        50 ms
+    %     label key on a selected map point -> color changed                        50 ms
     %     add a cell (click -> point shown), without / with snap              100 / 250 ms
     %     next close pair, next sweep field                                         100 ms
     %   Prints every measurement and a summary table; fails over budget (medians).
@@ -110,7 +110,7 @@ classdef (TestTags = {'Benchmark'}) tCuratorMapPerf < matlab.unittest.TestCase
             app.handleKey('tab', {});
             drawnow;
             mapFirst = 1000 * toc(t1);
-            tc.assertEqual(app.CentreView, "map");
+            tc.assertEqual(app.CenterView, "map");
             L = app.LastTimings;
             fprintf('[map-perf] first Map show of ECM1: %.0f ms = load %.0f ms + the rest and drawnow\n', ...
                 mapFirst, L.MapLoadMs);
@@ -126,9 +126,9 @@ classdef (TestTags = {'Benchmark'}) tCuratorMapPerf < matlab.unittest.TestCase
             R.Toggle = t;
             fprintf('[map-perf] Gallery -> Map %.1f ms (median), Map -> Gallery %.1f ms (median)\n', ...
                 median(t(1:2:end)), median(t(2:2:end)));
-            tc.assertEqual(app.CentreView, "map");
+            tc.assertEqual(app.CenterView, "map");
 
-            % 3 label key on a selected map point -> colour changed
+            % 3 label key on a selected map point -> color changed
             m = app.Map;
             k = find(all(double(m.RGB) == C.Unreviewed, 2), 1);
             id = m.Ids(k);
@@ -147,7 +147,7 @@ classdef (TestTags = {'Benchmark'}) tCuratorMapPerf < matlab.unittest.TestCase
                 ok = ok && isequal(double(m.RGB(m.rowsOf(id), :)), want);
             end
             R.MapLabel = t(w + 1:end);
-            tc.verifyTrue(ok, 'the point wears the new colour');
+            tc.verifyTrue(ok, 'the point wears the new color');
 
             % 4 add a cell: click -> point shown, without and with snap
             app.handleKey('escape', {});
@@ -240,7 +240,7 @@ classdef (TestTags = {'Benchmark'}) tCuratorMapPerf < matlab.unittest.TestCase
             fprintf('[map-perf] %-46s %8s %8s %8s %8s  %s\n', 'action', 'median', 'p90', 'max', 'budget', 'verdict');
             names = ["FirstOpen" "MapFirst" "Toggle" "MapLabel" "Add" "AddSnap" "NextPair" "NextField"];
             what = ["first source of the session" "first Map show of a source" "Gallery <-> Map (loaded)" ...
-                "label key on a map point -> colour" "add a cell, no snap" "add a cell, snap" ...
+                "label key on a map point -> color" "add a cell, no snap" "add a cell, snap" ...
                 "next close pair" "next sweep field"];
             for i = 1:numel(names)
                 v = R.(names(i));

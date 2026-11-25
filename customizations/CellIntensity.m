@@ -9,7 +9,7 @@ classdef CellIntensity
 %
 %   Method (per cell)
 %   -----------------
-%     1. Extract an 80x80 px tile centred on the cell's (X,Y) position.
+%     1. Extract an 80x80 px tile centered on the cell's (X,Y) position.
 %     2. Segment each pixel as cell (foreground) or background with a random
 %        forest pixel classifier (MATLAB TreeBagger).
 %     3. The cell's intensity is the mean of the ORIGINAL pixel values over
@@ -17,8 +17,8 @@ classdef CellIntensity
 %
 %   Pixel features (19 per pixel) used by the classifier:
 %       * 1  : contrast-adjusted pixel intensity (imadjust)
-%       * 2  : horizontal position relative to the tile centre (px)
-%       * 3  : vertical   position relative to the tile centre (px)
+%       * 2  : horizontal position relative to the tile center (px)
+%       * 3  : vertical   position relative to the tile center (px)
 %       * 4-19: pixel intensity in 16 Gabor-filtered versions of the tile
 %               (4 wavelengths x 4 orientations).
 %   Gabor wavelengths : 2*sqrt(2) * 2.^(0:3) = [2.83 5.66 11.31 22.63] px/cycle
@@ -29,7 +29,7 @@ classdef CellIntensity
 %
 %   Typical use
 %   -----------
-%       % --- Train once from pixel-labelled tiles -------------------------
+%       % --- Train once from pixel-labeled tiles -------------------------
 %       %   tiles : 1xK cell of 80x80 image tiles
 %       %   masks : 1xK cell of 80x80 logical masks (true = cell pixel)
 %       model = CellIntensity.trainClassifier(tiles, masks);
@@ -79,14 +79,14 @@ classdef CellIntensity
             if nargin < 2 || isempty(bank)
                 bank = CellIntensity.gaborBank();
             end
-            % Normalise intensity to [0,1] double for filtering/adjustment.
+            % Normalize intensity to [0,1] double for filtering/adjustment.
             t = CellIntensity.toUnit(tile);
             [H, W] = size(t);
 
             % 1) Contrast-adjusted intensity.
             tAdj = imadjust(t);
 
-            % 2-3) Position relative to the geometric tile centre (px).
+            % 2-3) Position relative to the geometric tile center (px).
             cx = (W + 1) / 2;
             cy = (H + 1) / 2;
             [C, R] = meshgrid(1:W, 1:H);
@@ -125,7 +125,7 @@ classdef CellIntensity
     methods (Static)
 
         function model = trainClassifier(tiles, masks, opts)
-            % Train a random forest pixel classifier from labelled tiles.
+            % Train a random forest pixel classifier from labeled tiles.
             %   tiles : 1xK (or Kx1) cell of grayscale image tiles.
             %   masks : 1xK cell of logical masks, same size as each tile,
             %           true where the pixel belongs to the cell (foreground).
@@ -192,7 +192,7 @@ classdef CellIntensity
             %                               given) or 'otsu' (model-free
             %                               Otsu threshold fallback).
             %             CenterComponent : keep only the connected foreground
-            %                               component nearest the tile centre
+            %                               component nearest the tile center
             %                               (default true). This isolates the
             %                               central cell from stray foreground.
             % Returns the logical mask and, for the RF method, the per-pixel
@@ -201,7 +201,7 @@ classdef CellIntensity
             useRf  = ~isempty(model);
             method = CellIntensity.optOr(opts, 'Method', ...
                 CellIntensity.ternary(useRf, 'rf', 'otsu'));
-            keepCentre = CellIntensity.optOr(opts, 'CenterComponent', true);
+            keepCenter = CellIntensity.optOr(opts, 'CenterComponent', true);
 
             [H, W] = size(tile);
             prob = [];
@@ -226,23 +226,23 @@ classdef CellIntensity
                         'Unknown segmentation Method "%s".', method);
             end
 
-            if keepCentre && any(mask(:))
-                mask = CellIntensity.centreComponent(mask);
+            if keepCenter && any(mask(:))
+                mask = CellIntensity.centerComponent(mask);
             end
         end
 
-        function mask = keepCentreComponent(mask)
-            % Public wrapper around the centre-component reduction: reduce a
+        function mask = keepCenterComponent(mask)
+            % Public wrapper around the center-component reduction: reduce a
             % binary mask to the single connected foreground component nearest
-            % the tile centre. Reused by the training-data builder.
+            % the tile center. Reused by the training-data builder.
             if any(mask(:))
-                mask = CellIntensity.centreComponent(mask);
+                mask = CellIntensity.centerComponent(mask);
             end
         end
 
         function [intensity, mask, tile] = measureTile(model, fullTile, opts)
-            % Measure the staining intensity of the cell centred in a tile.
-            %   fullTile : grayscale tile centred on the cell (original units).
+            % Measure the staining intensity of the cell centered in a tile.
+            %   fullTile : grayscale tile centered on the cell (original units).
             % Returns:
             %   intensity : mean of the ORIGINAL pixel values over the cell
             %               (foreground) pixels; NaN if the segmentation is
@@ -261,7 +261,7 @@ classdef CellIntensity
         end
 
         function res = measure(model, img, xy, opts)
-            % Measure intensity for a set of (X,Y) cell centres in one image.
+            % Measure intensity for a set of (X,Y) cell centers in one image.
             %   img  : grayscale image (single page already selected).
             %   xy   : N x 2 matrix of [X Y] pixel coordinates (X = column,
             %          Y = row), as produced by predict.py / the locs CSVs.
@@ -344,7 +344,7 @@ classdef CellIntensity
             % the shared CellToolkit naming conventions.
             %   csvPath : a "*_locs.csv" produced by the Cell* pipeline. Uses
             %             CURATED_X/CURATED_Y when present (skipping rows the
-            %             neighbour resolver deleted/merged away), else X/Y.
+            %             neighbor resolver deleted/merged away), else X/Y.
             %   opts    : optional struct, forwarded to measure(), plus
             %             ImagePath : override the auto-detected TIFF path
             %             Page      : override the auto-detected TIFF page
@@ -379,7 +379,7 @@ classdef CellIntensity
     methods (Static)
 
         function tile = extractTile(img, xc, yc, sz)
-            % Extract an sz x sz tile centred on (xc,yc) (X=col, Y=row).
+            % Extract an sz x sz tile centered on (xc,yc) (X=col, Y=row).
             % Pixels falling outside the image are filled by edge replication
             % so the tile is always exactly sz x sz.
             if nargin < 4, sz = CellIntensity.TileSize; end
@@ -401,9 +401,9 @@ classdef CellIntensity
     %  ===================================================================
     methods (Static, Access = private)
 
-        function mask = centreComponent(mask)
+        function mask = centerComponent(mask)
             % Reduce a binary mask to the single connected component nearest
-            % the tile centre — the central cell the tile was built around.
+            % the tile center — the central cell the tile was built around.
             cc = bwconncomp(mask);
             if cc.NumObjects <= 1
                 return;
@@ -411,16 +411,16 @@ classdef CellIntensity
             [H, W] = size(mask);
             cr = (H + 1) / 2;
             cc2 = (W + 1) / 2;
-            centreIdx = sub2ind([H, W], round(cr), round(cc2));
-            % If the centre pixel itself is foreground, keep its component.
+            centerIdx = sub2ind([H, W], round(cr), round(cc2));
+            % If the center pixel itself is foreground, keep its component.
             for k = 1:cc.NumObjects
-                if any(cc.PixelIdxList{k} == centreIdx)
+                if any(cc.PixelIdxList{k} == centerIdx)
                     mask = false(H, W);
                     mask(cc.PixelIdxList{k}) = true;
                     return;
                 end
             end
-            % Otherwise keep the component whose centroid is closest to centre.
+            % Otherwise keep the component whose centroid is closest to center.
             best = 1; bestD = inf;
             for k = 1:cc.NumObjects
                 [rr, ccq] = ind2sub([H, W], cc.PixelIdxList{k});

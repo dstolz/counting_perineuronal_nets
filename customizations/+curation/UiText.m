@@ -1,6 +1,6 @@
 classdef UiText
 %UITEXT  Every word CellCurator shows: tooltips, button labels, the key map, the cheat sheet, the
-%   colour legend, the status and context messages, and the label colours. One place, so the
+%   color legend, the status and context messages, and the label colors. One place, so the
 %   wording stays consistent and can be tested (tTooltips).
 %
 %   t = curation.UiText.tip(id, args...)     tooltip of control ID (sprintf ARGS into it)
@@ -9,10 +9,10 @@ classdef UiText
 %   T = curation.UiText.keymap()             table Key, Modifier, Label, Action, Description:
 %                                            Key and Modifier as CellCurator.handleKey takes them,
 %                                            Label as the user reads it ("Ctrl+Z", "Enter")
-%   C = curation.UiText.colors()             label colours, 0-255 doubles (see below)
+%   C = curation.UiText.colors()             label colors, 0-255 doubles (see below)
 %   s = curation.UiText.cheatSheet(width)    the key and mouse cheat sheet (one char row, newlines;
 %                                            lines of at most WIDTH characters, default 48)
-%   L = curation.UiText.legendItems()        the colour legend under the gallery (swatches + text)
+%   L = curation.UiText.legendItems()        the color legend under the gallery (swatches + text)
 %   s = curation.UiText.bandLabel(band)      "Likely good", "Middle, leaning bad", ...
 %   s = curation.UiText.queueLabel(name)     "Review", "Flagged", "Browse Good", ...
 %   s = curation.UiText.disabled(id, reason) tooltip of control ID when disabled, saying why
@@ -20,16 +20,16 @@ classdef UiText
 %   L = curation.UiText.mapLegendItems(S)    the legend under the section map (S: the map markers)
 %   s = curation.UiText.markerClassLabel(c)  "To review", "Good", ... (curation.MapMarkers.CLASSES)
 %
-%   Colours (Okabe-Ito, colour-blind safe; shared with the map and the Dataset Manager):
+%   Colors (Okabe-Ito, color-blind safe; shared with the map and the Dataset Manager):
 %     Good [0 158 115], Bad [213 94 0], Uncertain [240 228 66], Flag (corner badge) [204 121 167],
 %     Blind [140 140 140] (audit tile not decided yet: a neutral border, no proposal),
 %     Cursor [255 255 255], Selection [86 180 233],
-%     ProposedGood / ProposedBad: the default's colour at reduced strength (untouched tiles),
+%     ProposedGood / ProposedBad: the default's color at reduced strength (untouched tiles),
 %     Background [24 24 24] (gallery), ProposedStrength (the blend factor),
 %     Unreviewed [0 114 178] (map points not decided yet: the default of their marker; the map's
 %     markers are the reviewer's choice, curation.MapMarkers), Exclude [230 159 0] (exclusion regions),
 %     Reference [217 217 217] (the reference strip), DimFactor (excluded cells on the map keep this
-%     share of their colour).
+%     share of their color).
 
     properties (Constant)
         SEP = [' ' char(183) ' ']          % " · "
@@ -55,17 +55,17 @@ classdef UiText
             switch char(id)
                 % ---- map and edits
                 case 'toggleView'
-                    t = ['Switch the centre between the gallery of tiles and the map of the whole section ' ...
+                    t = ['Switch the center between the gallery of tiles and the map of the whole section ' ...
                         '[Tab] or [v]. Pressed: the map is showing. Labels, zoom and page stay where they are.'];
                 case 'showOnMap'
                     t = ['Show on map [.]: the cell under the pointer (else the cursor) on the map of the ' ...
-                        'section, selected, with its neighbours around it.'];
+                        'section, selected, with its neighbors around it.'];
                 case 'toolSelect'
                     t = ['Select tool [s]: click a cell to select it (Shift+click adds), drag to pan. Click ' ...
                         'inside an exclusion region to select the region. Double-click or Enter shows the cell ' ...
                         'in the gallery. Esc returns here from every other tool.'];
                 case 'toolAdd'
-                    t = ['Add tool [a]: click where the detector missed a cell to add one there (labelled ' ...
+                    t = ['Add tool [a]: click where the detector missed a cell to add one there (labeled ' ...
                         'Good). A click on an existing cell selects it instead.'];
                 case 'toolMove'
                     t = 'Move tool [m]: drag a cell to where it belongs; its tiles are cut again at the new place.';
@@ -73,17 +73,17 @@ classdef UiText
                     t = ['Lasso tool [l]: draw around cells, then label them all, make the area an exclusion ' ...
                         'region (tissue folds, edges) or merge them into one cell.'];
                 case 'snap'
-                    t = ['Snap to centre: a cell you add or move lands on the centre of the stained structure ' ...
+                    t = ['Snap to center: a cell you add or move lands on the center of the stained structure ' ...
                         'nearby (the hole of a net, the body of a PV cell), found by snapToCellCentroid. ' ...
                         'Off: exactly where you click or drop it.'];
                 case 'fitMap'
                     t = 'Show the whole section. The wheel zooms about the pointer; dragging pans; + and - zoom too.';
                 case 'markers'
-                    t = ['Markers' char(8230) ': choose the colour and symbol of the map''s points for each cell ' ...
+                    t = ['Markers' char(8230) ': choose the color and symbol of the map''s points for each cell ' ...
                         'state (to review, Good, Bad, Uncertain, flagged). Used by the map and the locator, and ' ...
                         'remembered for the next session.'];
                 case 'markerColor'
-                    t = 'The colour of the %s markers on the map and the locator.';
+                    t = 'The color of the %s markers on the map and the locator.';
                 case 'markerSymbol'
                     t = 'The symbol of the %s markers.';
                 case 'markerFilled'
@@ -135,7 +135,7 @@ classdef UiText
                 case 'sweepNext'
                     t = 'Next field [Space] or [Enter]. After the last field the sweep is marked done.';
                 case 'sweepWidth'
-                    t = ['Width of one sweep field in micrometres (neighbouring fields overlap by a tenth). ' ...
+                    t = ['Width of one sweep field in micrometers (neighboring fields overlap by a tenth). ' ...
                         'Smaller fields: more of them, each shown larger. Remembered for next time.'];
                 case 'finishFlagged'
                     t = 'Show the flagged cells (Flagged queue). Each needs a label before the source can be completed.';
@@ -148,7 +148,7 @@ classdef UiText
                     t = ['Step over the whole section on the map and add the cells the detector missed (Sweep ' ...
                         'for missed cells). Optional: only needed if this section will be used to train the detector.'];
                 case 'finishAudit'
-                    t = ['Show the audit tiles still to judge (grey border, no proposal): a few tiles you confirmed ' ...
+                    t = ['Show the audit tiles still to judge (gray border, no proposal): a few tiles you confirmed ' ...
                         'by default, and the blind holdout. Each needs g, b or u before the source can be completed.'];
                 case 'finishRescore'
                     t = ['Rescore now: the cells you added or moved have no Stage-2 score for their new position. ' ...
@@ -228,6 +228,12 @@ classdef UiText
                 case 'database'
                     t = ['The lab database: its server, your login and what waits to be sent. The curation files ' ...
                         'are the same with or without it.'];
+                case 'subject'
+                    t = ['What the lab database says about the animal this section is of: its sex, species and ' ...
+                        'project, its tags (cohort:a, pilot, ...) and its variables (age, dose, ...), written ' ...
+                        'to the status bar. Shown only when you press this, so that you do not see the animal''s ' ...
+                        'group while you decide on cells. The answers are the ones this computer last read ' ...
+                        '(Dataset Manager: Check subjects); nothing here asks the server.'];
                 case 'finishComplete'
                     t = ['Mark this source complete [Enter]: its final list of kept cells is written ' ...
                         '(<name>_final.csv; if it cannot be written the source stays incomplete), it is recorded ' ...
@@ -270,9 +276,9 @@ classdef UiText
                     t = 'Hide the list of keys [?] or [Esc].';
                 case 'queues'
                     t = ['What to review. Review: undecided cells, a page at a time, each page with one ' ...
-                        'proposed label, plus a few audit tiles (grey border, no proposal). Flagged: cells set aside with [f]. Close pairs: kept cells so close ' ...
+                        'proposed label, plus a few audit tiles (gray border, no proposal). Flagged: cells set aside with [f]. Close pairs: kept cells so close ' ...
                         'they may be one cell (on the map). Vanished good: kept cells the detector no longer ' ...
-                        'finds. Browse: cells already labelled, to check again. Sweep: step over the map to ' ...
+                        'finds. Browse: cells already labeled, to check again. Sweep: step over the map to ' ...
                         'add missed cells (optional).'];
                 case 'sections'
                     t = ['Every section in the folder with the share of its cells reviewed; ' char(10003) ...
@@ -280,7 +286,7 @@ classdef UiText
                 case 'tabInspector'
                     t = 'The cell under the pointer (or the cursor, or the one selected on the map), enlarged, with its scores, label and note.';
                 case 'tabMap'
-                    t = ['The whole section: the cells of the page on screen in colour, the one under the ' ...
+                    t = ['The whole section: the cells of the page on screen in color, the one under the ' ...
                         'pointer ringed. Click a place to show it on the big map.'];
                 case 'note'
                     t = 'A one-line note on the cell shown above. Press Enter to save it.';
@@ -297,9 +303,12 @@ classdef UiText
                     t = 'Clear [x]: remove the label and the flag; the cell is undecided again.';
                 case 'confirm'
                     t = ['Confirm the page [Enter]: every untouched tile gets the page''s proposed label, ' ...
-                        'then the next page appears. Audit tiles (grey border) never get it: each needs g, b or u.'];
+                        'then the next page appears. Audit tiles (gray border) never get it: each needs g, b or u.'];
                 case 'prev'
-                    t = ['Show the previous page again [' L ']. Its labels can still be changed.'];
+                    t = 'Go back one page [PgUp]. Its labels can still be changed.';
+                case 'next'
+                    t = ['Go to the next page without confirming this one [PgDn]: nothing is labeled, ' ...
+                        'and the tiles you left untouched stay in the queue.'];
                 case 'nextSource'
                     t = 'Open the next channel or section that still has cells to review [n].';
                 case 'openNext'
@@ -335,7 +344,8 @@ classdef UiText
                 case 'flag',        s = 'Flag [f]';
                 case 'clear',       s = 'Clear [x]';
                 case 'confirm',     s = 'Confirm page [Enter]';
-                case 'prev',        s = ['Previous page [' L ']'];
+                case 'prev',        s = 'Previous page [PgUp]';
+                case 'next',        s = 'Next page [PgDn]';
                 case 'nextSource',  s = 'Next source [n]';
                 case 'openNext',    s = 'Open next source [n]';
                 case 'brightness',  s = 'Brightness';
@@ -353,12 +363,12 @@ classdef UiText
                 case 'toolAdd',     s = 'Add [a]';
                 case 'toolMove',    s = 'Move [m]';
                 case 'toolLasso',   s = 'Lasso [l]';
-                case 'snap',        s = 'Snap to centre';
+                case 'snap',        s = 'Snap to center';
                 case 'fitMap',      s = 'Whole section';
                 case 'markers',     s = ['Markers' E];
                 case 'markerTitle', s = 'Map markers';
                 case 'markerHeadClass', s = 'Cell state';
-                case 'markerHeadColor', s = 'Colour';
+                case 'markerHeadColor', s = 'Color';
                 case 'markerHeadSymbol', s = 'Symbol';
                 case 'markerHeadFilled', s = 'Filled';
                 case 'markerHeadPreview', s = 'Preview';
@@ -403,6 +413,7 @@ classdef UiText
                         'it says how often a tile confirmed by default changes when judged blind, and how ' ...
                         'accurate the assist model is on blind holdout tiles.'];
                 case 'database',    s = ['Database' E];
+                case 'subject',     s = ['Subject' E];
                 case 'training',    s = ['Training' E];
                 case 'trainingTab', s = 'Training';
                 case 'rescoreEdited', s = 'Score edited cells (%s)';
@@ -473,8 +484,6 @@ classdef UiText
             %MSG  Status, context-line and undo-description texts (sprintf templates).
             S = curation.UiText.SEP;
             D = curation.UiText.DASH;
-            L = curation.UiText.LEFT;
-            R = curation.UiText.RIGHT;
             E = curation.UiText.ELLIPSIS;
             K = curation.UiText.CHECK;
             MU = curation.UiText.MU;
@@ -494,7 +503,7 @@ classdef UiText
                 case 'mapUnflagged', s = 'Removed the flag from %s.';
                 case 'added',        s = 'Added cell %d (Good) at X %.1f, Y %.1f%s.';
                 case 'moved',        s = 'Moved cell %d by %.1f px%s.';
-                case 'snapped',      s = ' (snapped %.1f px to the centre)';
+                case 'snapped',      s = ' (snapped %.1f px to the center)';
                 case 'snapNone',     s = ' (snap found no structure nearby: placed where clicked)';
                 case 'addOutside',   s = 'That is outside the image: no cell was added.';
                 case 'lassoMarked',  s = 'Marked %s %s (lasso).';
@@ -543,7 +552,7 @@ classdef UiText
                 case 'ctxMapSelect', s = ['click a cell to select it' S 'Tab: back to the gallery'];
                 case 'ctxMapAdd',    s = 'Add tool: click where the detector missed a cell%s';
                 case 'ctxMapMove',   s = 'Move tool: drag a cell to where it belongs%s';
-                case 'ctxSnapOn',    s = ' (snapped to its centre)';
+                case 'ctxSnapOn',    s = ' (snapped to its center)';
                 case 'ctxMapLasso',  s = 'Lasso tool: draw around cells to label, exclude or merge them';
                 case 'ctxMapOne',    s = ['Cell %d selected (%s)' D 'Enter: show it in the gallery' S 'g b u f x: label it'];
                 case 'ctxMapMany',   s = ['%s selected' D 'g b u f x: label them all' S 'Esc: clear'];
@@ -601,19 +610,19 @@ classdef UiText
                 case 'finDoneTip',   s = '%s Nothing is left here.';
                 case 'finNothingHere', s = 'Nothing is left in that list.';
                 % ---- blind (audit) tiles
-                case 'auditTiles',   s = '%s audit %s (grey border)';
+                case 'auditTiles',   s = '%s audit %s (gray border)';
                 case 'blindSelect',  s = ['Audit tile: press g, b or u (or a label button). No proposal is shown ' ...
-                        'for it, so your own judgement measures the review.'];
+                        'for it, so your own judgment measures the review.'];
                 case 'blindKeep',    s = ['Marked %s %s' S '%s g, b or u (the cursor is on the first).'];
                 case 'blindLeft',    s = '%s g, b or u (the cursor is on the first).';
-                case 'blindNoClear', s = 'An audit tile waiting for its judgement has nothing to clear: press g, b or u.';
-                case 'blindSkipped', s = [S '%s left for their own judgement (audit tiles are labelled one at a time)'];
+                case 'blindNoClear', s = 'An audit tile waiting for its judgment has nothing to clear: press g, b or u.';
+                case 'blindSkipped', s = [S '%s left for their own judgment (audit tiles are labeled one at a time)'];
                 case 'blindInspect', s = ['Cell %d' S 'audit tile (blind)\nJudge it without a proposal: g, b or u.\n' ...
                         'Its scores and P(Good) show once you have decided.\nFlag: %s'];
                 case 'holdoutApplied', s = '%s set aside as blind holdout tiles%s.';
                 case 'holdoutGone',  s = ' (%s listed no longer exist)';
                 case 'confirmAudit', s = ['%s: %s confirmed by default will be shown again blind ' ...
-                        '(audit tiles, grey border) to measure the review.'];
+                        '(audit tiles, gray border) to measure the review.'];
                 case 'enterHeld',    s = ['Enter ignored: release it first. A held Enter repeats, so each ' ...
                         'page needs its own press.'];
                 case 'enterTooSoon', s = ['Enter ignored: the page has been on screen for less than %d ms. ' ...
@@ -652,7 +661,7 @@ classdef UiText
                         'for this channel kind from now on.'];
                 case 'trainDoneNoDeploy', s = 'Fine-tune finished in %s, but no model folder was made: %s';
                 case 'trainFailed',  s = 'The fine-tune failed (%s); see %s.';
-                case 'trainCancelled', s = 'The fine-tune was cancelled.';
+                case 'trainCanceled', s = 'The fine-tune was canceled.';
                 case 'trainCountsText', s = ['Scorer: %s Good, %s Uncertain, %s Bad from %d sections of %d ' ...
                         'animals. Detector: %d of %d sources complete and swept (%d marked complete).'];
                 case 'trainCounting', s = ['Counting what can be exported' char(8230) ' (from the saved ' ...
@@ -675,6 +684,17 @@ classdef UiText
                 % ---- lab database
                 case 'dbMissing',    s = ['The lab database client is not here: %s Nothing is sent; the curation ' ...
                         'files are the same without it.'];
+                case 'subjectNoSource', s = 'No source is open: there is no subject to look up.';
+                case 'subjectNoName',   s = ['The file name of this section names no subject (SUBJ-ID-<number>), so ' ...
+                        'the lab database cannot be asked about it.'];
+                case 'subjectNotAsked', s = ['%s: this computer has not asked the lab database about it yet. Press ' ...
+                        'Check subjects in the Dataset Manager.'];
+                case 'subjectNoClient', s = '%s: nothing is known here. %s';
+                case 'subjectAbsent',   s = '%s is not in the lab database.';
+                case 'subjectKnown',    s = '%s in the lab database: %s.';
+                case 'subjectTags',     s = 'Tags: %s';
+                case 'subjectVariables', s = 'Variables: %s';
+                case 'subjectNoFacts',  s = 'No tags or variables';
                 % ---- assist model and audit report
                 case 'assistOff',    s = 'Assist is off in this window: proposals come from the rescore (cold start).';
                 case 'assistRead',   s = ['Assist: the folder was read in the background (%d sources); the model ' ...
@@ -737,7 +757,9 @@ classdef UiText
                 case 'nothingUndo',  s = 'Nothing to undo.';
                 case 'nothingRedo',  s = 'Nothing to redo.';
                 case 'noTarget',     s = ['Point at a tile (or move the cursor with ' curation.UiText.UP ' ' curation.UiText.DOWN ') first.'];
-                case 'noSkip',       s = ['This page proposes a label: press Enter to confirm it, or ' L ' to look back.'];
+                case 'lastPage',     s = 'This is the last page to review.';
+                case 'pageLeft',     s = ['Page %d left unconfirmed' S 'its untouched tiles stay in the queue (PgUp goes back).'];
+                case 'pageShown',    s = ['Page %d of %d' S 'no labels were applied'];
                 case 'firstPage',    s = 'This is the first page of this session.';
                 case 'noHistory',    s = 'No earlier page in this session yet.';
                 case 'saved',        s = 'Saved.';
@@ -769,7 +791,7 @@ classdef UiText
                 case 'ctxListEnter', s = 'Enter: next page (labels change only where you mark them)';
                 case 'ctxListLast',  s = 'Enter: back to the first page of this queue';
                 case 'ctxHistory',   s = ['Earlier page %d of %d' S '%s'];
-                case 'ctxHistoryEnter', s = ['Enter or ' R ': forward' S 'a click switches Good ' char(8596) ' Bad'];
+                case 'ctxHistoryEnter', s = ['Enter or PgDn: forward' S 'a click switches Good ' char(8596) ' Bad'];
                 case 'ctxEmptyNext', s = ['Nothing left to review in %s' D 'Enter or n: open %s (%s)'];
                 case 'ctxEmptyDone', s = ['Nothing left to review in this folder' D 'every source is done'];
                 case 'ctxEmptyQueue', s = ['Nothing in %s for %s' D 'choose another queue on the left'];
@@ -828,10 +850,10 @@ classdef UiText
                 "backspace",  "",        "Backspace",    "clear",       "Same as x (in a sweep: the previous field)"
                 "return",     "",        "Enter",        "confirm",     "Confirm the page: untouched tiles get the proposed label; next page. On the map: what the line above the map says"
                 "space",      "",        "Space",        "confirm",     "Same as Enter"
-                "leftarrow",  "",        string(L),      "prev",        "Previous page (already reviewed, still editable). Map: previous pair or field"
-                "pageup",     "",        "PgUp",         "prev",        "Same as " + string(L)
-                "rightarrow", "",        string(R),      "next",        "Next page without confirming (Flagged, Browse and earlier pages). Map: skip the pair, next field"
-                "pagedown",   "",        "PgDn",         "next",        "Same as " + string(R)
+                "pageup",     "",        "PgUp",         "prev",        "Previous page (still editable). Map: previous pair or field"
+                "pagedown",   "",        "PgDn",         "next",        "Next page without confirming: untouched tiles stay in the queue. Map: skip the pair, next field"
+                "leftarrow",  "",        string(L),      "cursorLeft",  "Move the cursor one tile left (map: previous pair or field, else pan)"
+                "rightarrow", "",        string(R),      "cursorRight", "Move the cursor one tile right (map: skip the pair, next field, else pan)"
                 "uparrow",    "",        string(U),      "cursorUp",    "Move the cursor up one row (map: pan)"
                 "downarrow",  "",        string(D),      "cursorDown",  "Move the cursor down one row (map: pan)"
                 "tab",        "",        "Tab",          "toggleView",  "Switch between the gallery and the map of the section"
@@ -845,8 +867,6 @@ classdef UiText
                 "j",          "",        "j",            "merge",       "Merge: the lassoed cells into one, or the close pair on screen (the higher-scored cell is kept)"
                 "k",          "",        "k",            "keepBoth",    "Close pairs: keep both cells (two cells)"
                 "delete",     "",        "Del",          "regionRemove", "Remove the selected exclusion region"
-                "leftarrow",  "shift",   "Shift+" + L,   "cursorLeft",  "Move the cursor one tile left"
-                "rightarrow", "shift",   "Shift+" + R,   "cursorRight", "Move the cursor one tile right"
                 "n",          "",        "n",            "nextSource",  "Open the next source that still has cells to review"
                 "rightarrow", "control", "Ctrl+" + R,    "sourceNext",  "Next source in the folder (channel, then section)"
                 "leftarrow",  "control", "Ctrl+" + L,    "sourcePrev",  "Previous source in the folder"
@@ -878,9 +898,9 @@ classdef UiText
             %   font); descriptions wrap under themselves (a hanging indent after the key column).
             if nargin < 1, width = 48; end
             T = curation.UiText.keymap();
-            W = curation.UiText.wrapText(['Each page proposes one label: the faint border colour ' ...
+            W = curation.UiText.wrapText(['Each page proposes one label: the faint border color ' ...
                 'of its untouched tiles. Mark only the tiles that differ, then press Enter: every ' ...
-                'untouched tile gets the proposed label. A tile with a grey border is an audit tile: ' ...
+                'untouched tile gets the proposed label. A tile with a gray border is an audit tile: ' ...
                 'it shows no proposal and needs g, b or u (Enter waits for it).'], width);
             lines = [{'REVIEW BY EXCEPTION'}; cellstr(W); {''; 'MOUSE'}];
             mouse = {
@@ -911,9 +931,9 @@ classdef UiText
             s = strjoin(lines, newline);
         end
 
-        %% ------------------------------------------------------------------ colours
+        %% ------------------------------------------------------------------ colors
         function C = colors()
-            %COLORS  Label colours (0-255 doubles), shared by the gallery, map and Dataset Manager.
+            %COLORS  Label colors (0-255 doubles), shared by the gallery, map and Dataset Manager.
             C = struct();
             C.Good = [0 158 115];
             C.Bad = [213 94 0];
@@ -968,10 +988,10 @@ classdef UiText
         end
 
         function L = legendItems()
-            %LEGENDITEMS  The colour legend under the gallery: struct array with Name, Kind
-            %   ("border": a tile border of that colour; "corner": the corner badge), Colors (n x 3,
+            %LEGENDITEMS  The color legend under the gallery: struct array with Name, Kind
+            %   ("border": a tile border of that color; "corner": the corner badge), Colors (n x 3,
             %   0-255: one swatch per row) and Text. CellCurator draws each swatch the way the tiles
-            %   show that colour.
+            %   show that color.
             C = curation.UiText.colors();
             L = struct( ...
                 'Name',   {'good', 'bad', 'uncertain', 'proposed', 'blind', 'flag', 'cursor', 'selection'}, ...

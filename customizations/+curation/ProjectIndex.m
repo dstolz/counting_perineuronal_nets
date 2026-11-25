@@ -38,7 +38,7 @@ classdef ProjectIndex < handle
 %   manifest (else UmPerPx NaN, UmSource "not read": never the 0.645 default). This is what
 %   curation.AssistRunner does: its index job builds on the background pool with ReadImages=false,
 %   and it computes the features itself, of the sources on screen from the pages the window holds
-%   (curation.Features.compute on the worker) and of labelled sources not on screen from pages it
+%   (curation.Features.compute on the worker) and of labeled sources not on screen from pages it
 %   reads in MATLAB's own thread.
 %
 %   DISCOVERY. CellDatasetManifest.discover(parentDir, WriteManifest=false, Probe=false); a
@@ -54,8 +54,8 @@ classdef ProjectIndex < handle
 %   curation.Store.COLUMNS), its record in '<base>.curation.json' (revision, journalBytes,
 %   umPerPixel), then the journal lines newer than that revision are replayed on top (so labels
 %   appear before the store's 2 s debounced snapshot). A source without a snapshot contributes
-%   its locs rows, unlabelled (CellID 1..n in file order, as the store would create them).
-%   PriorLabel: for confirm-audit rows re-labelled blind, the label they had before (the Old
+%   its locs rows, unlabeled (CellID 1..n in file order, as the store would create them).
+%   PriorLabel: for confirm-audit rows re-labeled blind, the label they had before (the Old
 %   value of the Label line in the journal transaction that set LabelSource to blind; no such
 %   line = unchanged); "" for every other row. PriorProposalP: for the same rows, the P shown
 %   when they were confirmed (the Old value of the ProposalP line of that transaction, else the
@@ -64,7 +64,7 @@ classdef ProjectIndex < handle
 %   FEATURES (curation.Features, from the image page of the source and its companion page)
 %   are cached per source in CacheDir as feat_<hash of SourceId>.mat with a fingerprint of the
 %   rows' CellID / X / Y / score / rescore / InLocs, the image file (path, size, time), the
-%   pages, the pixel size and curation.Features.VERSION. The neighbour features count every
+%   pages, the pixel size and curation.Features.VERSION. The neighbor features count every
 %   detection in the current locs (InLocs), whatever its curation state: labels, merges and
 %   exclusions never change any row's features (moving a cell does: X/Y).
 %   Pixel size per source: the curation JSON, else the manifest image record, else the TIFF
@@ -203,7 +203,7 @@ classdef ProjectIndex < handle
         end
 
         function [F, y, groups, sections, ids, calibrateOn] = trainingSet(idx, kind)
-            %TRAININGSET  Labelled rows of one kind (curation.AssistModel.trainingMask) with
+            %TRAININGSET  Labeled rows of one kind (curation.AssistModel.trainingMask) with
             %   features, stacked over the project. y: Good; groups: animal; ids "<SourceId>|<CellID>".
             %   calibrateOn: N x 1 logical, the rows admissible for fit's opts.CalibrateOn: EVERY
             %   training row (all true). The output used to be the blind mask (confirm-audit,
@@ -219,7 +219,7 @@ classdef ProjectIndex < handle
                 m = curation.AssistModel.trainingMask(T);
                 if ~any(m), continue; end
                 if isempty(idx.Feat{i})
-                    idx.warn(sprintf('%s has %d labelled rows but no features (image missing?); left out.', ...
+                    idx.warn(sprintf('%s has %d labeled rows but no features (image missing?); left out.', ...
                         idx.Sources.SourceId(i), nnz(m)));
                     continue;
                 end
@@ -370,8 +370,8 @@ classdef ProjectIndex < handle
                 j = find(old.SourceId == S.SourceId(i), 1);
                 if ~isempty(j)
                     rows{i} = idx.Rows{j}; feat{i} = idx.Feat{j}; fp(i) = idx.FeatFp(j); stamps{i} = idx.Stamps{j};
-                    S(i, {'HasSnapshot', 'NumRows', 'NumLabelled', 'HasFeatures', 'UmPerPx', 'UmSource'}) = ...
-                        old(j, {'HasSnapshot', 'NumRows', 'NumLabelled', 'HasFeatures', 'UmPerPx', 'UmSource'});
+                    S(i, {'HasSnapshot', 'NumRows', 'NumLabeled', 'HasFeatures', 'UmPerPx', 'UmSource'}) = ...
+                        old(j, {'HasSnapshot', 'NumRows', 'NumLabeled', 'HasFeatures', 'UmPerPx', 'UmSource'});
                 end
             end
             idx.Sources = S;
@@ -411,7 +411,7 @@ classdef ProjectIndex < handle
             idx.Rows{i} = T;
             idx.Stamps{i} = stamp;
             idx.Sources.NumRows(i) = height(T);
-            idx.Sources.NumLabelled(i) = nnz(T.Reviewed & T.Label ~= "");
+            idx.Sources.NumLabeled(i) = nnz(T.Reviewed & T.Label ~= "");
             idx.Counters.SnapshotReads = idx.Counters.SnapshotReads + 1;
         end
 
@@ -455,7 +455,7 @@ classdef ProjectIndex < handle
             end
             if ~idx.readsImages()
                 idx.warn(sprintf(['%s: features not computed (ReadImages false: images are not read here; ' ...
-                    '%d labelled rows have none).'], s.SourceId, nnz(T.Reviewed & T.Label ~= "")));
+                    '%d labeled rows have none).'], s.SourceId, nnz(T.Reviewed & T.Label ~= "")));
                 return;
             end
             pageT = idx.page(img, s.Page);
@@ -468,7 +468,7 @@ classdef ProjectIndex < handle
                 idx.warn(sprintf('%s: page %d of %s could not be read; no features.', s.SourceId, s.Page, img));
                 return;
             end
-            F = curation.Features.compute(pageT, pageC, T, um, struct('NeighbourMask', logical(T.InLocs)));
+            F = curation.Features.compute(pageT, pageC, T, um, struct('NeighborMask', logical(T.InLocs)));
             idx.Counters.FeatureComputations = idx.Counters.FeatureComputations + 1;
             idx.Feat{i} = F;
             idx.FeatFp(i) = fp;
@@ -625,7 +625,7 @@ classdef ProjectIndex < handle
                 false(0, 1), zeros(0, 1), zeros(0, 1), false(0, 1), 'VariableNames', ...
                 {'SourceId', 'Section', 'Animal', 'Folder', 'Base', 'Key', 'Kind', 'LocsFile', 'CurationCsv', ...
                 'CurationJson', 'JournalFile', 'ImageFile', 'Page', 'CompanionKey', 'CompanionPage', ...
-                'UmPerPx', 'UmSource', 'HasSnapshot', 'NumRows', 'NumLabelled', 'HasFeatures'});
+                'UmPerPx', 'UmSource', 'HasSnapshot', 'NumRows', 'NumLabeled', 'HasFeatures'});
         end
 
         function p = absPath(p)
@@ -773,7 +773,7 @@ classdef ProjectIndex < handle
         end
 
         function C = rowsFromLocs(path)
-            % Unlabelled rows from a detector locs CSV (CellID 1..n in file order).
+            % Unlabeled rows from a detector locs CSV (CellID 1..n in file order).
             L = readtable(path, 'TextType', 'string', 'VariableNamingRule', 'preserve');
             n = height(L);
             C = curation.ProjectIndex.emptyColumns(n);

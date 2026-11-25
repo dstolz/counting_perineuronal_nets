@@ -415,7 +415,7 @@ classdef tDiscovery < matlab.unittest.TestCase
                 tc.verifyLessThanOrEqual(pos(2) + pos(4) - 1 + 40, h, sprintf('%dx%d: title bar on screen', w, h));
                 tc.verifyLessThanOrEqual(pos(3), 1300);
                 tc.verifyLessThanOrEqual(pos(4), 1010);
-                tc.verifyLessThan(abs((pos(1) - 1) - (w - pos(1) - pos(3) + 1)), 2, 'centred sideways');
+                tc.verifyLessThan(abs((pos(1) - 1) - (w - pos(1) - pos(3) + 1)), 2, 'centered sideways');
             end
             big = CellDiscovery.windowPosition([3840 2160]);
             tc.verifyEqual(big(3:4), [1300 1010], 'a big screen keeps the design size');

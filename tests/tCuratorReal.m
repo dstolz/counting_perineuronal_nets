@@ -177,7 +177,7 @@ classdef (TestTags = {'Slow', 'RealData'}) tCuratorReal < matlab.unittest.TestCa
                 tc.verifyEqual(st.get('Label', P.Ids(ex(1))), opp);
                 tc.verifyEqual(st.get('Label', P.Ids(ex(2))), "Uncertain");
                 rest = setdiff(o, ex);
-                tc.verifyTrue(all(st.get('Label', P.Ids(rest)) == P.Default), 'Enter labelled the rest');
+                tc.verifyTrue(all(st.get('Label', P.Ids(rest)) == P.Default), 'Enter labeled the rest');
                 tc.verifyTrue(all(st.get('LabelSource', P.Ids(rest)) == "confirmed"));
                 if any(P.Blind)
                     tc.verifyTrue(all(st.get('LabelSource', P.Ids(P.Blind)) == "blind"), 'audit tiles: blind');
@@ -253,7 +253,7 @@ classdef (TestTags = {'Slow', 'RealData'}) tCuratorReal < matlab.unittest.TestCa
             L = app.LastTimings;
             fprintf(['[real] first Map show: %.0f ms (map made at the pause: %d; ensure+layout %.0f, load %.0f; ' ...
                 'assist runner busy then: %d)\n'], R.MapFirst, ~isempty(app.Map), L.MapEnsureMs, L.MapLoadMs, busy);
-            tc.assertEqual(app.CentreView, "map");
+            tc.assertEqual(app.CenterView, "map");
             pause(0.5); drawnow;
             kinds = string({app.Map.Regions.kind});
             tc.verifyTrue(any(kinds == "reference"), 'the reference strip is on the map');
@@ -271,7 +271,7 @@ classdef (TestTags = {'Slow', 'RealData'}) tCuratorReal < matlab.unittest.TestCa
                 t(i) = 1000 * toc(t1);
             end
             R.Toggle = t;
-            tc.verifyEqual(app.CentreView, "map");
+            tc.verifyEqual(app.CenterView, "map");
             app.handleKey('tab', {});
             % a source reviewed to its finish checklist (blind tiles judged on the way)
             for i = 1:200
@@ -312,7 +312,7 @@ classdef (TestTags = {'Slow', 'RealData'}) tCuratorReal < matlab.unittest.TestCa
 
     methods
         function showPage(~, app)
-            if app.CentreView ~= "gallery", app.showCentre("gallery"); end
+            if app.CenterView ~= "gallery", app.showCenter("gallery"); end
             app.hoverTile(min(5, numel(app.Page.Ids)));
             pause(0.4);
             drawnow;

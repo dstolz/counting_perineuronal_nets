@@ -21,7 +21,7 @@ classdef AssistModel
 %       (never a person), legacy-resolver (duplicate decisions, not "not a cell") and
 %       merged/stale rows are never used. Confirm-audit rows and blind re-asks without a role
 %       (disagreements re-asked blind) DO train, with their blind label: each is one of the
-%       labelled rows, re-labelled; leaving them out would remove exactly the rows where the model
+%       labeled rows, re-labeled; leaving them out would remove exactly the rows where the model
 %       and the first label disagreed and make the model and its calibration overconfident
 %       (measured: with 3% of rows re-asked, fresh rows with P < 0.05 held 4.5% cells against a
 %       mean P of 0.25% when they were left out, 2.4% against 1.5% when kept).
@@ -32,7 +32,7 @@ classdef AssistModel
 %
 %   FIT OPTIONS (struct, every field optional)
 %     Seed 1              reproducible: same data + seed -> identical model and predictions
-%                         (the global random stream is restored afterwards)
+%                         (the global random stream is restored afterward)
 %     NumTrees 200        trees of the final model
 %     CVTrees 40          trees per cross-validation model (fewer than the final model to keep
 %                         the fit within seconds; the out-of-fold scores then have coarser steps
@@ -87,8 +87,8 @@ classdef AssistModel
 %   monotone map, linear between knots and clamped outside them, applied to the final model's
 %   raw scores. TAILS: the lowest PAV block is the minimum of running means, so its in-sample
 %   value is optimistic for new data (often exactly 0; the highest often exactly 1). The extreme
-%   blocks are therefore pooled with their neighbours until the lowest holds MinTailEvents (10)
-%   Good rows and the highest 10 Bad rows, pooling only neighbours below 0.15 / above 0.85 (the
+%   blocks are therefore pooled with their neighbors until the lowest holds MinTailEvents (10)
+%   Good rows and the highest 10 Bad rows, pooling only neighbors below 0.15 / above 0.85 (the
 %   review queue's likely-bad / likely-good bands: no row changes band through it, and perfectly
 %   separated classes are never merged); an extreme block left with fewer events takes the
 %   Jeffreys estimate (k + 0.5) / (n + 1), and the map is kept inside [0.5/(N+1), 1 - 0.5/(N+1)].
@@ -721,7 +721,7 @@ classdef AssistModel
                 s = s + sum(prob(Z.Roots(rootLeaf)));
             end
             roots = uint32(Z.Roots(~rootLeaf));
-            % entries (row, tree) still travelling: row and current node
+            % entries (row, tree) still traveling: row and current node
             nd = reshape(repmat(roots', N, 1), [], 1);
             row = repmat(uint32(1:N)', numel(roots), 1);
             while ~isempty(nd)

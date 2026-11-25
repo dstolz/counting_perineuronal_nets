@@ -68,7 +68,7 @@ classdef tCuratorFinish < matlab.uitest.TestCase
             st = app.Store;
             tCuratorFinish.labelAllGood(st);
             app.showQueue('closePairs');
-            tc.assertEqual(app.CentreView, "map", app.StatusText);
+            tc.assertEqual(app.CenterView, "map", app.StatusText);
             tc.assertEqual(app.MapTask, "pairs");
             n0 = numel(app.PairList);
             tc.assumeGreaterThanOrEqual(n0, 3, 'the fixture has duplicate detections');
@@ -81,7 +81,7 @@ classdef tCuratorFinish < matlab.uitest.TestCase
             tc.verifyEmpty(app.MapSelection, 'not selected: a key acts on the cell under the pointer (pass C)');
             r = app.Map.viewRect();
             tc.verifyLessThanOrEqual(min(r(2) - r(1), r(4) - r(3)) * st.Meta.UmPerPixel, 70, 'zoomed to about 60 um');
-            tc.verifyTrue(c.Centroid(1) > r(1) && c.Centroid(1) < r(2), 'centred on the pair');
+            tc.verifyTrue(c.Centroid(1) > r(1) && c.Centroid(1) < r(2), 'centered on the pair');
             tc.verifyEqual(char(tCuratorFinish.byTag(app, 'pn:pairBar').Visible), 'on');
             tc.verifySubstring(char(app.ContextText), char(c.Title));
             tc.verifySubstring(char(app.ContextText), sprintf('pair 1 of %d', n0));
@@ -171,7 +171,7 @@ classdef tCuratorFinish < matlab.uitest.TestCase
             tc.verifyEqual(app.Map.SweepIndex, 2, 'and stays on the field');
             % leave and resume
             app.handleKey('tab', {});
-            tc.verifyEqual(app.CentreView, "gallery");
+            tc.verifyEqual(app.CenterView, "gallery");
             tc.verifyEqual(app.QueueName, "review", 'leaving the sweep returns to the review');
             tc.verifyEqual(app.Session.SweepField, 2, 'the field reached is remembered');
             tCuratorFinish.idle();
@@ -193,7 +193,7 @@ classdef tCuratorFinish < matlab.uitest.TestCase
                 app.handleKey('space', {});
             end
             tc.verifyTrue(logical(st.Meta.SweepDone), 'after the last field the sweep is done');
-            tc.verifyEqual(app.CentreView, "gallery");
+            tc.verifyEqual(app.CenterView, "gallery");
             tc.verifySubstring(char(app.StatusText), 'Sweep done');
             tc.verifyEqual(app.Session.SweepField, 0, 'a new sweep starts at the first field');
             app.handleKey('z', {'control'});
@@ -293,7 +293,7 @@ classdef tCuratorFinish < matlab.uitest.TestCase
             sec = tCuratorFinish.byTag(app, 'lb:sections');
             tc.verifySubstring(char(sec.Items{1}), [CK ' ECM1'], 'the sections list shows it');
             tc.verifySubstring(tCuratorFinish.byTag(app, 'src:ECM1').Text, CK);
-            tc.verifySubstring(done.Text, 'Completed', 'complete: readable, in the done colour');
+            tc.verifySubstring(done.Text, 'Completed', 'complete: readable, in the done color');
             % undoable
             app.handleKey('z', {'control'});
             tc.verifyFalse(logical(st.Meta.Complete), 'Ctrl+Z undoes the completion');

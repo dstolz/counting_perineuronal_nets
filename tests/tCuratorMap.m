@@ -41,7 +41,7 @@ classdef tCuratorMap < matlab.unittest.TestCase
             drawnow;
         end
 
-        function rgb = colourOf(app, id)
+        function rgb = colorOf(app, id)
             m = app.Map;
             r = m.rowsOf(id);
             rgb = double(m.RGB(r, :));
@@ -88,11 +88,11 @@ classdef tCuratorMap < matlab.unittest.TestCase
             app = tc.openApp();
             st = app.Store;
             C = curation.UiText.colors();
-            tc.verifyEqual(app.CentreView, "gallery");
+            tc.verifyEqual(app.CenterView, "gallery");
             tc.verifyEqual(app.Counters.MapLoads, 0, 'the map is loaded on first use');
             app.handleKey('tab', {});
             tc.verifyEqual(app.Counters.MapLoads, 1);
-            tc.assertEqual(app.CentreView, "map", app.StatusText);
+            tc.assertEqual(app.CenterView, "map", app.StatusText);
             m = app.Map;
             tc.assertNotEmpty(m);
             ids = st.get('CellID');
@@ -108,25 +108,25 @@ classdef tCuratorMap < matlab.unittest.TestCase
             tc.verifyGreaterThan(m.rowsOf(two(2)), 0, 'and comes back with the undo');
             lab = st.get('Label');
             k = find(act & lab == "" & ~st.get('Excluded') & st.get('Flag') == "", 1);
-            tc.verifyEqual(tCuratorMap.colourOf(app, ids(k)), C.Unreviewed, 'not reviewed: the to-review colour');
+            tc.verifyEqual(tCuratorMap.colorOf(app, ids(k)), C.Unreviewed, 'not reviewed: the to-review color');
             k = find(act & lab == "Bad" & st.get('LabelSource') ~= "auto" & ~st.get('Excluded'), 1);
             if ~isempty(k)
-                tc.verifyEqual(tCuratorMap.colourOf(app, ids(k)), C.Bad);
+                tc.verifyEqual(tCuratorMap.colorOf(app, ids(k)), C.Bad);
             end
             tc.verifySubstring(char(app.ContextText), 'Map of ECM1');
             loads = app.Counters.MapLoads;
 
             % an edit in the gallery while the map is hidden reaches it when it shows again
             app.handleKey('tab', {});
-            tc.assertEqual(app.CentreView, "gallery");
+            tc.assertEqual(app.CenterView, "gallery");
             P = app.Page;
             app.hoverTile(1);
             app.handleKey('b', {});
             tc.verifyEqual(st.get('Label', P.Ids(1)), "Bad");
-            tc.verifyEqual(tCuratorMap.colourOf(app, P.Ids(1)), C.Unreviewed, 'the hidden map is not touched on the key path');
+            tc.verifyEqual(tCuratorMap.colorOf(app, P.Ids(1)), C.Unreviewed, 'the hidden map is not touched on the key path');
             app.handleKey('v', {});
-            tc.assertEqual(app.CentreView, "map");
-            tc.verifyEqual(tCuratorMap.colourOf(app, P.Ids(1)), C.Bad, 'shown again: the changed point is recoloured');
+            tc.assertEqual(app.CenterView, "map");
+            tc.verifyEqual(tCuratorMap.colorOf(app, P.Ids(1)), C.Bad, 'shown again: the changed point is recolored');
             tc.verifyEqual(app.Counters.MapLoads, loads, 'loaded once per source; then only the changed points');
 
             % with the map showing every change arrives at once: excluded dimmed, flagged distinct
@@ -135,12 +135,12 @@ classdef tCuratorMap < matlab.unittest.TestCase
             rid = st.addRegion(curation.Regions.make("exclude", p2 + [-3 -3; 3 -3; 3 3; -3 3]));
             tc.assertTrue(st.get('Excluded', id2), 'the store excludes a cell inside a region');
             d = C.DimFactor;
-            tc.verifyEqual(tCuratorMap.colourOf(app, id2), round(d * C.Unreviewed + (1 - d) * C.Background), ...
+            tc.verifyEqual(tCuratorMap.colorOf(app, id2), round(d * C.Unreviewed + (1 - d) * C.Background), ...
                 'an excluded cell is dimmed');
             st.removeRegion(rid);
-            tc.verifyEqual(tCuratorMap.colourOf(app, id2), C.Unreviewed, 'and bright again');
+            tc.verifyEqual(tCuratorMap.colorOf(app, id2), C.Unreviewed, 'and bright again');
             st.setFlag(id2, "later");
-            tc.verifyEqual(tCuratorMap.colourOf(app, id2), C.Flag, 'a flagged cell wears the flag colour');
+            tc.verifyEqual(tCuratorMap.colorOf(app, id2), C.Flag, 'a flagged cell wears the flag color');
             st.setFlag(id2, "");
 
             % the display settings apply to the map
@@ -182,13 +182,13 @@ classdef tCuratorMap < matlab.unittest.TestCase
             tc.verifyGreaterThan(n1, n0, 'showing the tab draws it');
             tc.verifyEqual(sort(L.Ids), sort(app.Map.Ids), 'the same cells as the map');
             P = app.Page;
-            % the page's cells in colour, the others dimmed
+            % the page's cells in color, the others dimmed
             act = st.get('State') == "active" & st.get('Label') == "" & st.get('Flag') == "" & ~st.get('Excluded');
             ids = st.get('CellID');
             onPage = ids(act & ismember(ids, P.Ids));
             offPage = ids(act & ~ismember(ids, P.Ids));
             tc.assumeNotEmpty(onPage);
-            tc.verifyEqual(double(L.RGB(L.rowsOf(onPage(1)), :)), C.Unreviewed, 'a cell of the page: full colour');
+            tc.verifyEqual(double(L.RGB(L.rowsOf(onPage(1)), :)), C.Unreviewed, 'a cell of the page: full color');
             d = C.DimFactor;
             tc.verifyEqual(double(L.RGB(L.rowsOf(offPage(1)), :)), round(d * C.Unreviewed + (1 - d) * C.Background), ...
                 'a cell of another page: dimmed');
@@ -201,7 +201,7 @@ classdef tCuratorMap < matlab.unittest.TestCase
             id = P.Ids(6);
             xy = [st.get('X', id), st.get('Y', id)];
             app.clickLocator(xy + [40 30]);
-            tc.verifyEqual(app.CentreView, "map");
+            tc.verifyEqual(app.CenterView, "map");
             r = app.Map.viewRect();
             tc.verifyTrue(xy(1) > r(1) && xy(1) < r(2) && xy(2) > r(3) && xy(2) < r(4), 'the clicked place is in view');
             tc.verifyFalse(app.Map.IsFit, 'zoomed in on it');
@@ -226,11 +226,11 @@ classdef tCuratorMap < matlab.unittest.TestCase
             id = P.Ids(4);
             app.hoverTile(4);
             app.handleKey('.', {});
-            tc.assertEqual(app.CentreView, "map");
+            tc.assertEqual(app.CenterView, "map");
             tc.verifyEqual(app.MapSelection, id, 'the cell is selected on the map');
             xy = [st.get('X', id), st.get('Y', id)];
             r = app.Map.viewRect();
-            tc.verifyTrue(xy(1) > r(1) && xy(1) < r(2) && xy(2) > r(3) && xy(2) < r(4), 'centred on it');
+            tc.verifyTrue(xy(1) > r(1) && xy(1) < r(2) && xy(2) > r(3) && xy(2) < r(4), 'centered on it');
             tc.verifyEqual(app.Map.Selection, id, 'and ringed');
             tCuratorMap.idle();
             fields = findall(app.Figure, 'Tag', 'lbl:fields');
@@ -241,15 +241,15 @@ classdef tCuratorMap < matlab.unittest.TestCase
             tc.verifyEqual(st.get('Label', id), "Good");
             tc.verifyEqual(st.get('LabelSource', id), "human");
             tc.verifyTrue(st.get('Reviewed', id));
-            tc.verifyEqual(tCuratorMap.colourOf(app, id), C.Good, 'recoloured at once');
+            tc.verifyEqual(tCuratorMap.colorOf(app, id), C.Good, 'recolored at once');
             app.handleKey('f', {});
             tc.verifyEqual(st.get('Flag', id), "later");
-            tc.verifyEqual(tCuratorMap.colourOf(app, id), C.Flag);
+            tc.verifyEqual(tCuratorMap.colorOf(app, id), C.Flag);
             app.handleKey('f', {});
             tc.verifyEqual(st.get('Flag', id), "");
             app.handleKey('x', {});
             tc.verifyEqual(st.get('Label', id), "");
-            tc.verifyEqual(tCuratorMap.colourOf(app, id), C.Unreviewed);
+            tc.verifyEqual(tCuratorMap.colorOf(app, id), C.Unreviewed);
 
             % a click selects; Shift+click adds; a key then acts on all, one transaction
             [id2, xy2] = tCuratorMap.lonePoint(app, 12, id);
@@ -268,7 +268,7 @@ classdef tCuratorMap < matlab.unittest.TestCase
             % Enter on a selected point: the gallery page that holds it
             app.mapClick(xy2);
             app.handleKey('return', {});
-            tc.assertEqual(app.CentreView, "gallery");
+            tc.assertEqual(app.CenterView, "gallery");
             tc.verifyEqual(app.QueueName, "browseBad", 'a Bad cell is shown in Browse Bad');
             tc.verifyEqual(app.Page.Ids(app.Cursor), id2, 'with the cursor on it');
 
@@ -280,7 +280,7 @@ classdef tCuratorMap < matlab.unittest.TestCase
             idU = elig(end);
             k = app.Map.rowsOf(idU);
             app.mapClick(app.Map.XY(k, :), 'open');
-            tc.assertEqual(app.CentreView, "gallery");
+            tc.assertEqual(app.CenterView, "gallery");
             tc.verifyEqual(app.QueueName, "review");
             tc.verifyEqual(app.Page.Kind, "active");
             tc.verifyEqual(app.Page.Ids(app.Cursor), idU);
@@ -365,7 +365,7 @@ classdef tCuratorMap < matlab.unittest.TestCase
             app.mapClick(xy);
             tc.verifyEqual(app.MapSelection, id);
             app.handleKey('return', {});
-            tc.assertEqual(app.CentreView, "gallery");
+            tc.assertEqual(app.CenterView, "gallery");
             tc.verifyEqual(app.QueueName, "browseGood");
             tc.verifyEqual(app.Page.Ids(app.Cursor), id, 'the added cell is on a Browse Good page');
             tc.verifyTrue(any(app.Gallery.Ids == id));
@@ -378,7 +378,7 @@ classdef tCuratorMap < matlab.unittest.TestCase
             tc.verifyEqual(m.rowsOf(id), 0, 'and the map');
         end
 
-        function snapToCentre(tc)
+        function snapToCenter(tc)
             app = tc.openApp('PV2');
             st = app.Store;
             truth = tc.Truth.PV2;
@@ -401,7 +401,7 @@ classdef tCuratorMap < matlab.unittest.TestCase
             id = ids(end);
             p = [st.get('X', id), st.get('Y', id)];
             tc.verifyEqual(st.get('PosSource', id), "snap", 'snapped: PosSource snap');
-            tc.verifyLessThan(norm(p - c), norm(off), 'snapped towards the true centre');
+            tc.verifyLessThan(norm(p - c), norm(off), 'snapped toward the true center');
             tc.verifyEqual(app.Map.XY(app.Map.rowsOf(id), :), p, 'AbsTol', 1e-6, 'drawn where it was snapped');
             % a move with snap on also refines the drop
             app.setMapTool('move');
@@ -453,8 +453,8 @@ classdef tCuratorMap < matlab.unittest.TestCase
             k = find(inside, 1);
             d = C.DimFactor;
             base = curation.UiText.colors();
-            tc.verifyEqual(tCuratorMap.colourOf(app, ids(k)), ...
-                round(d * tCuratorMap.stateColour(st, ids(k), base) + (1 - d) * C.Background), 'excluded cells are dimmed');
+            tc.verifyEqual(tCuratorMap.colorOf(app, ids(k)), ...
+                round(d * tCuratorMap.stateColor(st, ids(k), base) + (1 - d) * C.Background), 'excluded cells are dimmed');
             eligible = st.get('State') == "active" & ~st.get('Reviewed') & ~st.get('Excluded') & ...
                 st.get('Label') == "" & st.get('Flag') == "";
             tc.verifyFalse(any(eligible & inside), 'excluded cells leave the review queue');
@@ -478,7 +478,7 @@ classdef tCuratorMap < matlab.unittest.TestCase
             tc.verifyTrue(all(st2.get('Excluded', ids2(in2))), 'PV2 cells inside are excluded');
             tc.verifyFalse(any(st2.get('Excluded', ids2(act2 & ~in2))));
             tc.verifySubstring(lower(char(app.StatusText)), 'exclusion regions', 'the status bar says so');
-            tc.verifyEqual(app.CentreView, "map", 'the map stays on screen');
+            tc.verifyEqual(app.CenterView, "map", 'the map stays on screen');
             tc.verifyTrue(any([app.Map.Regions.kind] == "exclude"), 'and shows the region for PV2');
             tc.verifyEqual(sort(app.Map.Ids), sort(ids2(act2)), 'with the points of PV2');
         end
@@ -607,7 +607,7 @@ classdef tCuratorMap < matlab.unittest.TestCase
     end
 
     methods (Static)
-        function rgb = stateColour(st, id, C)
+        function rgb = stateColor(st, id, C)
             lab = st.get('Label', id);
             rgb = C.Unreviewed;
             pend = any(st.get('AuditRole', id) == ["holdout" "confirm-audit"]) && st.get('LabelSource', id) ~= "blind";
@@ -616,7 +616,7 @@ classdef tCuratorMap < matlab.unittest.TestCase
                 case "Bad", rgb = C.Bad;
                 case "Uncertain", rgb = C.Uncertain;
             end
-            if pend, rgb = C.Unreviewed; end       % an audit tile waiting for its blind judgement
+            if pend, rgb = C.Unreviewed; end       % an audit tile waiting for its blind judgment
             if st.get('Flag', id) ~= "", rgb = C.Flag; end
         end
 

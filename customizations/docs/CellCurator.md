@@ -5,13 +5,13 @@
 **Cell Curator** is where you check the cells that Cell Discovery found. You look
 at a screenful of small image crops at a time, mark the few that are wrong, and
 press Enter to confirm the rest. You can also add cells the detector missed, move
-badly centred ones, merge duplicates and cut out damaged parts of a section. When
+badly centered ones, merge duplicates and cut out damaged parts of a section. When
 a channel of a section is finished, the app writes the final list of kept cells.
 
-It replaces two older tools, the
-[Cell Neighbor Resolver](CellNeighborResolution.md) and
-[Cell Localization QC](CellQualityControl.md) (both still present, marked
-Legacy). It comes after [Cell Discovery](CellDiscovery.md), which writes the
+It replaces two older tools, the Cell Neighbor Resolver and Cell Localization
+QC, which have been removed; Curator imports what they saved (see
+[Coming from the old tools](#coming-from-the-old-tools)). It comes after
+[Cell Discovery](CellDiscovery.md), which writes the
 `*_locs.csv` files it reads, and you normally start it from the
 [Cell Dataset Manager](CellDatasetManager.md).
 
@@ -21,7 +21,7 @@ every cell on every page is on screen when you press Enter, and nothing is
 removed on the model's say-so.
 
 Contents: [Getting started](#getting-started) ·
-[Reviewing a page](#reviewing-a-page) · [Audit tiles](#audit-tiles-grey-border) ·
+[Reviewing a page](#reviewing-a-page) · [Audit tiles](#audit-tiles-gray-border) ·
 [Order of review and the assist model](#order-of-review-and-the-assist-model) ·
 [The map](#the-map) · [Finishing a source](#finishing-a-source) ·
 [The audit report](#the-audit-report) ·
@@ -80,14 +80,14 @@ dropdown (*Target*, *Overlay*, *Companion*, *Side by side*), *Brightness* and
 - **Sections** — every section in the folder with the share of its cells
   reviewed; a check mark means a channel is complete. Click one to open it.
 
-**Centre.** In the gallery view, a line at the top says exactly what Enter will
+**Center.** In the gallery view, a line at the top says exactly what Enter will
 do, for example:
 
 > Middle, leaning good · P 0.79–0.85 · page 1 of 16
-> Enter: mark the 77 untouched tiles Good, and 13 audit tiles (grey border) need g, b or u
+> Enter: mark the 77 untouched tiles Good, and 13 audit tiles (gray border) need g, b or u
 
-Under it is the page of tiles, and under that a colour legend. The *Map view
-[Tab]* button at the top right switches the centre to the map of the whole
+Under it is the page of tiles, and under that a color legend. The *Map view
+[Tab]* button at the top right switches the center to the map of the whole
 section.
 
 **Right column.** Four tabs:
@@ -96,7 +96,7 @@ section.
   ways (the channel under review, the other channel, and an overlay), with its
   `score`, `rescore`, P(Good), label and flag; a one-line note field (type, then
   Enter to save); and buttons *Good [g]*, *Bad [b]*, *Uncertain [u]*, *Flag [f]*,
-  *Clear [x]*, *Previous page [←]*, *Confirm page [Enter]*, *Next source [n]*
+  *Clear [x]*, *Confirm page [Enter]*, *Previous page [PgUp]*, *Next page [PgDn]*, *Next source [n]*
   and *Show on map [.]*.
 - **Map** — a small locator of the section. Click a place to show it on the big
   map.
@@ -108,7 +108,7 @@ wrong), then a *Database…* button and the [database lamp](#the-lab-database-la
 at the right end. Errors never open a dialog; they appear here.
 
 Hover over any control for a tooltip that says what it does, its key, and, when
-it is greyed out, why.
+it is grayed out, why.
 
 ---
 
@@ -130,7 +130,7 @@ under the gallery uses these words):
 | Full green | **Good** |
 | Full orange | **Bad** |
 | Yellow | **Uncertain** |
-| Grey | **audit tile: g, b or u** — no proposal; you must decide it ([below](#audit-tiles-grey-border)) |
+| Gray | **audit tile: g, b or u** — no proposal; you must decide it ([below](#audit-tiles-gray-border)) |
 | Pink corner badge | **flagged for later** |
 | White outline | **cursor** |
 | Light-blue outline | **selected** |
@@ -146,7 +146,7 @@ You only touch the tiles that differ from the page's proposal.
 | Change many tiles the same way | Hold the button and drag across them |
 | Select several tiles | Shift+click; then `g`, `b`, `u`, `f` or `x` act on all of them (`Esc` clears the selection) |
 | Label explicitly with the keyboard | `g` Good, `b` Bad, `u` Uncertain on the tile under the pointer, else the cursor tile |
-| Move the cursor | `↑` `↓`, `Shift+←` `Shift+→` |
+| Move the cursor | `↑` `↓` `←` `→` |
 | Clear a label and flag | `x` or Backspace |
 | Flag a cell for later | `f` (press again to remove the flag) |
 | Add a note | Point at the cell, type in the Inspector's note field, press Enter |
@@ -180,14 +180,17 @@ guarded.)
 - `Ctrl+Z` undoes your last action and brings the page it was made on back on
   screen; `Ctrl+Y` redoes it. One Enter, one drag, one lasso or one merge is one
   step. There are up to 1,000 steps.
-- `←` (or PgUp) shows the previous page of this session. You can still change its
-  labels: on such a page a click switches a cell between Good and Bad. `→`, PgDn
-  or Enter take you forward again.
-- On a page that proposes a label, `→` does nothing except say "This page
-  proposes a label: press Enter to confirm it, or ← to look back." You cannot
-  skip a page with the arrow keys.
+- `PgDn` (or *Next page*) shows the next page without confirming the one you
+  leave: nothing is labeled, and its untouched tiles stay in the queue. `PgUp`
+  (or *Previous page*) goes back to it. Only Enter confirms a page, and only the
+  page on screen. On the last page `PgDn` says so; when you confirm the last
+  page, the pages you left behind come up again.
+- `PgUp` on the first page still to review shows the pages you confirmed in this
+  session. You can still change their labels: on such a page a click switches a
+  cell between Good and Bad. `PgDn` or Enter take you forward again.
+- The arrow keys move the cursor from tile to tile and never turn the page.
 - *Browse Good*, *Browse Bad* and *Browse Uncertain* list the cells you have
-  already labelled so you can check them again.
+  already labeled so you can check them again.
 
 ### Display keys
 
@@ -207,9 +210,9 @@ per tile), so brightness differences between tiles are real.
 
 ---
 
-## Audit tiles (grey border)
+## Audit tiles (gray border)
 
-A few tiles on your pages have a **grey border and no proposal**. They are audit
+A few tiles on your pages have a **gray border and no proposal**. They are audit
 tiles. They exist so the app can measure two things: how reliable bulk
 confirmation is, and how accurate the assist model is.
 
@@ -217,7 +220,7 @@ confirmation is, and how accurate the assist model is.
   right-click is Uncertain). A left-click only puts the cursor on it. Enter never
   labels an audit tile.
 - **The page waits for them.** When you press Enter, the ordinary untouched tiles
-  are labelled, but a page that still holds an undecided audit tile stays on
+  are labeled, but a page that still holds an undecided audit tile stays on
   screen, the cursor jumps to the tile, and the status bar says how many are left.
   A source cannot be completed while audit tiles are undecided.
 - The Inspector hides an audit tile's scores and P(Good) until you have decided
@@ -228,7 +231,7 @@ confirmation is, and how accurate the assist model is.
   of the tiles you confirmed by default (at least 5), shown again blind when a
   source's ordinary queue is empty.
 - **Nothing about them is hidden from the saved data.** An audit tile you judge
-  is labelled like any other cell (`LabelSource` is `blind`); a Good one is a kept
+  is labeled like any other cell (`LabelSource` is `blind`); a Good one is a kept
   cell. The cell's audit role, the label it first had, and the proposal it had are
   all recorded in the curation files, and the audit report uses exactly that
   record.
@@ -287,19 +290,19 @@ The three lines under "Assist" on the left:
 ## The map
 
 Press `Tab` or `v` (or *Map view [Tab]*) to show the whole section: one marker per
-cell, its colour and symbol set by the cell's state, over the section image. Your labels, zoom and page
+cell, its color and symbol set by the cell's state, over the section image. Your labels, zoom and page
 stay where they were; `Tab` returns to the gallery.
 
 The legend under the map: Good, Bad, Uncertain, *to review*, *flagged*,
 *excluded (dim)*, *selected*, *exclusion region* and *reference strip*. By
-default, cells still to review are **filled blue squares**, and labelled and
-flagged cells are open circles in their label's colour (the cell stays visible
+default, cells still to review are **filled blue squares**, and labeled and
+flagged cells are open circles in their label's color (the cell stays visible
 inside the ring).
 
 ### Markers
 
 *Markers…* on the map's tool bar opens a small window with one row per cell
-state (to review, Good, Bad, Uncertain, flagged): a **colour**, a **symbol**
+state (to review, Good, Bad, Uncertain, flagged): a **color**, a **symbol**
 (circle, square, diamond, four triangles, two stars, plus, cross, asterisk),
 **Filled** (a solid marker with a thin dark edge; off: only the outline, so the
 cell under it stays visible; plus, cross and asterisk have no face to fill) and a
@@ -308,7 +311,7 @@ preview. Every change shows on the map, the locator and the legend at once. **OK
 (Esc, or closing the window) goes back to the markers you had; **Defaults** puts
 every row back to the defaults above (OK keeps them). Excluded cells keep their
 state's marker, dimmed. The markers apply to the map only; the tiles' border
-colours do not change.
+colors do not change.
 
 The wheel zooms about the pointer, dragging pans, and *Whole section* shows
 everything. In the gallery, `.` shows the cell under the pointer (else the
@@ -326,8 +329,8 @@ selected cell in the gallery.
 
 `Esc` returns to Select from any other tool.
 
-**Snap to centre** (a tick box in the map's tool bar): a cell you add or move
-lands on the centre of the stained structure nearby (the hole of a net, the body
+**Snap to center** (a checkbox in the map's tool bar): a cell you add or move
+lands on the center of the stained structure nearby (the hole of a net, the body
 of a PV cell), found with `snapToCellCentroid`. If it finds no structure, the
 cell goes where you clicked and the status bar says so. Off: exactly where you
 click.
@@ -375,7 +378,7 @@ they may be one cell found twice, one pair at a time on the map. A bar offers:
 | Keep both | `k` | Two cells; the pair is not proposed again |
 | Skip, Back | `→` `←` | Decide later; previous pair |
 
-A cell merged this way is not labelled Bad, so it never counts as a "not a
+A cell merged this way is not labeled Bad, so it never counts as a "not a
 cell" example anywhere. After a re-detection, new detections right next to a cell
 you already reviewed also appear here, with "merge into the reviewed cell" as the
 proposal.
@@ -394,7 +397,7 @@ them. Where the sweep stopped is remembered for the session.
 
 ## Finishing a source
 
-When the Review queue is empty, the centre shows a **checklist**:
+When the Review queue is empty, the center shows a **checklist**:
 
 | Row | Meaning |
 |-----|---------|
@@ -420,13 +423,13 @@ says why.
 ### `_final.csv`
 
 It holds one row per **kept cell**: `X`, `Y`, `class`, `score`, `imgName`, `thr`,
-`rescore` and `CellID`. A cell is kept when it is active, labelled Good by a
+`rescore` and `CellID`. A cell is kept when it is active, labeled Good by a
 person (by hand, by confirming a page, by an audit tile, or by an imported legacy
 QC label), and not inside an exclusion region. Uncertain cells are not in it.
 Merged-away cells and cells inside exclusion regions are not in it. `X` and `Y`
 are full-resolution pixels. The detector's `*_locs.csv` is never changed.
 
-### Editing afterwards
+### Editing afterward
 
 Changing anything that changes the kept cells (a label, an added, moved or merged
 cell, a region), or leaving cells to review or flagged, **un-completes** the
@@ -453,7 +456,7 @@ alike.
 | Candidates, reviewed, kept; decided one by one vs confirmed in bulk; to review | How far you are and how much rests on bulk confirmation |
 | **Reviewer consistency**: of N tiles first confirmed by default and later shown blind, X got a different label (rate, 95% interval) | How often bulk confirmation let through something you would have decided differently when looking at it alone |
 | The same split by **Bad-default pages** (cells left Bad) and **Good-default pages** (non-cells kept), and by band | Which kind of page you are less reliable on |
-| "Among the tiles still labelled Bad by bulk confirmation an estimated … are cells; among those still labelled Good, an estimated … are not" | A rough count of residual errors: the rate above times the number of bulk-confirmed labels |
+| "Among the tiles still labeled Bad by bulk confirmation an estimated … are cells; among those still labeled Good, an estimated … are not" | A rough count of residual errors: the rate above times the number of bulk-confirmed labels |
 | "For ±2 points about … tiles judged blind are needed" | How many more audit tiles would narrow the intervals |
 | **Model accuracy**: on N held-out tiles judged blind, the model ranks cells above non-cells with AUC … against the raw rescore … | How good the model really is, on tiles chosen at random, never trained on and judged without a proposal. Shown only once at least 10 of each class were judged blind |
 | Mean P there against cells observed; proposal matched the blind label on … % | Whether the model's probabilities are honest |
@@ -507,13 +510,24 @@ value.
 
 ## The lab database lamp
 
-At the right end of the status bar are a *Database…* button (opens the lab
-database window: its server, your login and what waits to be sent) and a lamp:
+At the right end of the status bar are a *Subject…* button, a *Database…* button
+(opens the lab database window: its server, your login and what waits to be
+sent) and a lamp.
+
+*Subject…* writes to the status bar what the lab database says about the animal
+the open section is of: its sex, species and project, its tags (`cohort:a`,
+`pilot`) and its variables (`Age at perfusion = 92 d`). It is shown only when
+you press the button, on purpose: while you decide on cells you should not see
+which group the animal belongs to. The answers are the ones this computer last
+read (**Check subjects** in the Dataset Manager); the button never asks the
+server.
+
+The lamp:
 
 | Lamp | Meaning |
 |------|---------|
-| Database: not installed (grey) | The lab database client is not on this computer, or is too old, or is switched off. Curator works the same; a record of each completed source is kept beside its files |
-| Database: off (grey) | The client is here but turned off on this computer |
+| Database: not installed (gray) | The lab database client is not on this computer, or is too old, or is switched off. Curator works the same; a record of each completed source is kept beside its files |
+| Database: off (gray) | The client is here but turned off on this computer |
 | Database: connected (green) | The server answered |
 | Database: offline (orange) | The server is out of reach; what you record waits here and is sent when it answers |
 | Database: attention (red) | Something on this computer needs fixing; open the window |
@@ -555,12 +569,11 @@ Generated from `curation.UiText.keymap()`. The same list is on screen under
 
 | Key | What it does |
 |-----|--------------|
-| `←` | Previous page (already reviewed, still editable). Map: previous pair or field |
-| `PgUp` | Same as `←` |
-| `→` | Next page without confirming (Flagged, Browse and earlier pages). Map: skip the pair, next field |
-| `PgDn` | Same as `→` |
+| `PgUp` | Previous page (still editable). Map: previous pair or field |
+| `PgDn` | Next page without confirming: untouched tiles stay in the queue. Map: skip the pair, next field |
+| `←` | Move the cursor one tile left (map: previous pair or field, else pan) |
+| `→` | Move the cursor one tile right (map: skip the pair, next field, else pan) |
 | `↑` `↓` | Move the cursor up or down one row (map: pan) |
-| `Shift+←` `Shift+→` | Move the cursor one tile left or right |
 | `n` | Open the next source that still has cells to review |
 | `Ctrl+→` | Next source in the folder (channel, then section) |
 | `Ctrl+←` | Previous source in the folder |
@@ -634,7 +647,7 @@ Keys are ignored while you are typing in the note field.
 ### The source opens read-only
 
 The status bar says "Opened ECM1 of <section> read-only: <reason>" and the
-editing controls are greyed out (their tooltips say why). Nothing is written. The
+editing controls are grayed out (their tooltips say why). Nothing is written. The
 reasons:
 
 | Reason in the status bar | What to do |
@@ -738,8 +751,9 @@ cut off by the crash, it is skipped with a warning.
 
 ## Coming from the old tools
 
-The first time Curator opens a source, it **imports once** what the old tools
-saved. It never changes or deletes the old files.
+The Cell Neighbor Resolver and Cell Localization QC have been removed. The first
+time Curator opens a source, it **imports once** what they saved. It never
+changes or deletes the old files.
 
 - **`_QC.csv` labels** are matched to cells by the QC file's own X/Y position (not
   by row number) and become labels of source `legacy-qc`: Good, Bad and Uncertain
@@ -756,7 +770,7 @@ saved. It never changes or deletes the old files.
 | Resolver: find close pairs | *Close pairs* queue (on the map) |
 | Resolver: Keep A / Keep B / Merge | **Merge** keeps the higher-scored cell and marks the other merged. To keep the other one, move or label it as you need |
 | Resolver: Keep Both | `k` / *Keep both* |
-| Resolver: add or move a point | *Add* and *Move* tools, with *Snap to centre* |
+| Resolver: add or move a point | *Add* and *Move* tools, with *Snap to center* |
 | Resolver: delete a point | Label it Bad, or merge it |
 | Resolver: rescore | *Score edited cells* |
 | QC: Good / Bad / Uncertain (`g` `b` `u`) | The same keys |
@@ -767,9 +781,6 @@ saved. It never changes or deletes the old files.
 | QC: observation export | *Export observation table…* |
 | QC: sort, filter, score threshold (`t`), histogram (`h`) | No equivalent yet: pages are ordered by the assist model |
 | Resolver and QC: *Undo* | `Ctrl+Z`, `Ctrl+Y`, with 1,000 steps |
-
-Do not run the old tools on a source you are curating here. The Resolver edits
-the locs file in place, and Curator would see that as changed detections.
 
 ---
 

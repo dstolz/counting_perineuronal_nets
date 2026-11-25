@@ -10,6 +10,13 @@ classdef CellDiscovery < handle
     %       <stem>_resized.tif files are hidden from the list (the count label
     %       says how many); files whose mapped pages all have a result CSV are
     %       check-marked and counted as done.
+    %     - Subject tags: the list can be narrowed to the files whose subject
+    %       (the SUBJ-ID in the file name) carries given lab database tags
+    %       ("cohort:a -qc:fail"; celldb.tagFilter, the lab database's filter
+    %       grammar), so a batch detects one cohort. The tags are the ones this
+    %       computer last read (Check subjects asks the database; nothing else
+    %       here does). app.setTagFilter(expr) and app.checkSubjects() are the
+    %       same without the mouse; app.listedFiles() gives the files listed.
     %     - Detection model + optional rescoring model (Stage 2) selection,
     %       per page in the page map
     %     - Multi-page TIFF support: process pages separately, with a
@@ -33,16 +40,16 @@ classdef CellDiscovery < handle
     %       per-page parameters (Snap options... dialog). Adds non-destructive
     %       SNAP_X/SNAP_Y/SNAP_Shift/SNAP_Snapped columns to the result CSV and,
     %       when requested, overwrites X/Y with the snapped coordinates.
-    %     - The detector input (LSM -> background -> resize -> normalisation,
+    %     - The detector input (LSM -> background -> resize -> normalization,
     %       in the scratch TIFF's class) is built by CellToolkit.modelInputPage,
     %       and everything needed to rebuild it exactly (resize factor and mode,
     %       background radius, LSM correction with its page set and options,
-    %       normalisation percentiles/target/limits) is recorded in the
+    %       normalization percentiles/target/limits) is recorded in the
     %       manifest's detection stage (detectionFacts), so curation exports
     %       and rescoring regenerate the same image (CellToolkit.modelInputFromFile).
     %     - Pipeline order per page: detection (predict.py) -> snap
     %       (snapToCellCentroid) -> Stage-2 rescoring (score.py). Rescoring runs
-    %       after snap so the scoring model crops patches centred on the snapped
+    %       after snap so the scoring model crops patches centered on the snapped
     %       (refined) cell locations; the score lands in the 'rescore' column.
     %       Rescoring is its own streamed stage, like detection.
     %     - Full predict.py argument exposure (device, batch-size, threshold).
@@ -141,14 +148,14 @@ classdef CellDiscovery < handle
         TRAIN_UM_PER_PIXEL = 0.645
         PIXEL_SIZE_TOL     = 0.15
 
-        % Intensity normalisation of the detector input ("Normalize" column):
+        % Intensity normalization of the detector input ("Normalize" column):
         % these percentiles of the preprocessed page map to [0 NORM_TARGET].
         % predict.py divides by 255, so 255 puts the page on the 8-bit scale
         % the models were trained on.
         NORM_PERCENTILES = [1 99.9]
         NORM_TARGET      = 255
 
-        % Progress label colour, and the one of a run in which a page failed.
+        % Progress label color, and the one of a run in which a page failed.
         LABEL_COLOR      = [0 0 0]
         LABEL_FAIL_COLOR = [0.75 0 0]
 
@@ -165,6 +172,8 @@ classdef CellDiscovery < handle
         hFig
         hDirEdit
         hRegexEdit
+        hTagsEdit
+        hCheckSubjectsBtn
         hFileCountLabel
         hFileList
         hPyEdit
@@ -225,6 +234,10 @@ classdef CellDiscovery < handle
         dirListing    = {}      % the *_locs.csv files of the last search's directory listing (the "done" marks look in it)
         searchRoot    = ''      % folder of the last search (the file list shows paths relative to it)
         nHidden       = 0       % *_resized.tif files the last search hid
+        foundFiles    = {}      % the image files of the last search, before the subject-tag filter
+        fileTags      = ''      % the subject-tag filter (the lab database's grammar); '' = none
+        nByTags       = 0       % files the subject-tag filter left out
+        tagNote       = ''      % what celldb.tagFilter said about the filter last
     end
 
     properties (Hidden)
@@ -322,6 +335,44 @@ classdef CellDiscovery < handle
                 target.doSearch();
             end
             figure(target.hFig);
+        end
+
+        function setTagFilter(obj, expr)
+            % List only the files whose subject (the SUBJ-ID in the file name)
+            % passes this filter of lab database tags: tags separated by spaces
+            % that must all hold, "-" before one the subject must not have,
+            % "namespace:*" for any tag of a namespace, a bare word for a bare
+            % tag (celldb.tagFilter). '' lists every file again. A file whose
+            % name names no subject, and one whose subject was never checked,
+            % is not listed while a filter is set. Not kept between sessions.
+            obj.fileTags = strtrim(char(expr));
+            obj.hTagsEdit.Value = obj.fileTags;
+            obj.applyTagFilter();
+        end
+
+        function r = checkSubjects(obj)
+            % The Check subjects button: ask the lab database about the
+            % subjects the found files name (which it has, their tags and
+            % variables; a few seconds at most), then apply the tag filter to
+            % the answers. Returns celldb.refreshSubjects' struct.
+            r = struct('ok', false, 'asked', 0, 'missing', strings(0, 1), 'message', "", 'tagsRead', false);
+            ids = CellDiscovery.subjectsOf(obj.foundFiles);
+            ids = unique(ids(strlength(ids) > 0));
+            set(obj.hFig, 'Pointer', 'watch');
+            drawnow;
+            try
+                r = celldb.refreshSubjects(ids);
+            catch ME
+                r.message = "Subjects not checked: " + string(ME.message);
+            end
+            set(obj.hFig, 'Pointer', 'arrow');
+            obj.applyTagFilter();
+            obj.showProgress(char(r.message));
+        end
+
+        function files = listedFiles(obj)
+            % The absolute paths of the files the list shows (a cell column).
+            files = obj.allAbsFiles(:);
         end
 
         function addCloseListener(obj, fcn)
@@ -450,11 +501,11 @@ classdef CellDiscovery < handle
             %% pDir
             pDir = uipanel(topGrid, 'Title', 'Directory & File Search');
             pDir.Layout.Column = 1;
-            gDir = uigridlayout(pDir, [2 4]);
+            gDir = uigridlayout(pDir, [3 4]);
             gDir.Padding       = [6 6 6 6];
             gDir.RowSpacing    = 4;
             gDir.ColumnSpacing = 4;
-            gDir.RowHeight     = {22, 22};
+            gDir.RowHeight     = {22, 22, 22};
             gDir.ColumnWidth   = {'fit', '1x', 90, 'fit'};
 
             lbl = uilabel(gDir, 'Text', 'Parent directory:', 'HorizontalAlignment', 'left');
@@ -488,6 +539,30 @@ classdef CellDiscovery < handle
                 'Tooltip', 'Search the parent folder again with the file filter. Use it after files were added, removed or detected outside this window.', ...
                 'ButtonPushedFcn', @obj.onSearch);
             btn.Layout.Row = 2; btn.Layout.Column = 3;
+
+            lbl = uilabel(gDir, 'Text', 'Subject tags:', 'HorizontalAlignment', 'left');
+            lbl.Layout.Row = 3; lbl.Layout.Column = 1;
+
+            obj.hTagsEdit = uieditfield(gDir, 'text', 'Value', '', 'Tag', 'tagsEdit', ...
+                'Tooltip', ['List only the files whose subject (the SUBJ-ID in the file name) carries these lab ' ...
+                'database tags, so a batch detects only those; press Enter. Tags separated by spaces must all ' ...
+                'hold; a leading "-" means "does not have"; "cohort:*" means any tag of that namespace; a bare ' ...
+                'word is a bare tag. Example: cohort:a -qc:fail. The tags are the ones Check subjects last ' ...
+                'read: a file whose subject was never checked, or whose name names no subject, is not listed ' ...
+                'while a filter is set. Empty lists every file. Not kept between sessions.'], ...
+                'ValueChangedFcn', @(s, ~) obj.setTagFilter(s.Value));
+            try
+                obj.hTagsEdit.Placeholder = 'cohort:a -qc:fail   (empty: every file)';
+            catch
+            end
+            obj.hTagsEdit.Layout.Row = 3; obj.hTagsEdit.Layout.Column = 2;
+
+            obj.hCheckSubjectsBtn = uibutton(gDir, 'Text', 'Check subjects', 'Tag', 'checkSubjectsBtn', ...
+                'Tooltip', ['Ask the lab database about the subjects the found files name: which it has, and ' ...
+                'their tags and variables (a few seconds at most). The answers are kept on this computer; the ' ...
+                'Subject tags filter goes by them. Nothing else in this window asks the server.'], ...
+                'ButtonPushedFcn', @(~, ~) obj.checkSubjects());
+            obj.hCheckSubjectsBtn.Layout.Row = 3; obj.hCheckSubjectsBtn.Layout.Column = 3;
 
             %% pPy
             pPy = uipanel(topGrid, 'Title', 'Python Environment');
@@ -634,12 +709,12 @@ classdef CellDiscovery < handle
                 'Page: the page number in the TIFF (1 = first).\n' ...
                 'Suffix: names the result file <stem>_<suffix><page>_locs.csv; use letters only (e.g. page).\n' ...
                 'Detection Model: the detector run on this page; (skip) leaves the page out.\n' ...
-                'Rescore Model: the scorer that rates each detection afterwards; (none) = no rescoring.\n' ...
+                'Rescore Model: the scorer that rates each detection afterward; (none) = no rescoring.\n' ...
                 'LSM: correct the bidirectional LSM scanner artifact first (options: LSM options...).\n' ...
                 'Bg radius: radius in pixels of the background subtraction; 0 = off.\n' ...
                 'Resize x: factor applied to the page before detection. 0 = auto: computed from the ' ...
                 'TIFF pixel-size calibration so the detector sees %g um/px (the training pixel size).\n' ...
-                'Snap: move each detection to its refined cell centre afterwards (options: Snap options...).\n' ...
+                'Snap: move each detection to its refined cell center afterward (options: Snap options...).\n' ...
                 'Normalize: stretch the detector input so its %g-%g percentiles span the 8-bit range the models ' ...
                 'were trained on (does not alter the saved resized TIF or the source image).'], ...
                 obj.TRAIN_UM_PER_PIXEL, obj.NORM_PERCENTILES(1), obj.NORM_PERCENTILES(2)), ...
@@ -743,8 +818,8 @@ classdef CellDiscovery < handle
                 'Items', obj.DOT_COLORS, ...
                 'Value', obj.DOT_COLORS{min(obj.P.dotColorIdx, numel(obj.DOT_COLORS))}, ...
                 'Tag', 'dotColorPop', ...
-                'Tooltip', ['Colour of the detection dots in the result figure and PNG. A colormap name ' ...
-                '(parula, hot, ...) colours the dots by their rank in the score; a plain colour paints all dots alike.'], ...
+                'Tooltip', ['Color of the detection dots in the result figure and PNG. A colormap name ' ...
+                '(parula, hot, ...) colors the dots by their rank in the score; a plain color paints all dots alike.'], ...
                 'ValueChangedFcn', @obj.onDotColorChange);
             obj.hDotColorPop.Layout.Row = 1; obj.hDotColorPop.Layout.Column = 6;
 
@@ -768,7 +843,7 @@ classdef CellDiscovery < handle
                 'Value', logical(obj.P.saveLsmTif), 'Tag', 'saveLsmTif', ...
                 'Tooltip', ['Exports  <stem>_resized.tif  in the image subdirectory. ' ...
                 'Saves the image after LSM correction, background subtraction, and resize — ' ...
-                'the image the detection model received, before any intensity normalisation ' ...
+                'the image the detection model received, before any intensity normalization ' ...
                 '(source intensities are kept for downstream measurements).'], ...
                 'ValueChangedFcn', @obj.onSaveLsmTifChange);
             obj.hSaveLsmTif.Layout.Row = 3; obj.hSaveLsmTif.Layout.Column = [1 8];
@@ -831,6 +906,7 @@ classdef CellDiscovery < handle
                 obj.hFileCountLabel.FontColor = [0.7 0 0];
                 obj.setFileList({}, {});
                 obj.allAbsFiles = {};
+                obj.foundFiles  = {};
                 return;
             end
 
@@ -854,6 +930,7 @@ classdef CellDiscovery < handle
                     obj.hFileCountLabel.FontColor = [0.7 0 0];
                     obj.setFileList({}, {});
                     obj.allAbsFiles = {};
+                    obj.foundFiles  = {};
                     return;
                 end
             end
@@ -861,9 +938,31 @@ classdef CellDiscovery < handle
             % one writes a second set of results into the same dataset.
             [allFiles, nHidden] = CellDiscovery.hideDerivedImages(allFiles);
 
-            obj.allAbsFiles = allFiles;
+            obj.foundFiles  = allFiles;
             obj.searchRoot  = rootDir;
             obj.nHidden     = nHidden;
+            obj.applyTagFilter();
+        end
+
+        function applyTagFilter(obj)
+            % Narrow the files of the last search to those whose subject passes
+            % the Subject tags filter (celldb.tagFilter: this computer's cache,
+            % never the server), then redraw the list. No filter: every file.
+            files = obj.foundFiles;
+            obj.nByTags = 0;
+            obj.tagNote = '';
+            if ~isempty(obj.fileTags) && ~isempty(files)
+                try
+                    [keep, note] = celldb.tagFilter(CellDiscovery.subjectsOf(files), obj.fileTags);
+                catch ME
+                    keep = false(numel(files), 1);
+                    note = "The tag filter shows nothing: " + string(ME.message);
+                end
+                obj.nByTags = nnz(~keep);
+                obj.tagNote = char(note);
+                files = files(keep);
+            end
+            obj.allAbsFiles = files;
             obj.refreshFileMarks();
         end
 
@@ -886,7 +985,15 @@ classdef CellDiscovery < handle
                 labels = {};
             end
             obj.setFileList(labels, files);
-            obj.hFileCountLabel.Text      = CellDiscovery.fileCountText(n, obj.nHidden, nnz(done));
+            txt = CellDiscovery.fileCountText(n, obj.nHidden, nnz(done));
+            tip = 'Image files found below the parent directory, and how many have every result already.';
+            if ~isempty(obj.fileTags)
+                txt = sprintf('%s %c %d left out by tags', txt, char(183), obj.nByTags);
+                tip = strtrim(sprintf('%s The Subject tags filter "%s" left out %d file(s). %s', ...
+                    tip, obj.fileTags, obj.nByTags, obj.tagNote));
+            end
+            obj.hFileCountLabel.Text      = txt;
+            obj.hFileCountLabel.Tooltip   = tip;
             obj.hFileCountLabel.FontColor = CellToolkit.ternary(n > 0, [0.1 0.45 0.1], [0.6 0.4 0]);
         end
 
@@ -1935,11 +2042,11 @@ classdef CellDiscovery < handle
             obj.pageWarnings = {};
 
             % --- Preprocess the whole file once (joint LSM), grab this page ---
-            % Preprocessing is centralised: the entire channel stack is corrected
+            % Preprocessing is centralized: the entire channel stack is corrected
             % together (so LSM registration uses every channel) and cached, then
             % reused for every page's detection and for the output TIF.
             %
-            % Intensity normalisation is applied here, to the detector-input
+            % Intensity normalization is applied here, to the detector-input
             % scratch image only (which Stage-2 rescoring also crops from). The
             % cached pages — and so the saved resized TIF and the snap input —
             % keep their source intensities for downstream measurements.
@@ -1950,7 +2057,7 @@ classdef CellDiscovery < handle
                 if job.normalize
                     job.normLimits = lims;
                     if any(isnan(job.normLimits(:)))
-                        fprintf(2, '[WARN] %s: no intensity spread to normalise; page used as is.\n', job.label);
+                        fprintf(2, '[WARN] %s: no intensity spread to normalize; page used as is.\n', job.label);
                     else
                         fprintf('[NORM] %s: p%g = %.4g -> 0, p%g = %.4g -> %g\n', job.label, ...
                             obj.NORM_PERCENTILES(1), job.normLimits(1,1), ...
@@ -1991,7 +2098,7 @@ classdef CellDiscovery < handle
             %
             % Detection ONLY: Stage-2 rescoring (job.rescoreModel) is a stage of
             % its own after snapToCellCentroid refinement (launchScoring),
-            % letting the scoring model crop patches centred on the snapped
+            % letting the scoring model crop patches centered on the snapped
             % cell locations rather than the raw detected ones.
             predOpts = struct( ...
                 'output',       job.tmpCsv, ...
@@ -2130,7 +2237,7 @@ classdef CellDiscovery < handle
 
             % --- Stage-2 rescoring (score.py), AFTER detection + snap ----------
             % Out of the predict.py call so the scoring model crops its 64x64
-            % patches around the snapped (refined) cell centres, and a stage of
+            % patches around the snapped (refined) cell centers, and a stage of
             % its own: score.py runs asynchronously, streamed by the timer like
             % predict.py, so MATLAB stays free and Stop / Abort now act on it.
             % Best effort: a scoring failure never blocks the CSV write.
@@ -2156,8 +2263,8 @@ classdef CellDiscovery < handle
             % scratch image (job.tmpImg) at the training pixel size, so the
             % (snapped) original-image coordinates are mapped back into resized
             % space (* the resize factor f). When snap ran, SNAP_X/SNAP_Y carry
-            % the refined centres (snapped points moved, unsnapped points keep
-            % their original location), so the model sees crops centred on the
+            % the refined centers (snapped points moved, unsnapped points keep
+            % their original location), so the model sees crops centered on the
             % best available cell location regardless of the ApplyToXY setting.
             started  = false;
             job      = obj.inFlight.job;
@@ -2169,7 +2276,7 @@ classdef CellDiscovery < handle
                 return;
             end
 
-            % Effective scoring centres in original-image space.
+            % Effective scoring centers in original-image space.
             vn = locsOrig.Properties.VariableNames;
             if all(ismember({'SNAP_X','SNAP_Y'}, vn))
                 ex = locsOrig.SNAP_X; ey = locsOrig.SNAP_Y;
@@ -2183,9 +2290,9 @@ classdef CellDiscovery < handle
             if isempty(keys), return; end
 
             % Write the score.py input. score.py consumes the first column as
-            % the DataFrame index, derives integer crop centres from Yp/Xp, and
+            % the DataFrame index, derives integer crop centers from Yp/Xp, and
             % resolves imgName against --root. rescore_key rides through so the
-            % score can be merged back onto the right rows afterwards
+            % score can be merged back onto the right rows afterward
             % (readScores).
             [~, imgStem, imgExt] = fileparts(job.tmpImg);
             nLive = numel(keys);
@@ -2343,9 +2450,13 @@ classdef CellDiscovery < handle
             %     manifest (CellDatasetManifest) so the active analysis file,
             %     analyzed image/pages and provenance are the authoritative
             %     record every other Cell* tool reads. Best effort: never let
-            %     manifest bookkeeping disrupt a batch run. ---
+            %     manifest bookkeeping disrupt a batch run. The manifest is the
+            %     one of the locs file just written (forCsv), which is where
+            %     the exports, rescoring and the lab database record look for
+            %     these facts; forImage is the same manifest by the rules of
+            %     CellDatasetManifest ("The base of a dataset"). ---
             try
-                mf  = CellDatasetManifest.forImage(job.imgFile);
+                mf  = CellDatasetManifest.forCsv(job.outCsvOrig);
                 key = CellDatasetManifest.keyForCsv(job.outCsvOrig);
                 info = CellDiscovery.detectionFacts(job);   % everything needed to regenerate the model input
                 info.image = job.imgFile;
@@ -2573,8 +2684,8 @@ classdef CellDiscovery < handle
             raw = [];
             try raw = CellToolkit.readPage(job.imgFile, job.page, job.nPages); catch, end
 
-            % A normalised detector input exists only as the scratch image; the
-            % cached page is the same image before intensity normalisation.
+            % A normalized detector input exists only as the scratch image; the
+            % cached page is the same image before intensity normalization.
             detImg = [];
             if isfield(job, 'normalize') && job.normalize
                 try detImg = imread(job.tmpImg); catch, end
@@ -2667,7 +2778,7 @@ classdef CellDiscovery < handle
                 'TooltipString', 'End the batch here (the page shown is already finished and kept).', ...
                 'String', 'Stop batch', 'Callback', @onStopDiag);
             % While paused, closing the window just continues (don't destroy the
-            % reusable figure); restore normal close behaviour afterwards.
+            % reusable figure); restore normal close behavior afterward.
             hDiag.CloseRequestFcn = @(~,~) uiresume(hDiag);
             drawnow;
             uiwait(hDiag);
@@ -2772,7 +2883,7 @@ classdef CellDiscovery < handle
             % detection scratch images and the optional output TIF draw from this
             % single cache, so the model and the saved TIF share the same
             % geometry and preprocessing (the scratch image alone is then
-            % intensity-normalised when the page's Normalize box is ticked), and
+            % intensity-normalized when the page's Normalize box is checked), and
             % the expensive joint-channel LSM correction runs once.
             if ~isempty(obj.preprocCache) && isfield(obj.preprocCache, 'imgFile') ...
                     && strcmp(obj.preprocCache.imgFile, imgFile)
@@ -2791,7 +2902,7 @@ classdef CellDiscovery < handle
             % Write a multi-page resized TIF whose page count matches the
             % source file, using the already-computed per-file cache so the saved
             % image is what the detection model received, before the optional
-            % intensity normalisation of the detector input.
+            % intensity normalization of the detector input.
             obj.ensurePreprocCache(job.imgFile, job.nPages);
             pages  = obj.preprocCache.pages;
             rzArr  = obj.preprocCache.rzArr;
@@ -2998,6 +3109,7 @@ classdef CellDiscovery < handle
         function setUIEnable(obj, state)
             ctrls = { ...
                 obj.hDirEdit,     obj.hRegexEdit,    obj.hPyEdit, ...
+                obj.hTagsEdit,    obj.hCheckSubjectsBtn, ...
                 obj.hCondaExeEdit, obj.hCondaEdit,   obj.hTestEnvBtn, ...
                 obj.hDeviceEdit,  obj.hBatchEdit,    obj.hThrEdit, ...
                 obj.hIgnoreRad,   obj.hOverwriteRad, ...
@@ -3103,7 +3215,7 @@ classdef CellDiscovery < handle
             job.resize       = rz;        % 1 = no resizing (resolved factor; see resolveResize)
             job.resizeMode   = '';        % set by jobForRow: 'auto' | 'manual' | 'uncalibrated'
             job.lsmPages     = [];        % set at launch: pages LSM-corrected together with this one
-            job.normalize    = false;     % set by jobForRow: normalise detector-input intensity
+            job.normalize    = false;     % set by jobForRow: normalize detector-input intensity
             job.normLimits   = [];        % [lo hi] source intensities mapped to [0 NORM_TARGET] (set at launch)
             job.calibratedUm = NaN;       % set by jobForRow: source um/px from the TIFF calibration (NaN = none)
             job.srcPixelSize = CellDiscovery.TRAIN_UM_PER_PIXEL * rz;   % best estimate of the source um/px
@@ -3172,11 +3284,11 @@ classdef CellDiscovery < handle
 
         function [img, lims] = detectorInputPage(page, normalize)
             % The detector-input image of a cached page (LSM, background and resize
-            % already applied by preprocessAllPages): intensity-normalised when the
-            % page's Normalize box is ticked, in the class the scratch TIFF stores.
+            % already applied by preprocessAllPages): intensity-normalized when the
+            % page's Normalize box is checked, in the class the scratch TIFF stores.
             % CellToolkit.modelInputPage does both, so the curation exports and
             % rescoring regenerate exactly this image. lims = the [lo hi] used
-            % ([] when not normalised).
+            % ([] when not normalized).
             [img, info] = CellToolkit.modelInputPage(page, struct('normalized', normalize, ...
                 'normPercentiles', CellDiscovery.NORM_PERCENTILES, 'normTarget', CellDiscovery.NORM_TARGET));
             lims = info.normLimits;
@@ -3260,7 +3372,7 @@ classdef CellDiscovery < handle
 
         function args = lsmOptionsToNameValue(opts)
             % Name-value cell for correctBidirectionalLSMArtifact from the persisted
-            % options (sanitised: every supported option, defaults filled in).
+            % options (sanitized: every supported option, defaults filled in).
             % The parsing is CellToolkit's, shared with modelInputFromFile.
             args = CellToolkit.lsmNameValue(CellDiscovery.sanitizeLSMOptions(opts));
         end
@@ -3369,7 +3481,7 @@ classdef CellDiscovery < handle
                 data{r,7} = z;
                 % Snap (snapToCellCentroid post-processing)
                 data{r,8} = CellToolkit.parseLogical(data{r,8}, false);
-                % Normalize (intensity normalisation of the detector input)
+                % Normalize (intensity normalization of the detector input)
                 data{r,9} = CellToolkit.parseLogical(data{r,9}, true);
             end
         end
@@ -3383,16 +3495,16 @@ classdef CellDiscovery < handle
             % by CellDiscovery, not passed to snapToCellCentroid.
             spec = {
                 'CellType',              'enum', {'auto','round','oval'},                                  'auto',   'Cell-shape preset: round (PV somata), oval (ring-like PNNs), or auto (balanced).'
-                'Method',                'enum', {'auto','weighted-centroid','mean-shift','radial-symmetry'}, 'auto', 'auto picks from CellType (oval => radial-symmetry). radial-symmetry finds the centre of an open/ring-like net; weighted-centroid suits solid somata; mean-shift is threshold-free but lands on the bright wall.'
+                'Method',                'enum', {'auto','weighted-centroid','mean-shift','radial-symmetry'}, 'auto', 'auto picks from CellType (oval => radial-symmetry). radial-symmetry finds the center of an open/ring-like net; weighted-centroid suits solid somata; mean-shift is threshold-free but lands on the bright wall.'
                 'PixelSize',             'num',  {},                                                       'auto',   'Microns per pixel of the SOURCE page snap runs on. auto = from the TIFF calibration (or 0.645 x the resize factor when the file has none).'
                 'CellDiameter',          'num',  {},                                                       '18',     'Expected cell diameter in microns.'
                 'BackgroundSubtraction', 'enum', {'tophat','gaussian','none'},                             'tophat', 'Global background removal before snapping.'
                 'ThresholdMethod',       'enum', {'otsu','adaptive','relative'},                           'otsu',   'Per-window foreground threshold (weighted-centroid only).'
                 'ThresholdScale',        'num',  {},                                                       '1.0',    'Multiplier on the Otsu threshold; <1 grows blobs, >1 shrinks them (weighted-centroid only).'
-                'RingRadius',            'num',  {},                                                       'auto',   'Expected net ring radius in px, centre-to-wall (radial-symmetry). auto = ~half the cell diameter.'
+                'RingRadius',            'num',  {},                                                       'auto',   'Expected net ring radius in px, center-to-wall (radial-symmetry). auto = ~half the cell diameter.'
                 'RingRadiusTolerance',   'num',  {},                                                       'auto',   'Fractional ring-radius band voted over (radial-symmetry). auto = preset.'
-                'DarkCenter',            'bool', {},                                                       'true',   'Bias the snap toward dark ring centres (radial-symmetry); on for PNN holes.'
-                'SearchRadius',          'num',  {},                                                       'auto',   'Max distance (px) from a detection to an eligible centre. auto = from cell size.'
+                'DarkCenter',            'bool', {},                                                       'true',   'Bias the snap toward dark ring centers (radial-symmetry); on for PNN holes.'
+                'SearchRadius',          'num',  {},                                                       'auto',   'Max distance (px) from a detection to an eligible center. auto = from cell size.'
                 'MaxShift',              'num',  {},                                                       'auto',   'Max distance (px) a detection may move. auto = SearchRadius.'
                 'OverMaxShiftAction',    'enum', {'reject','clamp','keep'},                                'reject', 'What to do when the snap exceeds MaxShift.'
                 'ApplyToXY',             'bool', {},                                                       'false',  'Overwrite X/Y with the snapped coordinates (SNAP_* columns are always added regardless).'
@@ -3552,9 +3664,9 @@ classdef CellDiscovery < handle
 
             % Per-page background subtraction (LSM already applied above), then
             % resize, by CellToolkit.modelInputPage without its intensity step
-            % (the detector input is normalised at launch, detectorInputPage).
+            % (the detector input is normalized at launch, detectorInputPage).
             % pagesFull holds the bg-subtracted page at source resolution (snap
-            % input); pages the resized one (detector input before normalisation,
+            % input); pages the resized one (detector input before normalization,
             % and what the optional *_resized.tif saves).
             pages     = cell(1, nPages);
             pagesFull = cell(1, nPages);
@@ -3651,7 +3763,7 @@ classdef CellDiscovery < handle
             % All fields default to empty/false when the source has no tags.
             res = struct('hasRes', false, 'xres', [], 'yres', [], 'unit', [], 'desc', '');
             t = [];
-            % Suppress libtiff warnings about unrecognised private tags (e.g.
+            % Suppress libtiff warnings about unrecognized private tags (e.g.
             % ImageJ's IJMetadata tags 50838/50839) — they are harmless.
             warnState = warning('off', 'all');
             try
@@ -3724,7 +3836,7 @@ classdef CellDiscovery < handle
             % writer stores each page in its OWN IFD (non-contiguous), so carrying
             % that header makes ImageJ read page 2+ from a byte offset that is off
             % by the size of the intervening IFD — the page appears shifted to the
-            % right. (MATLAB's own imread honours the IFDs and is unaffected,
+            % right. (MATLAB's own imread honors the IFDs and is unaffected,
             % which is why the corruption only shows in ImageJ.)
             %
             % We drop the stack-layout fields while keeping calibration lines
@@ -3808,7 +3920,7 @@ classdef CellDiscovery < handle
                 parts{end+1} = sprintf('resize=%g', job.resize);
             end
             if isfield(job, 'normalize') && job.normalize
-                parts{end+1} = 'normalised';
+                parts{end+1} = 'normalized';
             end
             if isempty(parts)
                 s = 'no preprocessing';
@@ -3821,7 +3933,7 @@ classdef CellDiscovery < handle
             % Overlay snapToCellCentroid movement on the snap-input axes: an
             % arrow from each original detection to its snapped location, with
             % original points in red, snapped points in green, and unmoved
-            % points in grey.
+            % points in gray.
             vn = T.Properties.VariableNames;
             if isempty(fromX) || ~all(ismember({'SNAP_X','SNAP_Y'}, vn))
                 return;
@@ -3907,6 +4019,22 @@ classdef CellDiscovery < handle
             files = files(~derived);
         end
 
+        function ids = subjectsOf(files)
+            % The subject each file's name names (celldb.parseSectionName:
+            % "SUBJ-ID-<n>"), "" where the name names none. A string column.
+            files = cellstr(files);
+            ids = strings(numel(files), 1);
+            for k = 1:numel(files)
+                try
+                    [~, stem] = fileparts(files{k});
+                    sec = celldb.parseSectionName(string(stem));
+                    ids(k) = string(sec.SubjectID);
+                catch
+                end
+            end
+            ids(ismissing(ids)) = "";
+        end
+
         function txt = fileCountText(n, nHidden, nDone)
             % The file-count label of a search: "12 files found (3 *_resized.tif
             % hidden)"; given NDONE (files whose pages all have results), also
@@ -3923,7 +4051,7 @@ classdef CellDiscovery < handle
         function pos = windowPosition(screenSize)
             % The main window's [x y width height] on a screen of SCREENSIZE =
             % [width height] pixels: the designed 1300 x 1010, cut to leave room
-            % for the taskbar below and the title bar above, and centred.
+            % for the taskbar below and the title bar above, and centered.
             designW = 1300; designH = 1010;
             taskbar = 48; titleBar = 40; slack = 8;
             w = screenSize(1); h = screenSize(2);
@@ -4249,7 +4377,7 @@ classdef CellDiscovery < handle
             % Set controls of the window as a person would, by name: PythonExe,
             % CondaExe, CondaEnv, Device, BatchSize, Threshold (text), Overwrite,
             % SavePng, SaveTif, Diagnostic (logical), PageMap (a 9-column cell,
-            % sanitised against the models found). Saves the settings to this
+            % sanitized against the models found). Saves the settings to this
             % window's preference group.
             p = inputParser;
             p.FunctionName = 'CellDiscovery.configure';
@@ -4368,7 +4496,7 @@ classdef CellDiscovery < handle
 
         function facts = detectionFactsFor(imgFile, row, lsmOptions, lsmIdx, normLimits)
             % The facts finishOutputs records for page-map row ROW of imgFile, the
-            % LSM page set lsmIdx and the normalisation limits used.
+            % LSM page set lsmIdx and the normalization limits used.
             [fdir, stem] = fileparts(char(imgFile));
             job = CellDiscovery.jobForRow(char(imgFile), fdir, stem, CellToolkit.countPages(imgFile), ...
                 row, 'model', '', lsmOptions, CellDiscovery.defaultSnapOptions());

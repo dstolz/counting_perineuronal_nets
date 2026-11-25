@@ -265,13 +265,13 @@ classdef (TestTags = {'Benchmark'}) tGalleryPerf < matlab.unittest.TestCase
             s = tc.pageStyle(1, n);
             g.showPage(tc.pageIds(1, n), s);
             drawnow;
-            colours = uint8([0 158 115; 213 94 0; 110 110 110]);
+            colors = uint8([0 158 115; 213 94 0; 110 110 110]);
             total = tc.Warmup + tc.Reps;
             t = zeros(total, 1);
             tCall = zeros(total, 1);
             for i = 1:total
                 k = mod(7 * i, n) + 1;
-                s.BorderRGB(k, :) = colours(mod(i, 3) + 1, :);
+                s.BorderRGB(k, :) = colors(mod(i, 3) + 1, :);
                 t0 = tic;
                 g.updateTiles(k, s);
                 tCall(i) = toc(t0);
@@ -289,12 +289,12 @@ classdef (TestTags = {'Benchmark'}) tGalleryPerf < matlab.unittest.TestCase
             s = tc.pageStyle(2, n);
             g.showPage(tc.pageIds(2, n), s);
             drawnow;
-            colours = uint8([0 158 115; 213 94 0]);
+            colors = uint8([0 158 115; 213 94 0]);
             total = tc.Warmup + tc.Reps;
             t = zeros(total, 1);
             tCall = zeros(total, 1);
             for i = 1:total
-                s.BorderRGB = repmat(colours(mod(i, 2) + 1, :), n, 1);
+                s.BorderRGB = repmat(colors(mod(i, 2) + 1, :), n, 1);
                 t0 = tic;
                 g.updateTiles(1:n, s);
                 tCall(i) = toc(t0);
@@ -344,7 +344,7 @@ classdef (TestTags = {'Benchmark'}) tGalleryPerf < matlab.unittest.TestCase
                 drawnow;
                 F = getframe(g.Axes);
                 tSwap(i) = toc(t0);
-                okSwap(i) = isequal(tGalleryPerf.frameColour(F, g, 1), double(s.BorderRGB));
+                okSwap(i) = isequal(tGalleryPerf.frameColor(F, g, 1), double(s.BorderRGB));
                 k = 20 + i;
                 s.BorderRGB = repmat(s.BorderRGB, n, 1);
                 s.BorderRGB(k, :) = [0 255 0];
@@ -353,7 +353,7 @@ classdef (TestTags = {'Benchmark'}) tGalleryPerf < matlab.unittest.TestCase
                 drawnow;
                 F = getframe(g.Axes);
                 tOne(i) = toc(t0);
-                okOne(i) = isequal(tGalleryPerf.frameColour(F, g, k), [0 255 0]);
+                okOne(i) = isequal(tGalleryPerf.frameColor(F, g, k), [0 255 0]);
             end
             fprintf(['[perf] visible latency (change + drawnow + getframe of the axes), median of %d:\n' ...
                 '[perf]   capture, nothing changed       %6.1f ms\n' ...
@@ -376,7 +376,7 @@ classdef (TestTags = {'Benchmark'}) tGalleryPerf < matlab.unittest.TestCase
             tLoop = toc(t0);
             F = getframe(g.Axes);
             tAll = toc(t0);
-            okLast = isequal(tGalleryPerf.frameColour(F, g, 1), double(s.BorderRGB));
+            okLast = isequal(tGalleryPerf.frameColor(F, g, 1), double(s.BorderRGB));
             fprintf(['[perf]   %d page swaps back to back: %.1f ms each until drawnow returned; with the final capture ' ...
                 '%.0f ms in all = %.1f ms per page after subtracting one control capture (last page shown: %d)\n'], ...
                 N, 1000 * tLoop / N, 1000 * tAll, 1000 * (tAll - median(tCur)) / N, okLast);
@@ -443,13 +443,13 @@ classdef (TestTags = {'Benchmark'}) tGalleryPerf < matlab.unittest.TestCase
 
     % ------------------------------------------------------------------------------------------------
     methods (Static)
-        function c = frameColour(F, g, k)
-            %frameColour  Colour of a captured frame (getframe of the gallery axes) in the middle of tile
+        function c = frameColor(F, g, k)
+            %frameColor  Color of a captured frame (getframe of the gallery axes) in the middle of tile
             %   K's left border band (the frame may be scaled by the display's DPI).
             L = g.Layout;
             sc = size(F.cdata, 2) / L.Size(2);
             r = L.Rect(k, :);
-            x = r(1) + L.BorderPx / 2 - 0.5;            % centre of the band, mosaic units
+            x = r(1) + L.BorderPx / 2 - 0.5;            % center of the band, mosaic units
             y = r(2) + r(4) / 2;
             fx = min(size(F.cdata, 2), max(1, round((x - 0.5) * sc + 0.5)));
             fy = min(size(F.cdata, 1), max(1, round((y - 0.5) * sc + 0.5)));

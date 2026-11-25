@@ -4,7 +4,7 @@ classdef tModelInput < matlab.unittest.TestCase
     %   refactor onto them.
     %
     %   BIT IDENTITY. For every combination of LSM correction (joint over both pages), background
-    %   subtraction, resize (manual 1 / auto from the TIFF calibration) and normalisation, the
+    %   subtraction, resize (manual 1 / auto from the TIFF calibration) and normalization, the
     %   image is compared, bit for bit and class, between
     %     OLD  the code before the refactor (frozen below, copied verbatim from commit 1936760:
     %          preprocessAllPages, applyPreprocess, the LSM option parsing, normalizeIntensity and

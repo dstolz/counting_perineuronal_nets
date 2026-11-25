@@ -56,7 +56,7 @@ classdef tLegacyImport < matlab.unittest.TestCase
             tc.verifyEqual(c.bad, nnz(q.Label == "Bad"));
             tc.verifyEqual(c.uncertain, nnz(q.Label == "Uncertain"));
             tc.verifyEqual(c.kept, nnz(q.Label == "Good"), 'legacy-qc Good is kept');
-            tc.verifyEqual(c.reviewed, nnz(ismember(q.Label, ["Good" "Bad" "Uncertain"])), 'reviewed = imported labelled rows');
+            tc.verifyEqual(c.reviewed, nnz(ismember(q.Label, ["Good" "Bad" "Uncertain"])), 'reviewed = imported labeled rows');
             tc.verifyEqual(c.total, height(tc.Truth.PV2.locs));
             tc.verifyEqual(c.flagged, nnz(q.Label == "Ignore"), 'Ignore rows become Flag=later');
         end
@@ -222,8 +222,8 @@ classdef tLegacyImport < matlab.unittest.TestCase
             n = height(L);
             ids = idsByDet(s.T, L);
             tc.assertEqual(height(s.T), n);
-            labelled = false(n, 1);
-            labelled(q.Row) = true;
+            labeled = false(n, 1);
+            labeled(q.Row) = true;
             for k = 1:height(q)
                 r = rowOfId(s.T, ids(q.Row(k)));
                 lab = q.Label(k);
@@ -236,7 +236,7 @@ classdef tLegacyImport < matlab.unittest.TestCase
                     tc.verifyTrue(contains(r.Notes, lab, 'IgnoreCase', true), 'a note mentions the legacy label');
                 end
             end
-            others = ~labelled;
+            others = ~labeled;
             T = s.T(ismember(s.T.CellID, ids(others)), :);
             tc.verifyTrue(all(T.Label == "" & ~T.Reviewed & T.Flag == ""), 'rows the QC file did not review stay untouched');
         end

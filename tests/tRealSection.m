@@ -105,7 +105,7 @@ classdef (TestTags = {'Slow', 'RealData'}) tRealSection < matlab.unittest.TestCa
                 tc.verifyLessThan(tCrop, 2000);
                 tc.verifyLessThan(tFeat, 1500);
                 tc.verifyEqual(size(F), [height(T) numel(names)]);
-                imgCols = ~ismember(string(names), ["rescore", "rescoreRank", "compContrast", "compCentreZ"]);
+                imgCols = ~ismember(string(names), ["rescore", "rescoreRank", "compContrast", "compCenterZ"]);
                 tc.verifyFalse(any(isnan(F(:, imgCols)), 'all'), 'no NaN in image features on real data');
 
                 p = curation.Proposals.current(T, key);
@@ -154,9 +154,9 @@ classdef (TestTags = {'Slow', 'RealData'}) tRealSection < matlab.unittest.TestCa
             tc.verifyEqual(size(xy, 1), 4, 'a wide line imports as a 4-corner strip');
             tc.verifyEqual(min(side), 600, 'AbsTol', 1, 'the strip is 600 px wide');
             info = imfinfo(fullfile(tc.Section, tc.Stem + ".tif"));
-            centre = mean(xy, 1);
-            tc.verifyTrue(centre(1) > 0 && centre(1) < info(1).Width && ...
-                centre(2) > 0 && centre(2) < info(1).Height, 'the strip lies on the image');
+            center = mean(xy, 1);
+            tc.verifyTrue(center(1) > 0 && center(1) < info(1).Width && ...
+                center(2) > 0 && center(2) < info(1).Height, 'the strip lies on the image');
         end
     end
 end

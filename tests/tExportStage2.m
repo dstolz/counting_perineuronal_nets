@@ -1,6 +1,6 @@
 classdef tExportStage2 < matlab.unittest.TestCase
     %TEXPORTSTAGE2  curation.Export.stage2 (and .observations) on a synthetic multi-section,
-    %   multi-animal project labelled through curation.Store, checked by instantiating the real
+    %   multi-animal project labeled through curation.Store, checked by instantiating the real
     %   Python dataset class (datasets.PerineuronalNetsRankDataset) on the export
     %   (tests\python\inspect_export.py):
     %     - its length equals the report's counts; X and Y are integers; agreement levels are 7/4/0
@@ -9,7 +9,7 @@ classdef tExportStage2 < matlab.unittest.TestCase
     %       convention puts it (to 2 px); a deliberately transposed export fails the same check;
     %     - no holdout, catch, excluded (also by a region the other channel drew), merged, auto,
     %       legacy-resolver or flagged row is present; an animal never straddles train and
-    %       validation; the left-out counts per rule are what the labelling implies;
+    %       validation; the left-out counts per rule are what the labeling implies;
     %     - one animal needs AllowSameValidation; too few labels per class refuses; Overwrite.
     %   The project builder (makeProject) and the inspector call are static methods shared with
     %   tExportStage1, tTrainSmoke and tRescore.
@@ -80,10 +80,10 @@ classdef tExportStage2 < matlab.unittest.TestCase
                 want = 7 * (lab == "Good") + 4 * (lab == "Uncertain");
                 tc.verifyEqual(items.agreement(ok), want, 'agreement = 7 Good / 4 Uncertain / 0 Bad');
                 tc.verifyTrue(all(items.h == 64 & items.w == 64), '64 x 64 patches');
-                [frac, off] = tc.centring(items, Pq, loc);
-                fprintf('[centring] %s: %.0f%% of true-cell rows have the blob where expected (+-2 px); mean export - blob = (%.2f, %.2f) px\n', ...
+                [frac, off] = tc.centering(items, Pq, loc);
+                fprintf('[centering] %s: %.0f%% of true-cell rows have the blob where expected (+-2 px); mean export - blob = (%.2f, %.2f) px\n', ...
                     sp, 100 * frac, off(1), off(2));
-                tc.verifyGreaterThanOrEqual(frac, 0.9, 'patches are centred on their cells');
+                tc.verifyGreaterThanOrEqual(frac, 0.9, 'patches are centered on their cells');
             end
         end
 
@@ -95,8 +95,8 @@ classdef tExportStage2 < matlab.unittest.TestCase
             items = struct2table(J.items);
             items.imgName = string(items.imgName);
             [~, loc] = ismember(items(:, {'imgName', 'X', 'Y'}), Pq(:, {'imgName', 'X', 'Y'}));
-            frac = tc.centring(items, Pq, loc);
-            fprintf('[centring] transposed export: %.0f%% within 2 px\n', 100 * frac);
+            frac = tc.centering(items, Pq, loc);
+            fprintf('[centering] transposed export: %.0f%% within 2 px\n', 100 * frac);
             tc.verifyLessThan(frac, 0.5, 'the coordinate check must catch a transposed image');
         end
     end
@@ -152,7 +152,7 @@ classdef tExportStage2 < matlab.unittest.TestCase
             T = tc.Index.table("pv");
             want = 0;
             for k = 1:size(tExportStage2.LAYOUT, 1)
-                % reviewed, active, labelled, not excluded (by flag or by the JSON regions)
+                % reviewed, active, labeled, not excluded (by flag or by the JSON regions)
                 R = T(T.Base == tExportStage2.LAYOUT(k, 2) + "_proj", :);
                 js = fullfile(tc.Parent, tExportStage2.LAYOUT(k, 1), tExportStage2.LAYOUT(k, 2) + "_proj.curation.json");
                 J = jsondecode(fileread(js));
@@ -209,9 +209,9 @@ classdef tExportStage2 < matlab.unittest.TestCase
             tc.verifyEqual(sum(r.Counts.Bad), 12 * n);
         end
 
-        function [frac, meanOff] = centring(tc, items, Pq, loc)
+        function [frac, meanOff] = centering(tc, items, Pq, loc)
             % share of true-cell rows whose patch maximum lies where the coordinate convention puts
-            % the cell's blob: model 0-based centre = f * (x_true - 0.5) - 0.5 (imresize's pixel
+            % the cell's blob: model 0-based center = f * (x_true - 0.5) - 0.5 (imresize's pixel
             % mapping of the 1-based fixture coordinates), exported X = round(f * X_full)
             hit = false(0, 1); off = zeros(0, 2);
             for i = 1:height(items)
@@ -240,10 +240,10 @@ classdef tExportStage2 < matlab.unittest.TestCase
 
         function truth = makeProject(parent, layout, labelFcn, cross)
             %MAKEPROJECT  Synthetic sections (makeSyntheticDataset, 500 x 700 px at 1.657 um/px) in
-            %   parent/<folder>, each labelled by labelFcn(store, truth, k) through curation.Store
-            %   (PV2); returns per section the fixture truth plus .plan (what was labelled) and
+            %   parent/<folder>, each labeled by labelFcn(store, truth, k) through curation.Store
+            %   (PV2); returns per section the fixture truth plus .plan (what was labeled) and
             %   .resize. cross (optional): the section where the ECM1 store draws an image-scope
-            %   exclusion region over a PV2 row labelled Good (plan.crossId) after PV2 was closed.
+            %   exclusion region over a PV2 row labeled Good (plan.crossId) after PV2 was closed.
             if nargin < 4, cross = 0; end
             truth = struct();
             for k = 1:size(layout, 1)

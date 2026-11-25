@@ -1,11 +1,11 @@
 classdef MapView < handle
-    %MapView  A whole tissue section with every detection as a coloured point: ONE image, ONE scatter.
+    %MapView  A whole tissue section with every detection as a colored point: ONE image, ONE scatter.
     %
     %   m = curation.MapView(parent, Name=Value)
     %       parent: a uigridlayout or uipanel of a uifigure. The view adds one borderless uipanel to it
     %       (m.Panel; set m.Panel.Layout to place it in a grid) holding one plain axes (not uiaxes; toolbar
     %       and default interactions off) and a fixed set of graphics objects, all created here and only
-    %       updated in place afterwards (no cla, no per-point objects, no new axes):
+    %       updated in place afterward (no cla, no per-point objects, no new axes):
     %         Image          the page at full resolution as uint8 RGB, pushed once per source and per
     %                        (mode, gain, gamma); zoom and pan change only the axes limits
     %         RegionGroup    ExcludeFill (patch) + ExcludeHatch, AnalysisLine, ReferenceLine (dashed)
@@ -18,7 +18,7 @@ classdef MapView < handle
     %         DragLine       the point being moved (move tool): its old and new place, joined
     %         LassoLine      the lasso being drawn
     %     Options
-    %       Background       panel colour [r g b] 0-1 (default [0.09 0.09 0.09])
+    %       Background       panel color [r g b] 0-1 (default [0.09 0.09 0.09])
     %       MarkerPx         point marker diameter in screen pixels (default 10)
     %       MarkerStyle      "ring" (default: the cell stays visible inside it) or "dot" (filled, dark edge)
     %       MarkerLineWidth  ring line width in points (default 1.5)
@@ -30,7 +30,7 @@ classdef MapView < handle
     %       ReferenceColor   [r g b] 0-1
     %       HatchSpacingPx   spacing of the exclusion hatch in image pixels (default 30)
     %
-    %   Image (X = column, Y = row, pixel centres at integers, Y axis reversed like an image)
+    %   Image (X = column, Y = row, pixel centers at integers, Y axis reversed like an image)
     %     m.setImage(pageT, pageC, limits, umPerPx)   once per source: pageT target page, pageC companion
     %         page ([] = none), limits 2 x 2 [lo hi] (row 1 target, row 2 companion, as CropCache.Limits)
     %         or [] to compute them (page percentiles [1 99.9]). Fits the whole image; setImage(...,
@@ -44,7 +44,7 @@ classdef MapView < handle
     %   layer: the marker style of each point, an index into MarkerStyles, scalar or one per id)
     %     m.setPoints(ids, xy, rgb, layer)   replace all points (clears the selection and the hover);
     %                                    layer default 1
-    %     m.updatePoints(ids, rgb, layer)    recolour points in place (and move them to another
+    %     m.updatePoints(ids, rgb, layer)    recolor points in place (and move them to another
     %                                    marker layer when LAYER is given)
     %     m.movePoints(ids, xy), m.addPoints(ids, xy, rgb, layer), m.removePoints(ids)
     %     m.setMarkerStyles(styles)      struct array Marker (a scatter marker: 'o', 's', 'd', '^', 'v',
@@ -67,7 +67,7 @@ classdef MapView < handle
     %
     %   View
     %     m.fit()                        the whole image
-    %     m.centerOn(xy, halfWidthUm)    centre on XY; with halfWidthUm, zoom so that the narrower side of
+    %     m.centerOn(xy, halfWidthUm)    center on XY; with halfWidthUm, zoom so that the narrower side of
     %                                    the view spans 2*halfWidthUm (clamped to the image like any view)
     %     r = m.viewRect()               [xmin xmax ymin ymax] of the view (axes limits, image pixels)
     %     m.setViewRect(r)               show rectangle R as large as it fits
@@ -75,12 +75,12 @@ classdef MapView < handle
     %                                    pan (screen pixels; positive moves the image right / up)
     %     Zoom is clamped between the whole image and MinSpanPx image pixels across the narrower side; the
     %     view never leaves the image (along an axis where the view is larger than the image, the image is
-    %     centred).
+    %     centered).
     %
     %   Missed-cell sweep
     %     rects = m.sweepRects(fieldUm, overlapFrac)   fields of fieldUm across (height from the panel's
     %         aspect ratio) tiling the image row by row (serpentine: left to right, then right to left;
-    %         Order="raster" for always left to right), neighbours overlapping by at least overlapFrac,
+    %         Order="raster" for always left to right), neighbors overlapping by at least overlapFrac,
     %         none leaving the image. K x 4 [xmin xmax ymin ymax]; kept in m.SweepRects.
     %     m.showSweepRect(k)             zoom to field k and outline it; k = 0 clears the outline
     %
@@ -126,7 +126,7 @@ classdef MapView < handle
     %     shown it re-checks a few times as the layout settles, and every press re-reads it; any public
     %     view call (fit, centerOn, setViewRect, zoomBy, panBy, sweepRects, showSweepRect) and the first
     %     hover or wheel event after a show re-read it too. A changed size keeps the view (a fitted
-    %     view stays fitted; else the centre and the scale).
+    %     view stays fitted; else the center and the scale).
     %     m.refreshLayout()              re-read the panel size now and re-apply the view
     %   Construction while a timer runs: MATLAB processes timer callbacks while it loads a class, and a
     %   view constructed by such a callback while this class is being loaded fails ("... is used in
@@ -169,7 +169,7 @@ classdef MapView < handle
 
         Ids = zeros(0, 1, 'uint32')     % one row per point
         XY = zeros(0, 2)                % [X Y] of each point
-        RGB = zeros(0, 3, 'uint8')      % colour of each point
+        RGB = zeros(0, 3, 'uint8')      % color of each point
         Layer = zeros(0, 1)             % marker layer of each point (index into MarkerStyles)
         Shown = false(0, 1)             % visible
         Selection = zeros(0, 1, 'uint32')
@@ -179,7 +179,7 @@ classdef MapView < handle
         SweepRects = zeros(0, 4)
         SweepIndex = 0
 
-        Center = [1 1]                  % view centre, image pixels
+        Center = [1 1]                  % view center, image pixels
         Scale = 1                       % image pixels per screen pixel
         LastTimings = struct('BuildMs', NaN)
     end
@@ -215,7 +215,7 @@ classdef MapView < handle
         ToolValue = "select"
         XD = zeros(0, 1)                % displayed X (NaN = hidden)
         YD = zeros(0, 1)
-        CD = zeros(0, 3)                % colours 0-1
+        CD = zeros(0, 3)                % colors 0-1
         RowOfId = zeros(0, 1)
         DenseLookup = true
         Pages = {[], []}
@@ -530,11 +530,11 @@ classdef MapView < handle
         end
 
         function updatePoints(obj, ids, rgb, layer)
-            %updatePoints  Recolour points IDS (rgb N x 3 or 1 x 3, 0-255) in place; with LAYER (scalar
+            %updatePoints  Recolor points IDS (rgb N x 3 or 1 x 3, 0-255) in place; with LAYER (scalar
             %   or one per id) also move them to that marker layer.
             rows = obj.requireRows(ids);
             if isempty(rows); return; end
-            rgb = curation.MapView.colours(rgb, numel(rows));
+            rgb = curation.MapView.colors(rgb, numel(rows));
             obj.RGB(rows, :) = rgb;
             obj.CD(rows, :) = double(rgb) / 255;
             relayered = [];
@@ -692,7 +692,7 @@ classdef MapView < handle
         function setMarks(obj, ids)
             %setMarks  Dashed rings on points IDS ([] clears), apart from the selection: what a task
             %   is about (CellCurator: the cells of the close pair on screen). Selecting, hovering and
-            %   labelling are unaffected by them.
+            %   labeling are unaffected by them.
             ids = uint32(ids(:));
             ids = ids(obj.rowsOf(ids) > 0);
             obj.Marks = unique(ids, 'stable');
@@ -848,7 +848,7 @@ classdef MapView < handle
         % ---- view -------------------------------------------------------------------------------------
         function refreshLayout(obj)
             %refreshLayout  Re-read the panel's size now and re-apply the view to it (a fitted view
-            %   stays fitted, else the centre and the scale are kept). Cheap when nothing changed.
+            %   stays fitted, else the center and the scale are kept). Cheap when nothing changed.
             if obj.Deleting; return; end
             obj.checkGeometry(true);
             obj.flush();
@@ -864,7 +864,7 @@ classdef MapView < handle
         end
 
         function centerOn(obj, xy, halfWidthUm)
-            %centerOn  Centre the view on XY; with halfWidthUm, the narrower side spans 2*halfWidthUm.
+            %centerOn  Center the view on XY; with halfWidthUm, the narrower side spans 2*halfWidthUm.
             obj.checkGeometry(false);
             s = obj.Scale;
             if nargin > 2 && ~isempty(halfWidthUm)
@@ -890,7 +890,7 @@ classdef MapView < handle
         end
 
         function zoomBy(obj, factor, xy)
-            %zoomBy  Zoom in by FACTOR (> 1 in, < 1 out) keeping image point XY (default the centre) fixed.
+            %zoomBy  Zoom in by FACTOR (> 1 in, < 1 out) keeping image point XY (default the center) fixed.
             obj.checkGeometry(false);
             if nargin < 3 || isempty(xy); xy = obj.Center; end
             obj.zoomAbout(double(xy(1, 1:2)), factor);
@@ -1044,13 +1044,13 @@ classdef MapView < handle
             end
         end
 
-        function cancelled = cancelDrag(obj)
+        function canceled = cancelDrag(obj)
             %cancelDrag  End the gesture in progress: a moved point snaps back, a lasso is dropped, a pan
             %   returns to its start. True when there was one.
             D = obj.Drag;
             obj.Drag = [];
-            cancelled = ~isempty(D);
-            if ~cancelled; return; end
+            canceled = ~isempty(D);
+            if ~canceled; return; end
             switch D.Kind
                 case "move"
                     if D.Moved; obj.restoreMoved(D.Id); end
@@ -1189,7 +1189,7 @@ classdef MapView < handle
         end
 
         function applyView(obj, c, s)
-            %applyView  Show centre C at scale S (clamped to the zoom range and to the image).
+            %applyView  Show center C at scale S (clamped to the zoom range and to the image).
             [sMin, sMax] = obj.scaleRange();
             if ~isfinite(s) || s <= 0; s = sMax; end
             s = min(max(s, sMin), sMax);
@@ -1250,7 +1250,7 @@ classdef MapView < handle
         function changed = checkGeometry(obj, reread)
             %checkGeometry  When REREAD (or the layout is dirty): read the panel's size again and, if
             %   it is not the size the view was computed for, place the axes and re-apply the view (a
-            %   fitted view stays fitted, else the centre and the scale are kept). The layout stays
+            %   fitted view stays fitted, else the center and the scale are kept). The layout stays
             %   dirty while the panel is not showing (a hidden panel's size means nothing).
             changed = false;
             if obj.Deleting || ~(reread || obj.LayoutDirty); return; end
@@ -1388,8 +1388,8 @@ classdef MapView < handle
             end
         end
 
-        function pushPoints(obj, xyChanged, colourChanged, rows, relayered)
-            %pushPoints  Send the displayed positions and/or colours to the scatters (one set call
+        function pushPoints(obj, xyChanged, colorChanged, rows, relayered)
+            %pushPoints  Send the displayed positions and/or colors to the scatters (one set call
             %   each). ROWS: the rows that changed ([] = any: every layer is sent); RELAYERED: the
             %   layers that gained or lost points (sent whole). Every non-empty layer holds all N
             %   points, NaN where a point belongs to another layer, so its rows line up with Ids.
@@ -1404,11 +1404,11 @@ classdef MapView < handle
             end
             if K == 1                                           % one style: the plain scatter
                 h = obj.Layers(1);
-                if (xyChanged && colourChanged) || ~isempty(relayered)
+                if (xyChanged && colorChanged) || ~isempty(relayered)
                     set(h, 'XData', obj.XD, 'YData', obj.YD, 'CData', obj.CD);
                 elseif xyChanged
                     set(h, 'XData', obj.XD, 'YData', obj.YD);
-                elseif colourChanged
+                elseif colorChanged
                     h.CData = obj.CD;
                 end
                 return
@@ -1422,7 +1422,7 @@ classdef MapView < handle
             for k = 1:K
                 whole = any(relayered == k);
                 doXY = whole || (xyChanged && touched(k));
-                doC = whole || (colourChanged && touched(k));
+                doC = whole || (colorChanged && touched(k));
                 if ~doXY && ~doC; continue; end
                 h = obj.Layers(k);
                 in = obj.Layer == k;
@@ -1596,7 +1596,7 @@ classdef MapView < handle
         end
 
         function restoreMoved(obj, id)
-            %restoreMoved  Show point ID at its own place again after a cancelled move.
+            %restoreMoved  Show point ID at its own place again after a canceled move.
             set(obj.DragLine, 'XData', NaN, 'YData', NaN);
             row = obj.rowsOf(id);
             if row > 0 && obj.Shown(row)
@@ -1791,7 +1791,7 @@ classdef MapView < handle
             end
             [ids, xy] = curation.MapView.checkXY(ids, xy);
             ids = uint32(ids);
-            rgb = curation.MapView.colours(rgb, numel(ids));
+            rgb = curation.MapView.colors(rgb, numel(ids));
         end
 
         function styles = checkStyles(styles)
@@ -1812,16 +1812,16 @@ classdef MapView < handle
             styles = out;
         end
 
-        function rgb = colours(rgb, n)
-            %colours  N x 3 uint8 colours from N x 3 or 1 x 3 values 0-255.
+        function rgb = colors(rgb, n)
+            %colors  N x 3 uint8 colors from N x 3 or 1 x 3 values 0-255.
             if isequal(size(rgb), [1 3]); rgb = repmat(rgb, n, 1); end
             if ~isequal(size(rgb), [n 3])
-                error('MapView:BadColour', 'rgb must be 1 x 3 or %d x 3 (0-255).', n);
+                error('MapView:BadColor', 'rgb must be 1 x 3 or %d x 3 (0-255).', n);
             end
             if ~isa(rgb, 'uint8')
                 rgb = double(rgb);
                 if any(~isfinite(rgb), 'all') || any(rgb < 0 | rgb > 255, 'all')
-                    error('MapView:BadColour', 'Colours are 0-255.');
+                    error('MapView:BadColor', 'Colors are 0-255.');
                 end
                 rgb = uint8(rgb);
             end

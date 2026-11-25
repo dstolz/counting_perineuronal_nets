@@ -5,11 +5,11 @@ classdef CropCache < handle
     %       pageT    target page (H x W numeric, any class and scale)
     %       pageC    companion page of the same size, or [] for none
     %       ids      N x 1 CellIDs (non-negative integers, unique; stored as uint32)
-    %       xy       N x 2 [X Y] in full-resolution pixels: X is the column, Y the row, pixel centres at
+    %       xy       N x 2 [X Y] in full-resolution pixels: X is the column, Y the row, pixel centers at
     %                integers (round(X), round(Y) index the page, as in the legacy QC app)
-    %       umPerPx  page pixel size in micrometres
+    %       umPerPx  page pixel size in micrometers
     %     Options
-    %       WindowUm         side of the square window around each cell, in micrometres (default 44: what
+    %       WindowUm         side of the square window around each cell, in micrometers (default 44: what
     %                        the scoring network sees)
     %       TilePx           tile side in pixels (default 80): the window is resampled to TilePx x TilePx
     %       Percentiles      [low high] page percentiles mapped to 0 and 255 (default [1 99.9]); computed
@@ -21,7 +21,7 @@ classdef CropCache < handle
     %       MaxSamples       page pixels sampled for the percentiles (default 1e6)
     %
     %   The crops of all N cells are sampled from the page with sub-pixel interpolation, directly at tile
-    %   resolution, in one vectorised pass per chunk of cells (separable kernels applied with pagemtimes),
+    %   resolution, in one vectorized pass per chunk of cells (separable kernels applied with pagemtimes),
     %   converted to uint8 with the page's fixed limits and kept for both channels. Outside the page the
     %   tile is 0 (black); TouchesBorder says which windows reach past the page edge.
     %
@@ -31,16 +31,16 @@ classdef CropCache < handle
     %
     %   [mosaic, layout] = c.compose(ids, nRows, nCols, style)
     %       A page of tiles, row-major (tile k is at row ceil(k/nCols), column k-(row-1)*nCols); unknown
-    %       or 0 ids and slots after numel(ids) are drawn in the background colour.
+    %       or 0 ids and slots after numel(ids) are drawn in the background color.
     %       style (struct; every field optional):
     %         Mode        "target" | "companion" | "overlay" (target green, companion magenta) |
     %                     "side" (target | companion: tiles twice as wide)
     %         Gain, Gamma display = min(1, Gain*v)^Gamma on v in [0 1] (Gamma < 1 brightens); scalar or
     %                     [target companion]
     %         LUT         256 x 1 or 256 x 2 lookup table (uint8, or double 0-255) used instead of Gain/Gamma
-    %         BorderRGB   K x 3 (or 1 x 3) border colours, uint8 or double 0-255; NaN rows: no border
+    %         BorderRGB   K x 3 (or 1 x 3) border colors, uint8 or double 0-255; NaN rows: no border
     %         BorderPx    border width in pixels, drawn inside the tile (default 3)
-    %         CornerRGB   K x 3 corner badge colours (top right, inside the border); NaN rows: no badge
+    %         CornerRGB   K x 3 corner badge colors (top right, inside the border); NaN rows: no badge
     %         CornerPx    badge side in pixels (default round(TilePx/8))
     %         Dim         K x 1 logical: draw the tile dimmed (DimFactor of its brightness, default 0.4)
     %         Gap         pixels between tiles (default 0)
@@ -86,7 +86,7 @@ classdef CropCache < handle
     end
 
     properties (Constant, Access = private)
-        ChunkCells = 512           % cells per vectorised extraction pass (bounds memory)
+        ChunkCells = 512           % cells per vectorized extraction pass (bounds memory)
         MaxDenseId = 1e7
     end
 
@@ -369,8 +369,8 @@ classdef CropCache < handle
             s.BorderPx = min(s.BorderPx, floor(min(TH, TW) / 2));
             s.CornerPx = min(s.CornerPx, min(TH, TW) - 2 * s.BorderPx);
             s.Background = uint8(reshape(double(s.Background), 1, 3));
-            s.BorderRGB = curation.CropCache.perTileColours(s.BorderRGB, K, 'BorderRGB');
-            s.CornerRGB = curation.CropCache.perTileColours(s.CornerRGB, K, 'CornerRGB');
+            s.BorderRGB = curation.CropCache.perTileColors(s.BorderRGB, K, 'BorderRGB');
+            s.CornerRGB = curation.CropCache.perTileColors(s.CornerRGB, K, 'CornerRGB');
             if isempty(s.Dim)
                 s.Dim = false(K, 1);
             elseif isscalar(s.Dim)
@@ -461,7 +461,7 @@ classdef CropCache < handle
         end
 
         function [Wt, idx, inside] = axisWeights(obj, c, nPix)
-            %axisWeights  Interpolation weights along one axis for cells centred at C (1 x m).
+            %axisWeights  Interpolation weights along one axis for cells centered at C (1 x m).
             %   Wt: T x h x m (sample j of cell n = sum_i Wt(j,i,n) * pixel idx(i,n)); idx: h x m page
             %   indices clamped to 1..nPix; inside: T x m, the sample lies on the page.
             T = obj.TilePx;
@@ -469,7 +469,7 @@ classdef CropCache < handle
             sc = max(1, step);                    % kernel stretch: anti-alias when shrinking
             if obj.Kernel == "cubic"; support = 2; else; support = 1; end
             R = support * sc;
-            off = ((1:T)' - (T + 1) / 2) * step;  % T x 1, the tile centre is on the cell
+            off = ((1:T)' - (T + 1) / 2) * step;  % T x 1, the tile center is on the cell
             m = numel(c);
             u = c + off;                          % T x m sample positions (page coordinates)
             p0 = floor(u(1, :) - R);              % first page pixel of each cell's patch
@@ -619,14 +619,14 @@ classdef CropCache < handle
 
     % ------------------------------------------------------------------------------------------------
     methods (Static, Access = private)
-        function mosaic = paintSlots(mosaic, g, slots, rel, colours)
-            %paintSlots  Set pixels REL (offsets within a tile) of tiles SLOTS to COLOURS (n x 3, 0-255).
+        function mosaic = paintSlots(mosaic, g, slots, rel, colors)
+            %paintSlots  Set pixels REL (offsets within a tile) of tiles SLOTS to COLORS (n x 3, 0-255).
             idx = rel + g.SlotBase(slots(:)');          % P x n
             P = numel(rel);
             HW = g.H * g.W;
-            colours = uint8(colours);
+            colors = uint8(colors);
             for ch = 1:3
-                mosaic(idx + (ch - 1) * HW) = repmat(colours(:, ch)', P, 1);
+                mosaic(idx + (ch - 1) * HW) = repmat(colors(:, ch)', P, 1);
             end
         end
 
@@ -642,8 +642,8 @@ classdef CropCache < handle
             end
         end
 
-        function c = perTileColours(c, K, name)
-            %perTileColours  K x 3 double colours (0-255, NaN rows = none) from [], 1 x 3 or K x 3.
+        function c = perTileColors(c, K, name)
+            %perTileColors  K x 3 double colors (0-255, NaN rows = none) from [], 1 x 3 or K x 3.
             if isempty(c)
                 c = NaN(K, 3);
                 return

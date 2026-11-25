@@ -11,7 +11,7 @@ function [folder, truth] = makeSyntheticDataset(outDir, opts)
 %     <Base>_proj_ECM1_locs.redetected.csv     (Variants) a re-detection of the same cells, other order
 %     <Base>_proj_PV2_locs.redetected.csv        (not named *_locs.csv, so discovery ignores them; a test
 %                                                copies one over the original to simulate re-detection)
-%     <Base>_proj_PV2_locs_QC.csv              legacy CellQualityControl file labelling about half the rows
+%     <Base>_proj_PV2_locs_QC.csv              legacy CellQualityControl file labeling about half the rows
 %     <Base>_proj_ECM1_locs.resolver.csv       legacy CellNeighborResolution file (CURATED_X/Y, pair status)
 %
 %   Name-value options (defaults)
@@ -23,7 +23,7 @@ function [folder, truth] = makeSyntheticDataset(outDir, opts)
 %     IntensityScale 3000        float32 pixel values reach about this, deliberately not 0-255
 %     Variants       true        also write the redetected, QC and resolver files
 %
-%   Coordinates: X is the column and Y the row of a 1-based pixel grid (pixel centres at integers).
+%   Coordinates: X is the column and Y the row of a 1-based pixel grid (pixel centers at integers).
 %
 %   TRUTH fields
 %     baseName, umPerPixel, imageSize, seed, paths (struct of file paths)
@@ -35,11 +35,11 @@ function [folder, truth] = makeSyntheticDataset(outDir, opts)
 %        dupGroups       cell array of row vectors: each duplicate pair [primary dup], and the 3-member cluster
 %        redet           table Row, Kind, TrueIdx, OldRow (0 = new detection) of the redetected CSV
 %        droppedOldRows  rows of the original that the redetection no longer has
-%     qc        table Row, Label, Code of the labelled rows of the PV2 QC file (Variants)
+%     qc        table Row, Label, Code of the labeled rows of the PV2 QC file (Variants)
 %     resolver  struct describing the resolver file (Variants): pairs, keepA/keepB/keepBoth/merged pair
 %               rows, deletedRow, addedRow, mergedRow, curatedNaNRows, nRows
 %
-%   See also tFixture, CellDatasetManifest, CellQualityControl, CellNeighborResolution.
+%   See also tFixture, CellDatasetManifest, curation.LegacyImport.
 
 arguments
     outDir (1,1) string
@@ -158,7 +158,7 @@ end
 
 
 function writeTiff(file, imgs, upp)
-%writeTiff  A multi-page float32 TIFF whose resolution tags give UPP micrometres per pixel.
+%writeTiff  A multi-page float32 TIFF whose resolution tags give UPP micrometers per pixel.
 if isfile(file); delete(file); end
 t = Tiff(file, 'w');
 cleaner = onCleanup(@() t.close());
@@ -173,7 +173,7 @@ for p = 1:numel(imgs)
     tag.PlanarConfiguration = Tiff.PlanarConfiguration.Chunky;
     tag.Compression = Tiff.Compression.None;
     tag.RowsPerStrip = 16;
-    tag.XResolution = 1e4 / upp;         % pixels per centimetre
+    tag.XResolution = 1e4 / upp;         % pixels per centimeter
     tag.YResolution = 1e4 / upp;
     tag.ResolutionUnit = Tiff.ResolutionUnit.Centimeter;
     tag.Software = 'makeSyntheticDataset';
@@ -372,15 +372,15 @@ end
 %% ---- legacy QC file ----------------------------------------------------------------------------
 
 function [tbl, qc] = buildQcTable(s, ch, csvPath, tifPath, base, channelName)
-%buildQcTable  The table CellQualityControl.saveCurrentQC writes: the locs columns + the 18 QC columns.
+%buildQcTable  The table the removed CellQualityControl.saveCurrentQC wrote: the locs columns + the 18 QC columns.
 locs = ch.locs;
 det = ch.det;
 n = height(locs);
-labelled = rand(s, n, 1) < 0.5;
+labeled = rand(s, n, 1) < 0.5;
 r = rand(s, n, 1);
 label = strings(n, 1);
 for k = 1:n
-    if ~labelled(k); continue; end
+    if ~labeled(k); continue; end
     switch det.Kind(k)
         case "tp"
             if r(k) < 0.90; label(k) = "Good"; elseif r(k) < 0.97; label(k) = "Uncertain"; else; label(k) = "Bad"; end
@@ -390,7 +390,7 @@ for k = 1:n
             if r(k) < 0.5; label(k) = "Bad"; else; label(k) = "Good"; end
     end
 end
-lab = find(labelled);
+lab = find(labeled);
 p = lab(randperm(s, numel(lab)));
 label(p(1:2)) = "Ignore";
 if nnz(label == "Uncertain") < 3
@@ -430,14 +430,14 @@ end
 %% ---- legacy resolver file ----------------------------------------------------------------------
 
 function [out, info] = buildResolverTable(ch)
-%buildResolverTable  The table CellNeighborResolution.saveResolved writes for the ECM detections.
+%buildResolverTable  The table the removed CellNeighborResolution.saveResolved wrote for the ECM detections.
 %   Pairs: each duplicate pair, and the cluster's three pairs (left Unresolved). The first four duplicate
 %   pairs (by row) become Keep A, Keep B, Keep Both and Merged. One false detection is deleted outright
 %   and one point is added by hand (at the first missed cell), as the GUI would.
 locs = ch.locs;
 n = height(locs);
 
-% neighbour pairs [rA rB isSimple], sorted by row
+% neighbor pairs [rA rB isSimple], sorted by row
 pairs = zeros(0, 3);
 for g = 1:numel(ch.dupGroups)
     m = ch.dupGroups{g};
@@ -532,7 +532,7 @@ end
 
 
 function out = joinToken(existing, tok)
-%joinToken  Append TOK to a ";"-joined list (as CellNeighborResolution.joinToken does).
+%joinToken  Append TOK to a ";"-joined list (as the removed CellNeighborResolution.joinToken did).
 if strlength(existing) == 0
     out = string(tok);
 else

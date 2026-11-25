@@ -1,7 +1,7 @@
 classdef tCuratorDatabase < matlab.unittest.TestCase
     %tCuratorDatabase  The lab database in CellCurator changes nothing the app writes: the same curation
     %   (the same synthetic section, the same decisions in the same order, marked complete through the
-    %   window) gives byte-identical <stem>_curation.csv (ReviewedAt normalised: it holds the time of
+    %   window) gives byte-identical <stem>_curation.csv (ReviewedAt normalized: it holds the time of
     %   each label) and <stem>_final.csv with the client switched off (CELLDB_NO_CLIENT=1) and with it
     %   on (an isolated, fake-server client: tests\celldb_test_client); after Mark source complete the
     %   record is made off the key path and its reason shown in the status bar; the status bar holds
@@ -103,6 +103,50 @@ classdef tCuratorDatabase < matlab.unittest.TestCase
             tc.verifyEqual(final1, final0, 'the final list is byte for byte the same');
             tc.verifyNotEmpty(app1.LastRecord);
             tc.verifySubstring(char(app1.StatusText), char(string(app1.LastRecord.reason)));
+        end
+
+        function theSubjectsTagsAndVariablesAreShownOnlyWhenAsked(tc)
+            % Subject...: what the lab database says about the section's animal goes to the status bar
+            % when the button is pressed, and nowhere before (review stays blind to the group)
+            tc.assumeNotEmpty(which('celldb.subjectInfo'), 'the celldb package is not here');
+            tc.assumeNotEqual(string(getenv('CELLDB_NO_CLIENT')), "1", 'run without the client');
+            [ok, why] = celldb.available('Refresh', true);
+            tc.assumeTrue(ok, "The lab database client is not usable here: " + why);
+            [ok, why] = labclient.Api.atLeast(4);
+            tc.assumeTrue(ok, "The lab database client here keeps no tags: " + string(why));
+            [fake, tc.Restore] = celldb_test_client();
+            celldb.available('Refresh', true);
+            tCelldbFacts.seed(fake);
+
+            folder = fullfile(tc.Root, 'subject');
+            makeSyntheticDataset(folder, 'Variants', false, 'BaseName', tCelldbRun.Section);
+            app = CellCurator('UseSettings', false, 'PrepareNext', false, 'Assist', false, 'ConfirmAudit', false);
+            tc.addTeardown(@() tCuratorDatabase.closeApp(app));
+            btn = findall(app.Figure, 'Tag', 'btn:subject');
+            tc.assertNumElements(btn, 1, 'a Subject... button in the status bar');
+            tc.verifySubstring(btn.Tooltip, 'only when you press this');
+            tc.verifySubstring(app.showSubject(), 'No source is open');
+
+            app.openParent(folder, '', 'ECM1');
+            app.waitForLayout();
+            txt = app.showSubject();
+            tc.verifySubstring(txt, 'SUBJ-ID-9001');
+            tc.verifySubstring(txt, 'has not asked the lab database');
+            tc.verifyEqual(char(app.StatusText), txt, 'it is the status bar that says it');
+            tc.verifyEmpty(fake.Calls(ismember(string(fake.Calls), ["subjectCurrent" "entityTags"])), ...
+                'the button reads the cache, never the server');
+
+            celldb.refreshSubjects("SUBJ-ID-9001");
+            app.handleKey('rightarrow', {});            % any review step: nothing of the subject appears by itself
+            shown = string(arrayfun(@(l) string(strjoin(string(l.Text), " ")), findall(app.Figure, 'Type', 'uilabel')));
+            tc.verifyFalse(any(contains(shown, ["cohort" "condition:noise" "pilot"])), ...
+                'no label of the window names the animal''s group unasked');
+            btn.ButtonPushedFcn(btn, []);
+            drawnow;
+            txt = char(app.StatusText);
+            tc.verifySubstring(txt, 'SUBJ-ID-9001 in the lab database: F, meriones_unguiculatus, project P1');
+            tc.verifySubstring(txt, 'Tags: cohort:a condition:noise pilot');
+            tc.verifySubstring(txt, 'Variables: Age at perfusion = 92 d; housing = pair');
         end
     end
 end

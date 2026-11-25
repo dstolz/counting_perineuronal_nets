@@ -241,7 +241,7 @@ classdef RescoreRunner < handle
             end
             if r.State == "running" || r.State == "ready"
                 r.State = "idle";
-                r.Message = "The rescore was cancelled.";
+                r.Message = "The rescore was canceled.";
             end
             r.Job = [];
         end

@@ -241,12 +241,12 @@ classdef tCuratorAssist < matlab.unittest.TestCase
 
     methods (Test, TestTags = {'Benchmark'})
         function benchmarkKeysWhileFittingAndApplying(tc)
-            % a real-size source (~2,000 rows of ECM1) and a second, fully labelled section: every label
+            % a real-size source (~2,000 rows of ECM1) and a second, fully labeled section: every label
             % change refits (MinNewLabels 1), so a fit is in flight while the keys are timed
             t0 = tic;
             tc.makeSections(2, 'ImageSize', [3277 2355], 'NumCells', [1250 1250]);
             tc.labelSection(2, 5000);
-            fprintf('\n[assist-perf] fixture: 2 real-size sections written and section 2 labelled in %.1f s\n', toc(t0));
+            fprintf('\n[assist-perf] fixture: 2 real-size sections written and section 2 labeled in %.1f s\n', toc(t0));
             app = tc.openApp('MinNewLabels', 1);
             r = app.Assist;
             n0 = app.Store.counts().total;

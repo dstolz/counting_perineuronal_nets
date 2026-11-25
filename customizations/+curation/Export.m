@@ -12,7 +12,7 @@ classdef Export
 %
 %   ---------------------------------------------------------------------------------------------
 %   THE IMAGE. The models read the detector input, never saved by CellDiscovery: the page after
-%   LSM correction, top-hat background subtraction, resize to 0.645 um/px and normalisation to
+%   LSM correction, top-hat background subtraction, resize to 0.645 um/px and normalization to
 %   0-255. Each export regenerates it with CellToolkit.modelInputFromFile from the facts the
 %   manifest recorded for the source's detection (CellToolkit.modelInputFactsFor; for sections
 %   detected before the facts were recorded, the resize factor is inferred and the rest assumed,
@@ -81,11 +81,11 @@ classdef Export
 %   unreviewed rows (and auto Bad) are background: nothing is written for them.
 %   PAINTED OUT (set to 0 in the exported image). Training has no ignore mechanism: an area can
 %   only be left out by removing its pixels. Painted: every "exclude" region of the section (scope
-%   "image" or the source key; tissue folds, edge artefacts: their cells are neither positive nor
+%   "image" or the source key; tissue folds, edge artifacts: their cells are neither positive nor
 %   background), and a disk of opts.IgnoreRadiusUm (12 um) around every active row that may not
 %   be a positive or background: audit evidence (any label), labels from a non-person source
 %   other than auto Bad (legacy-resolver), flagged rows with a Good/Uncertain label, and
-%   Uncertain rows when ~UncertainIsCell. A positive whose centre pixel is painted is dropped
+%   Uncertain rows when ~UncertainIsCell. A positive whose center pixel is painted is dropped
 %   (counted). An image is skipped when either half (the train-half1/half2 splits alternate left
 %   and right halves per image) has no positive (the validation loop indexes every image's
 %   annotations), or when a half is narrower or the image lower than one 640 px patch (the
@@ -94,8 +94,8 @@ classdef Export
 %   opts: Kind (required), Sections, UncertainIsCell true, IgnoreRadiusUm 12, PatchSize 640,
 %   Overwrite, Assume, Python (as above).
 %
-%   OBSERVATIONS (curation.Export.observations): one CSV with the columns of CellQualityControl's
-%   observation export, ObservationID, ImagePath, TiffPageNumber, PageAlias, X, Y, Score, Rescore,
+%   OBSERVATIONS (curation.Export.observations): one CSV with the columns of the removed
+%   CellQualityControl app's observation export, ObservationID, ImagePath, TiffPageNumber, PageAlias, X, Y, Score, Rescore,
 %   CropHeight, CropWidth, Classification: every active, Reviewed row with a label, not excluded
 %   (audit rows included: they are valid observations). ObservationID = md5 of
 %   "<ImagePath>|<PageAlias>|%.15g X|%.15g Y" as the legacy export; PageAlias = the channel name
@@ -341,7 +341,7 @@ classdef Export
                 painted(inImg) = mask(sub2ind([H W], rr(inImg), cc(inImg)));
                 dropped = pos & (painted | ~inImg);
                 why(pos & ~inImg) = "outside the model image";
-                why(pos & inImg & painted) = "positive whose centre was painted out";
+                why(pos & inImg & painted) = "positive whose center was painted out";
                 pos = pos & ~dropped;
                 r = curation.Export.tally(r, s, why(why ~= "positive" & why ~= "background"));
                 half = floor(W / 2);

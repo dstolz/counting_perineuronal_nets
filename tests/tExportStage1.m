@@ -1,5 +1,5 @@
 classdef tExportStage1 < matlab.unittest.TestCase
-    %TEXPORTSTAGE1  curation.Export.stage1 on a synthetic multi-animal project labelled through
+    %TEXPORTSTAGE1  curation.Export.stage1 on a synthetic multi-animal project labeled through
     %   curation.Store, checked by instantiating the real Python dataset class
     %   (datasets.PerineuronalNetsDataset, splits train-half1 and train-half2) on the export
     %   (tests\python\inspect_export.py):
@@ -7,7 +7,7 @@ classdef tExportStage1 < matlab.unittest.TestCase
     %       the reason;
     %     - the dataset's annotations (both halves) are exactly the positives of the report: Good
     %       and Uncertain, no holdout, no excluded row, no merged duplicate;
-    %     - every unclipped training box is centred on an exported positive (side 60 px);
+    %     - every unclipped training box is centered on an exported positive (side 60 px);
     %     - the exclusion region is 0 in the image the dataset reads (and outside it is not), the
     %       holdout cells are painted out; the H5 is float32 of the model-input size.
     %   One training step with the Stage-1 command line is in tTrainSmoke.
@@ -85,7 +85,7 @@ classdef tExportStage1 < matlab.unittest.TestCase
             tc.verifyEqual(h1.numImages, 2);
             tc.verifyEqual(h1.numAnnotations + h2.numAnnotations, height(A), ...
                 'every positive is in exactly one of the two halves');
-            C = struct2table([h1.centres; h2.centres]);
+            C = struct2table([h1.centers; h2.centers]);
             C.imgName = string(C.imgName);
             tc.verifyTrue(all(abs(C.side - 60) < 1e-9), 'boxes of side 60');
             d = inf(height(C), 1);
@@ -93,7 +93,7 @@ classdef tExportStage1 < matlab.unittest.TestCase
                 m = A.imgName == C.imgName(i);
                 d(i) = min(hypot(A.X(m) - C.X(i), A.Y(m) - C.Y(i)));
             end
-            tc.verifyLessThan(max(d), 1e-3, 'every unclipped box is centred on an exported positive');
+            tc.verifyLessThan(max(d), 1e-3, 'every unclipped box is centered on an exported positive');
             covered = 0;
             for i = 1:height(A)
                 covered = covered + any(C.imgName == A.imgName(i) & hypot(C.X - A.X(i), C.Y - A.Y(i)) < 1e-3);
@@ -107,7 +107,7 @@ classdef tExportStage1 < matlab.unittest.TestCase
                 tc.verifyEqual(string(J.dtype.(fld)), "float32");
             end
             tc.verifyEqual(J.rects(rects.zero), zeros(nnz(rects.zero), 1), ...
-                'exclusion region and holdout centres are 0 in what the dataset reads');
+                'exclusion region and holdout centers are 0 in what the dataset reads');
             tc.verifyTrue(all(J.rects(~rects.zero) > 0), 'outside them the image is not blank');
 
             % ---- the same, read by MATLAB (h5read gives the transpose)
@@ -121,7 +121,7 @@ classdef tExportStage1 < matlab.unittest.TestCase
     methods
         function R = rects(tc, r, out)
             % rectangles (0-based, end exclusive) the inspector reads: inside the exclusion region
-            % and at holdout centres (must be 0), and two controls outside (must not be blank)
+            % and at holdout centers (must be 0), and two controls outside (must not be blank)
             rows = {};
             zero = false(0, 1);
             for i = 1:height(r.Images)

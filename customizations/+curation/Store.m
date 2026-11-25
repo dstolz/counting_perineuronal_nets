@@ -30,7 +30,7 @@ classdef Store < handle
 %     S = curation.Store.schema()   table Name, Type, Default, Meaning of the snapshot columns
 %
 %   OPTIONS (open / openCsv / fromTable; struct, every field optional)
-%     TolUm          8      reconcile and legacy-QC position tolerance, micrometres
+%     TolUm          8      reconcile and legacy-QC position tolerance, micrometers
 %     Reviewer       getenv('USERNAME')
 %     ReadOnly       false  open without the lock; every mutator throws curation:Store:readOnly
 %     ImportLegacy   true   true | false | "force". true: run curation.LegacyImport on a store
@@ -149,7 +149,7 @@ classdef Store < handle
 %         store's own sources.<key> (keeping unknown fields there) and preserve everything else;
 %         region edits modify only the regions array, by region id (add/replace/remove), at
 %         commit. The regions array is always written as an array of objects. jsondecode
-%         collapses singleton arrays, so readers normalise shapes (keptPairs -> N x 2, regions ->
+%         collapses singleton arrays, so readers normalize shapes (keptPairs -> N x 2, regions ->
 %         regions()). revision is the store revision the snapshot holds, journalBytes the journal
 %         size then, csvFingerprint the snapshot's size and hash.
 %     <stem>_curation.lock         {host, user, pid, time (ms), session}, created exclusively
@@ -163,17 +163,17 @@ classdef Store < handle
 %     DET_X, DET_Y [double] detector position at the last match (NaN if added by hand)
 %     class, score [double], imgName [string], thr [double]   from the locs, refreshed on each
 %                           match (NaN/"" when the locs has no such column)
-%     rescore [double]      Stage-2 score of a crop centred on the cell (see RESCORE)
+%     rescore [double]      Stage-2 score of a crop centered on the cell (see RESCORE)
 %     RescoreSource [string] what produced rescore for the row's current position: "detector" |
 %                           a scoring model's name | "" (pending, rescore NaN); see RESCORE
 %     Origin [string]       detected | added | merged (a merge result created by a person)
-%     State [string]        active | merged (a duplicate's loser, never labelled Bad by a merge)
+%     State [string]        active | merged (a duplicate's loser, never labeled Bad by a merge)
 %                           | stale (detection vanished, unreviewed; purged at the next reconcile)
 %     MergedInto [uint32]   keeper's CellID, 0 = none
 %     PosSource [string]    det | snap | human
 %     InLocs [logical]      matched to the current locs file
 %     DetRun [string]       locs fingerprint at the last match
-%     MatchDistUm [double]  distance of the last match, micrometres (NaN never matched)
+%     MatchDistUm [double]  distance of the last match, micrometers (NaN never matched)
 %     Label [string]        "" | Good | Bad | Uncertain
 %     LabelSource [string]  "" | human | confirmed | blind | auto | legacy-qc | legacy-resolver
 %     Reviewed [logical]    a person decided this row
@@ -214,7 +214,7 @@ classdef Store < handle
 %     inside a batch reverts only its own changes; the batch stays open with the earlier ones.
 %
 %   RESCORE (columns rescore, RescoreSource)
-%     rescore is the Stage-2 network's score of a crop centred on the cell, so it belongs to a
+%     rescore is the Stage-2 network's score of a crop centered on the cell, so it belongs to a
 %     position; scoring models differ in scale, so RescoreSource names what produced each value:
 %       "detector"  the locs file's value at the row's detector position: rows created from the
 %                   locs (open, reconcile append, legacy import) and rows a reconcile refreshes.
@@ -397,7 +397,7 @@ classdef Store < handle
 %       5 all other rows (unreviewed, auto-rejected, stale) within TolUm on DET_X/Y;
 %       6 a detection still unmatched within TolUm of an active Reviewed row that is still
 %         unmatched is linked to it.
-%     So a person's cell gets its re-detection before an unreviewed neighbour can, and a kept cell
+%     So a person's cell gets its re-detection before an unreviewed neighbor can, and a kept cell
 %     never becomes "vanished" while its re-detection arrives as a second candidate.
 %     Matched: score, class, imgName, thr, DET_X/Y, DetRun, MatchDistUm, InLocs=true;
 %     X/Y follow the detector (PosSource -> det) unless PosSource is human; stale -> active.
@@ -537,7 +537,7 @@ classdef Store < handle
         NextRegionIdMem double = 1   % region ids of an in-memory store (never reused)
         SnapAtOpen logical = false   % open must write a snapshot (e.g. a torn journal tail was skipped)
         LocsTable = []               % the in-memory locs table of fromTable (detector values)
-        LocsCache = []               % struct fp, N: normalised locs of Meta.LocsFingerprint ([] N: unavailable)
+        LocsCache = []               % struct fp, N: normalized locs of Meta.LocsFingerprint ([] N: unavailable)
     end
 
     events
@@ -1969,7 +1969,7 @@ classdef Store < handle
         end
 
         function N = currentLocs(obj)
-            % Normalised locs (normalizeLocs) of the detector run the rows are matched to
+            % Normalized locs (normalizeLocs) of the detector run the rows are matched to
             % (Meta.LocsFingerprint): cached, else from the in-memory locs table or the locs file;
             % [] when the file at hand is another one or missing (remembered until the next
             % reconcile, so a missing file is not read again on every move).
@@ -3909,10 +3909,10 @@ classdef Store < handle
     end
 
     methods (Static, Hidden)
-        % Public only so a timer callback, a Constant initialiser and a test can reach them.
+        % Public only so a timer callback, a Constant initializer and a test can reach them.
 
         function R = fallbackNormRegions(decoded)
-            % Regions normaliser used when curation.Regions is absent (or rejects the input);
+            % Regions normalizer used when curation.Regions is absent (or rejects the input);
             % mirrors curation.Regions.normalize. Callers pass the result through canonRegions.
             R = curation.Store.emptyRegions();
             if isempty(decoded), return; end
@@ -4112,7 +4112,7 @@ classdef Store < handle
         end
 
         function J = reserveRegionIdIn(J, floorMax)
-            % Hand out the next region id (J.nextRegionId - 1 afterwards): never one in use, never
+            % Hand out the next region id (J.nextRegionId - 1 afterward): never one in use, never
             % one handed out before (nextRegionId only grows).
             J = curation.Store.canonJson(J);
             ids = zeros(0, 1);

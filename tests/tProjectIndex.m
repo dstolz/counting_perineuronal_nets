@@ -1,6 +1,6 @@
 classdef tProjectIndex < matlab.unittest.TestCase
     %TPROJECTINDEX  curation.ProjectIndex over a synthetic multi-section, multi-animal project:
-    %   discovery, animal ids, unlabelled sources, labels written through curation.Store appearing
+    %   discovery, animal ids, unlabeled sources, labels written through curation.Store appearing
     %   after refresh (journal replay and snapshot), the feature cache, PriorLabel from the
     %   journal, and that nothing is ever written inside the data folders.
     %   Run: pwsh -File tools\Run-Tests.ps1 tProjectIndex
@@ -118,12 +118,12 @@ classdef tProjectIndex < matlab.unittest.TestCase
             tc.verifyEqual(sm.Candidates(1), nE);
         end
 
-        function sourcesWithoutSnapshotAreUnlabelled(tc)
+        function sourcesWithoutSnapshotAreUnlabeled(tc)
             idx = tc.buildIdx();
             tc.verifyFalse(any(idx.Sources.HasSnapshot));
             [T, F] = idx.table("pv");
             tc.verifyEqual(height(T), size(F, 1));
-            tc.verifyTrue(all(isnan(F), 'all'), 'no features computed for unlabelled sources');
+            tc.verifyTrue(all(isnan(F), 'all'), 'no features computed for unlabeled sources');
             tc.verifyTrue(all(T.Label == "") && ~any(T.Reviewed) && all(T.State == "active"));
             t = tc.Truth.SUBJ_ID_9002IHC_sec1.PV2.locs;
             r = T(T.Base == "SUBJ-ID-9002IHC_sec1_proj", :);
@@ -301,7 +301,7 @@ classdef tProjectIndex < matlab.unittest.TestCase
             tc.verifyEqual(numel(y), 60 - 3 + 3);
         end
 
-        function neighbourFeaturesIgnoreCurationState(tc)
+        function neighborFeaturesIgnoreCurationState(tc)
             % nnUm / densityN counted only State "active" rows: a merge in one place changed the
             % features of other candidates. They count every detection in the locs (InLocs).
             s = tc.openStore(3, "PV2");
@@ -323,7 +323,7 @@ classdef tProjectIndex < matlab.unittest.TestCase
             F2 = idx.source(folder, L(3, 2) + "_proj", "PV2");
             names = curation.Features.names();
             nb = ismember(names, ["nnUm" "densityN"]);
-            tc.verifyEqual(F2(:, nb), F1(:, nb), sprintf(['merging rows %d and %d changed the neighbour ' ...
+            tc.verifyEqual(F2(:, nb), F1(:, nb), sprintf(['merging rows %d and %d changed the neighbor ' ...
                 'features of %d row(s)'], a, b, nnz(any(F2(:, nb) ~= F1(:, nb), 2))));
             tc.verifyEqual(rep.Recomputed, 0, 'a merge without a move does not invalidate the features');
         end

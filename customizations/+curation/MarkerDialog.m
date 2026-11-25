@@ -1,8 +1,8 @@
 classdef MarkerDialog < handle
-    %MARKERDIALOG  A small window to choose the map's markers: a colour and a symbol (filled or as an
+    %MARKERDIALOG  A small window to choose the map's markers: a color and a symbol (filled or as an
     %   outline) for each cell state of curation.MapMarkers.CLASSES. Non-modal; every change is
     %   shown on the map at once (PreviewFcn); OK keeps the markers, Cancel or closing the window
-    %   goes back to the markers it was opened with. Colours are chosen with uicolorpicker (inside the
+    %   goes back to the markers it was opened with. Colors are chosen with uicolorpicker (inside the
     %   window: no blocking system dialog).
     %
     %   d = curation.MarkerDialog(S, Name=Value)
@@ -10,7 +10,7 @@ classdef MarkerDialog < handle
     %       PreviewFcn  fcn(S) after every change (and with the original markers on Cancel)
     %       DoneFcn     fcn(S, accepted) once, when the window closes: OK (accepted true, S the chosen
     %                   markers) or Cancel / the close box / Esc (accepted false, S the original ones)
-    %       Near        a figure to centre the window over ([] = MATLAB's default place)
+    %       Near        a figure to center the window over ([] = MATLAB's default place)
     %       Visible     'on' (default) | 'off' (tests)
     %
     %   Test seams (exactly what the controls call):
@@ -65,7 +65,7 @@ classdef MarkerDialog < handle
             cls = obj.checkClass(cls);
             rgb = round(double(rgb(:)'));
             if numel(rgb) ~= 3 || any(~isfinite(rgb) | rgb < 0 | rgb > 255)
-                error('curation:MarkerDialog:badColor', 'A colour is [r g b], 0-255.');
+                error('curation:MarkerDialog:badColor', 'A color is [r g b], 0-255.');
             end
             obj.Styles.(cls).Color = rgb;
             obj.changed(cls);

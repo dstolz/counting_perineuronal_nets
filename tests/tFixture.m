@@ -162,21 +162,21 @@ classdef tFixture < matlab.unittest.TestCase
             tc.verifyEqual(height(T), n);
             tc.verifyEqual([T.X T.Y], [L.X L.Y]);
             tc.verifyEqual(T.QCSourceRow, (1:n)');
-            labelled = T.QCLabel ~= "" & ~ismissing(T.QCLabel);
-            tc.verifyEqual(logical(T.QCReviewed), labelled);
-            tc.verifyEqual(nnz(labelled) / n, 0.5, 'AbsTol', 0.12);
-            tc.verifyEqual(sort(unique(T.QCLabel(labelled)))', ["Bad" "Good" "Ignore" "Uncertain"]);
+            labeled = T.QCLabel ~= "" & ~ismissing(T.QCLabel);
+            tc.verifyEqual(logical(T.QCReviewed), labeled);
+            tc.verifyEqual(nnz(labeled) / n, 0.5, 'AbsTol', 0.12);
+            tc.verifyEqual(sort(unique(T.QCLabel(labeled)))', ["Bad" "Good" "Ignore" "Uncertain"]);
             tc.verifyGreaterThanOrEqual(nnz(T.QCLabel == "Ignore"), 2);
             tc.verifyEqual(T.QCCode(T.QCLabel == "Good"), ones(nnz(T.QCLabel == "Good"), 1));
             % true cells mostly Good, false positives mostly Bad
             det = tc.Truth.PV2.det;
-            tpLab = T.QCLabel(labelled & det.Kind == "tp");
-            fpLab = T.QCLabel(labelled & det.Kind == "fp");
+            tpLab = T.QCLabel(labeled & det.Kind == "tp");
+            fpLab = T.QCLabel(labeled & det.Kind == "fp");
             tc.verifyGreaterThan(mean(tpLab == "Good"), 0.7);
             tc.verifyGreaterThan(mean(fpLab == "Bad"), 0.7);
             % truth table
-            tc.verifyEqual(tc.Truth.qc.Row, find(labelled));
-            tc.verifyEqual(tc.Truth.qc.Label, T.QCLabel(labelled));
+            tc.verifyEqual(tc.Truth.qc.Row, find(labeled));
+            tc.verifyEqual(tc.Truth.qc.Label, T.QCLabel(labeled));
         end
 
         function legacyResolverFile(tc)

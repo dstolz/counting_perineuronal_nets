@@ -143,7 +143,7 @@ classdef TrainingPanel < handle
 
         function setParentDir(p, d)
             %SETPARENTDIR  Another folder: the counts of the last one are dropped (a count of it that
-            %   is still running is cancelled).
+            %   is still running is canceled).
             p.stopCounting();
             p.Options.ParentDir = char(d);
             p.Partials = [];
@@ -823,8 +823,8 @@ classdef TrainingPanel < handle
                     end
                 case "failed"
                     txt = M('trainFailed', t.Error, t.LogFile);
-                case "cancelled"
-                    txt = M('trainCancelled');
+                case "canceled"
+                    txt = M('trainCanceled');
                 otherwise
                     txt = M('trainIdle');
             end

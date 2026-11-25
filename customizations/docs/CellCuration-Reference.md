@@ -103,7 +103,7 @@ auto | legacy-qc | legacy-resolver`), `Reviewed`, `Flag` (`"" | later | recheck`
 `Excluded`, `ProposalP`, `ModelP`, `ModelVersion`, `AuditRole` (`"" | holdout |
 reject-audit | confirm-audit | catch`), `Reviewer`, `ReviewedAt`, `Notes`.
 
-`rescore` is the Stage-2 score of a crop centred on the cell, so it belongs to a
+`rescore` is the Stage-2 score of a crop centered on the cell, so it belongs to a
 position. `RescoreSource` names what produced it: `"detector"` (the locs file's
 value at the detector position), a scoring model's folder name, or `""` (pending,
 `rescore` NaN). A move of more than 0.01 px makes a score pending.
@@ -141,7 +141,7 @@ nearest first, each seeing only what is still unmatched (`curation.Reconciler.pl
 6. a detection still unmatched within `TolUm` of an active reviewed row that is
    still unmatched is linked to it.
 
-So a person's cell gets its re-detection before an unreviewed neighbour can.
+So a person's cell gets its re-detection before an unreviewed neighbor can.
 Matched rows refresh `score`, `class`, `imgName`, `thr` and `rescore` (by the
 position rule above). Unmatched: merged and human-touched rows unchanged; reviewed
 Good stays active and kept (counted as "vanished Good"); reviewed Bad/Uncertain
@@ -192,10 +192,9 @@ fit, a refused reconcile. A missing snapshot with history throws
 | File | Role |
 |------|------|
 | `CellCurator.m` | The window: layout, key and mouse handling, queues, map tasks, finish checklist, assist and rescore wiring, settings (`CellToolkit` settings under `CellCurator`). Test seams listed in its class help |
-| `CellDatasetManifest.m` | Adds the `curation` stage, `curationPath`, `curationJsonPath`, `recordCuration`, `Cur*` status fields (see its doc) |
-| `CellDatasetManager.m` | `Curate…` button, `Legacy:` buttons, `Review` column, `By class` overlay reads the curation snapshot first |
+| `CellDatasetManifest.m` | Adds the `curation` stage, `curationPath`, `curationJsonPath`, `recordCuration`, `Cur*` status fields (see its doc). Decides what a dataset is ("The base of a dataset": one dataset per section in the lab's `<x>_proj` layout) |
+| `CellDatasetManager.m` | The overview window and its headless API (`scan`, `statusTable`, `sourceTable`, `progressOf`): subject and section from the file name, curation progress, Find/Show filter, Next to curate, report export, cached preview, and the lab database column, lamp and buttons (through `celldb`). Test seams listed in its class help |
 | `CellToolkit.m` | Adds `modelInputPage`, `modelInputFromFile`, `modelInputFactsFor`: the detector's input pipeline, shared by `CellDiscovery`, the exports and rescoring |
-| `CellNeighborResolution.m`, `CellQualityControl.m` | **Legacy**, superseded, kept until parity |
 
 ### `+curation`
 
@@ -212,7 +211,7 @@ fit, a refused reconcile. A missing snapshot with history throws
 | `CropCache` | Every crop of a source, extracted once (44 µm window, 80 px, uint8, both channels) |
 | `GalleryView` | A page of tiles as one image object whose `CData` is replaced; cursor and selection lines |
 | `MapView` | The whole section as one image and one scatter per marker style (`setMarkerStyles`; every layer's rows line up with `Ids`, NaN where a point is in another layer); regions, reference strip, sweep fields, lasso |
-| `MapMarkers` | The map's markers: colour, symbol and fill per cell state (to review, Good, Bad, Uncertain, flagged), defaults, validation of saved settings, the state-to-marker rule, legend swatches |
+| `MapMarkers` | The map's markers: color, symbol and fill per cell state (to review, Good, Bad, Uncertain, flagged), defaults, validation of saved settings, the state-to-marker rule, legend swatches |
 | `MarkerDialog` | The *Markers…* window: live preview, OK keeps (saved in `CellCurator`'s settings as `MarkerStyles`), Cancel goes back |
 | `Queues` | Review and list queues cut into homogeneous pages; blind-tile interleaving |
 | `Proposals` | P(Good): cold start `sigmoid(rescore - c4)` (c4 = −0.170 PNN, −0.401 PV), else `score`; the model's `ModelP` when there is one |
@@ -230,7 +229,7 @@ fit, a refused reconcile. A missing snapshot with history throws
 | `Export` | Curated labels to Stage-2, Stage-1 and observation-table training data |
 | `Trainer` | Builds the training commands; runs and deploys the Stage-2 fine-tune |
 | `TrainingPanel` | The Training tab |
-| `UiText` | Every word the window shows (tooltips, labels, messages, key map, cheat sheet, legend, colours) |
+| `UiText` | Every word the window shows (tooltips, labels, messages, key map, cheat sheet, legend, colors) |
 
 ### `+celldb` (the only code that touches `labclient`)
 
@@ -241,6 +240,9 @@ fit, a refused reconcile. A missing snapshot with history throws
 | `available`, `capturing` | Whether the client is usable here; whether this computer keeps records for the database |
 | `enqueue`, `backfill` | Put a record in the client's outbox; queue records that never reached it |
 | `addLamp`, `openWindow`, `statusText` | The status-bar lamp; the Database window; one sentence on the database state |
+| `sourceRecords` | Where the record of each curated source is (`none`, `local`, `queued`, `sent`, `held`, `failed`, `discarded`) and whether it still describes the files (`current`). Files only: the `.provenance` folder beside the curation CSV (matched by file name, so a moved folder still matches), the fallback folder, and this computer's outbox. `Previous=` asks only the outbox again |
+| `subjectInfo`, `refreshSubjects` | What the database last said about subjects (the client's cache, never the network); ask the database now (bounded by a time budget; the only call here that waits for the server, and only on a person's click) |
+| `listen` | Call a function when the database's state or the outbox changes (the Dataset Manager's Database column follows it) |
 | `parseSectionName` | The lab's section-name convention (`SUBJ-ID-<n>…`) |
 | `codeVersion`, `clientCandidates`, `suspend` | Git commit (`-dirty`); where to look for CarasLabDB; pause sending during a batch |
 | `private/` | `absolutePath, fileSnapshot, newId, queueRecord, sha256File, timeText, writeTextAtomic` |
@@ -270,22 +272,39 @@ run only with `-IncludeSlow`. A test fails when a budget is exceeded.
 | Test | Budgets (ms) |
 |------|--------------|
 | `tGalleryPerf` | build 2000, compose 10, show (prefetched) 100, show (cold) 130, update one tile 30, update all 30 |
-| `tMapPerf` | new source 500, update one point 50, update 150 points 50, zoom step 50, pan step 50, centre on 50, pick 1, drag frame 30 |
+| `tMapPerf` | new source 500, update one point 50, update 150 points 50, zoom step 50, pan step 50, center on 50, pick 1, drag frame 30 |
 | `tCuratorMapPerf` | first open 2000, first map show 500, gallery↔map toggle 150, label on map 50, add 100, add with snap 250, next pair 100, next field 100 |
 | `tCuratorGestures` (Benchmark) | label key 30, Enter 100, source cold 2000, source back 300 |
 | `tCuratorReal` (Slow, RealData) | first open 2000, open 1000, label key 30, Enter 100, toggle 150 |
 | `tCuratorAssist` (Benchmark) | key while a fit runs 30, apply predictions 50 |
 | `tStoreSmoke` (Benchmark) | setLabel of 150 ids: 5 without journal, 15 with; undo/redo 15; flush 150; open an existing store 300 |
 | `tStoreRescore` (Benchmark) | `setRescore` of 150 ids with journal 15 |
+| `tManagerReal` (Slow, RealData) | Dataset Manager on three real sections, cold: scan into the list 3000, first preview 4000, the same preview again 1000, first move to another row 1200, a later move 250 |
 | `tFeatures`, `tAssistModel` (Benchmark) | features of 2,800 candidates 1,500 ms; fit 20,000 × 30 in 10 s; predict 3,000 rows 150 ms |
+| `tCuratorColdStart` (Slow, RealData, Benchmark; run it alone) | the first `CellCurator(folder)` of a MATLAB session to its first page: 14000 (a guard, not a target) |
 
 Measured on real sections: a label shows in about 16 ms, Enter-to-next-page about
 17 ms, a source opens in about 0.5 s (1.5 s for the first of a session). A real
 source has roughly 1,200–2,000 detections, 11–17 pages of 126 tiles.
 
+The first CellCurator of a MATLAB session is much slower than any later one: about
+11 s to the first page (2026-11-25), after the 3 s MATLAB needs for its own first
+window. Nearly all of it is code MATLAB loads on first use (about 150 UI components
+4 s, the table import behind `readtable` 1.5 s). Two costs of our own were removed
+that day: the keyboard focus is now asked for after the first page is up (asking
+while the window was still loading waited 3 s), and the detections file's time
+stamp comes from .NET, because the first call into Java cost 1.9 s.
+
+The Dataset Manager, measured cold on three real sections (2026-11-24): scan into
+the list about 1.3 s (the headless scan is about 0.4 s the first time and 0.25 s
+again), first preview of a section 1.8 s (two 57 MB float pages are read), the same
+preview again 0.35 s, a move to another row 40 ms once the window is warm. Its scan
+shows a progress window only when it takes longer than 0.7 s: creating and updating
+one cost about 1.2 s for three sections, five times the scan itself.
+
 How they are met: one `image` object per view and only `CData` changes; crops
 cached per source and the next page prefetched; the full-section image pushed once
-per source; point colours updated in place; fitting, feature computation and
+per source; point colors updated in place; fitting, feature computation and
 rescoring off the UI thread (`backgroundPool`, thread workers).
 
 ---
@@ -340,11 +359,23 @@ pwsh -File tools\Run-Tests.ps1 tFixture -Visible       # on your desktop, to wat
   `<x>_proj_roi.roi`. Each test copies it to a temporary folder and opens only the
   copy; `tCuratorReal` checks the master is unchanged at the end.
 - **`-WithoutClient`** proves nothing here needs the lab database client:
-  `tCelldbClient` and the client states of `tCelldbInvariance` are skipped, the rest
-  must pass.
+  `tCelldbClient`, the client states of `tCelldbInvariance` and all of
+  `tManagerDatabase` but its last test are skipped, the rest must pass.
+- **The Dataset Manager:** `tManifestBase` (what a dataset is), `tManagerScan`
+  (headless), `tManagerGui` (the window through its seams: list, filter, next to
+  curate, launch requests, report, preview, tooltips), `tManagerDatabase` (the
+  database column, subjects and buttons against the fake server, and without the
+  client), `tManagerCuration`, `tManagerGestures` (real `matlab.uitest`
+  gestures), `tManagerReal`. The window's tests set `app.LaunchFcn`, so no other tool
+  is opened from them.
+- **The wiki's Dataset Manager pictures** are made by `tests\tWikiScreens.m` (a
+  generator under the test runner, so the window is on the hidden desktop; filtered
+  by assumption unless `WIKI_SCREENS_OUT` names a folder) and
+  `tools\wiki\annotate_manager.py` (the numbered markers). The class help has the
+  commands. Real sections, the client's fake server, and never **Check subjects**.
 - Python helper scripts for the training tests are in `tests\python\`.
 
-The full suite is 515 tests and takes about 13 minutes. Do not run it while someone
+The full suite (`-IncludeSlow`) is about 650 tests and takes about 24 minutes (647 tests, measured 2026-11-24). Do not run it while someone
 else's run is in progress: one MATLAB on the hidden desktop at a time.
 
 ---
@@ -383,6 +414,33 @@ naming an unknown subject is held, not lost) and a storage root that covers the
 histology folders (registration of the image and locs files). `celldb.backfill`
 queues records that never reached the outbox.
 
+**Reading it back.** The Dataset Manager shows, per completed source, where its
+record is (`celldb.sourceRecords`) and whether the files changed since; marks the
+subjects the database does not have (`celldb.subjectInfo`, after **Check subjects**
+ran `celldb.refreshSubjects`); and offers **Queue records** (`celldb.backfill` on
+the scanned folder). All of that reads files on this computer; only Check subjects
+asks the server.
+
+**Tags and variables.** `celldb.refreshSubjects` also reads each subject's current
+tags and variable values (the client's `labclient.SubjectCache`, interface version
+4; an older client keeps recording and only shows none: `+celldb/private/factsUsable`).
+Every window reads them from the cache: `celldb.subjectTags` and
+`celldb.subjectVariables` (long tables), `celldb.subjectInfo` (`tags`, `variables`
+in a few words), `celldb.subjectFactors` (one column per tag namespace, bare tag
+and variable: what Cell Analysis groups and plots by, through
+`cellanalysis.Project.readDatabase`) and `celldb.tagFilter` (the lab database's
+filter grammar, `labclient.Tags`; a subject never checked or not in the database
+never passes a filter). The Dataset Manager has the **Tags** column and filter,
+Cell Discovery the **Subject tags** filter of its file list, Cell Analysis
+**Check subjects**, **Use by tags** and the `Tag:` / `Variable:` entries of its
+menus, and Cell Curator the **Subject...** button, which shows them only on
+request so that review stays blind to the animal's group. This app only reads
+tags and variables; they are written in CarasLabDB's own window. Tests:
+`tCelldbFacts` (and its `seed` for the fake server), `tAnalysisDatabase`,
+`tManagerDatabase`, `tDiscoveryGui`, `tCuratorDatabase`. A record is held, not lost, when its subject is unknown or its
+folder is outside the storage roots mapped here: the note says which, and the
+manager shows the note in the source's row.
+
 ---
 
 ## 8. The retraining loop
@@ -396,7 +454,7 @@ curate -> Export -> (train_score.py | train.py) -> deploy a model folder -> resc
 ### The model input image
 
 Both trainers need the image the models actually saw: LSM-corrected (optional),
-top-hat background subtracted, resized to 0.645 µm/px, normalised to 0–255. It is
+top-hat background subtracted, resized to 0.645 µm/px, normalized to 0–255. It is
 never saved by Cell Discovery, so each export and each rescore regenerates it with
 **one shared function**, `CellToolkit.modelInputPage` (via `modelInputFromFile`),
 from the facts the manifest recorded for the source's detection
@@ -427,7 +485,7 @@ export_report.json, export_summary.txt
 on the 8-level agreement scale the shipped scorers were trained on: **Good → 7,
 Uncertain → 4 (`UncertainLevel`), Bad → 0**, so shipped weights fine-tune directly
 and `rescore` keeps its scale. A row is exported when active, reviewed, a person's
-label source (`human, confirmed, blind, legacy-qc`), labelled, not excluded (store
+label source (`human, confirmed, blind, legacy-qc`), labeled, not excluded (store
 flag or current regions), not audit evidence (`holdout`, `reject-audit`, `catch`),
 not flagged, inside the model image. Everything else is counted per rule in the
 report. The split is **by animal** (an animal's sections all go to train or all to
@@ -524,13 +582,18 @@ State these honestly to users and reviewers.
 8. No GUI for `Rebuild` or `Force`; both are `curation.Store.open` options.
 9. The `catch` audit role (known non-cells shown blind) and the auto-reject
    functions in `curation.Audit` exist but the app never draws or uses them.
-10. Parity gaps with the legacy tools: the QC tool's score-threshold classification,
-    histogram, sorting and filtering, custom categories (imported as flags), and the
-    Resolver's choice of which duplicate survives (Curator keeps the higher-scored).
+10. What the removed legacy tools had and Curator does not: the QC tool's
+    score-threshold classification, histogram, sorting and filtering, custom categories
+    (imported as flags), and the Resolver's choice of which duplicate survives (Curator
+    keeps the higher-scored).
 11. Feature computation needs the images already read: thread workers cannot read
-    TIFFs, so a labelled source that is not open gets its features in idle time.
-12. The Dataset Manager's **By class** dropdown tooltip still describes QC files
-    only, though the overlay reads the curation snapshot first.
+    TIFFs, so a labeled source that is not open gets its features in idle time.
+12. The Dataset Manager's list is rebuilt by a full scan (about 85 ms per section on
+    a local disk once the page counts are recorded; a network folder is slower), also
+    when a tool opened from it closes. There is no incremental refresh of one dataset.
+13. The Dataset Manager cannot make the lab database record of a source itself: a
+    record is made by Cell Curator at **Mark source complete**. A source completed
+    before records existed shows `not recorded` until it is marked complete again.
 
 ---
 
@@ -546,7 +609,7 @@ State these honestly to users and reviewers.
   and proposes labels; the blind tiles measure it. The library functions remain,
   marked experimental.
 - **Decisions are not stored in `*_locs.csv`.** The old QC tool matched labels by
-  row position, so a re-detection silently mislabelled them, and the old Resolver
+  row position, so a re-detection silently mislabeled them, and the old Resolver
   overwrote raw `X/Y`. A separate store keyed by `CellID`, reconciled by position,
   survives re-detection (another session is changing the detector).
 - **A merge is not a Bad.** A duplicate's loser is `merged`, so it can never be a
@@ -560,7 +623,10 @@ State these honestly to users and reviewers.
 - **Regions in the dataset JSON.** An exclusion region applies to every channel of
   a section.
 - **Offline-first lab database.** Nothing the app writes depends on it.
-- **The two legacy tools are kept, unfixed, until parity** (section 9, item 10);
-  they are then to be deleted, together with the `resolve` and `qc` stages.
+- **The two legacy tools are deleted** (2026-11-24; last version in commit `1874dc1`),
+  without the features listed in section 9, item 10. `curation.LegacyImport` stays,
+  because their files stay on disk. The manifest's `resolve` and `qc` stages also stay
+  for now: they are derived from those files (`CURATED_X` columns, `*_QC.csv`), so the
+  dashboard still reports them, but nothing records them any more.
 - **Human curation speed and rendering speed come first** (budgets in section 5),
   with a tooltip on every control (`tTooltips` fails if one lacks it).

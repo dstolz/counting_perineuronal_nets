@@ -12,7 +12,7 @@ classdef tMapView < matlab.uitest.TestCase
         UmPerPx = 1.657
         % ids 1..5 at known places (ids 3 and 4 are 6 px apart); the random points keep 40 px away
         Special = [650 120; 100 500; 300 300; 306 300; 520 420]
-        Grey = [110 110 110]
+        Gray = [110 110 110]
     end
 
     properties
@@ -53,7 +53,7 @@ classdef tMapView < matlab.uitest.TestCase
             tc.View = curation.MapView(tc.Grid);
             tc.View.HoverInterval = 0;
             tc.View.setImage(tc.PageT, tc.PageC, [], tc.UmPerPx);
-            tc.View.setPoints(tc.Ids, tc.XY, tc.Grey);
+            tc.View.setPoints(tc.Ids, tc.XY, tc.Gray);
             tMapView.waitForLayout(tc.Fig, tc.View.Panel);
         end
     end
@@ -256,8 +256,8 @@ classdef tMapView < matlab.uitest.TestCase
             blue = img(:, :, 3) > 180 & img(:, :, 1) < 90 & img(:, :, 2) < 90;
             tc.assertGreaterThan(nnz(red), 5, 'the red ring is in the frame');
             tc.assertGreaterThan(nnz(blue), 5, 'the blue ring is in the frame');
-            tc.verifyEqual(centroid(red), expect(a), 'AbsTol', 2.5, 'red ring centred on point 1');
-            tc.verifyEqual(centroid(blue), expect(b), 'AbsTol', 2.5, 'blue ring centred on point 2');
+            tc.verifyEqual(centroid(red), expect(a), 'AbsTol', 2.5, 'red ring centered on point 1');
+            tc.verifyEqual(centroid(blue), expect(b), 'AbsTol', 2.5, 'blue ring centered on point 2');
             ea = round(expect(a));
             eb = round(expect(b));
             tc.verifyGreaterThan(img(ea(2), ea(1), 2), 150, 'the blob shows inside ring 1');
@@ -279,7 +279,7 @@ classdef tMapView < matlab.uitest.TestCase
             red = img(:, :, 1) > 180 & img(:, :, 2) < 90 & img(:, :, 3) < 90;
             e2 = [(a(1) - xl(1)) / diff(xl) * fw + 0.5, (a(2) - yl(1)) / diff(yl) * fh + 0.5];
             tc.assertGreaterThan(nnz(red), 5, 'the red ring is in the zoomed frame');
-            tc.verifyEqual(centroid(red), e2, 'AbsTol', 2.5, 'still centred on point 1 when zoomed in');
+            tc.verifyEqual(centroid(red), e2, 'AbsTol', 2.5, 'still centered on point 1 when zoomed in');
             tc.verifyEqual(ringExtent(red, e2), ext1, 'AbsTol', 2, 'the ring keeps its size on screen');
         end
 
@@ -365,7 +365,7 @@ classdef tMapView < matlab.uitest.TestCase
             tc.verifyTrue(v.IsFit, 'zooming out stops at the whole image');
             r = v.viewRect();
             tc.verifyEqual(v.Scale, max(tc.W / pp(3), tc.H / pp(4)), 'RelTol', 1e-12);
-            tc.verifyEqual([mean(r(1:2)) mean(r(3:4))], ([tc.W tc.H] + 1) / 2, 'AbsTol', 1e-9, 'centred');
+            tc.verifyEqual([mean(r(1:2)) mean(r(3:4))], ([tc.W tc.H] + 1) / 2, 'AbsTol', 1e-9, 'centered');
             tc.verifyLessThanOrEqual(r([1 3]), [0.5 0.5] + 1e-9);
             tc.verifyGreaterThanOrEqual(r([2 4]), [tc.W tc.H] + 0.5 - 1e-9);
 
@@ -432,7 +432,7 @@ classdef tMapView < matlab.uitest.TestCase
             tc.verifyTrue(v.IsFit);
         end
 
-        function testRecolourMoveAddRemoveVisible(tc)
+        function testRecolorMoveAddRemoveVisible(tc)
             v = tc.View;
             ids = tc.Ids;
             n = numel(ids);
@@ -440,11 +440,11 @@ classdef tMapView < matlab.uitest.TestCase
             rows = v.rowsOf(ids([7 9]));
             tc.verifyEqual(v.Points.CData(rows, :), repmat([0 158 115] / 255, 2, 1), 'AbsTol', 1e-12);
             tc.verifyEqual(v.RGB(rows, :), uint8(repmat([0 158 115], 2, 1)));
-            tc.verifyEqual(v.Points.CData(v.rowsOf(ids(8)), :), tc.Grey / 255, 'AbsTol', 1e-12, 'others unchanged');
+            tc.verifyEqual(v.Points.CData(v.rowsOf(ids(8)), :), tc.Gray / 255, 'AbsTol', 1e-12, 'others unchanged');
             v.updatePoints(ids(1:3), uint8([255 0 0; 0 255 0; 0 0 255]));
             tc.verifyEqual(v.Points.CData(v.rowsOf(ids(1:3)), :), eye(3), 'AbsTol', 1e-12);
             tc.verifyError(@() v.updatePoints(uint32(99999), [1 2 3]), 'MapView:UnknownId');
-            tc.verifyError(@() v.updatePoints(ids(1), [300 0 0]), 'MapView:BadColour');
+            tc.verifyError(@() v.updatePoints(ids(1), [300 0 0]), 'MapView:BadColor');
 
             v.movePoints(ids(7), [123.25 456.5]);
             r = v.rowsOf(ids(7));
@@ -522,7 +522,7 @@ classdef tMapView < matlab.uitest.TestCase
             tc.verifyTrue(isnan(v.Layers(2).XData(r(3))), 'hidden in its own layer');
             v.setVisible(ids(3), true);
             v.updatePoints(ids(1), [255 0 0]);
-            tc.verifyEqual(v.Layer(r(1)), 2, 'a recolour without LAYER keeps the layer');
+            tc.verifyEqual(v.Layer(r(1)), 2, 'a recolor without LAYER keeps the layer');
 
             v.addPoints(uint32([7001; 7002]), [40 50; 60 70], [255 255 0], [3; 1]);
             tc.verifyEqual(v.Layer(v.rowsOf(uint32([7001; 7002]))), [3; 1]);
@@ -563,7 +563,7 @@ classdef tMapView < matlab.uitest.TestCase
             v.setSelection([]);
             tc.verifyTrue(all(isnan(v.SelectionLine.XData)));
             v.setSelection(b);
-            v.setPoints(tc.Ids, tc.XY, tc.Grey);
+            v.setPoints(tc.Ids, tc.XY, tc.Gray);
             tc.verifyEmpty(v.Selection, 'setPoints clears the selection');
         end
 
@@ -803,7 +803,7 @@ classdef tMapView < matlab.uitest.TestCase
                     tc.verifyEqual(fw, fieldUm / tc.UmPerPx, 'RelTol', 1e-9, what);
                     tc.verifyEqual(fh / fw, pp(4) / pp(3), 'RelTol', 1e-9, [what ': the viewport''s shape']);
                 end
-                % row by row: rows top to bottom, the next field always a neighbour (serpentine)
+                % row by row: rows top to bottom, the next field always a neighbor (serpentine)
                 tc.verifyTrue(issorted(R(:, 3)), what);
                 for k = 2:size(R, 1)
                     if R(k, 3) == R(k - 1, 3)
@@ -831,7 +831,7 @@ classdef tMapView < matlab.uitest.TestCase
             tc.verifyError(@() v.showSweepRect(size(R, 1) + 1), 'MapView:BadSweep');
 
             function checkAxis(iv, L, ov, what)
-                % the fields of one axis cover [0.5, L + 0.5] with neighbours overlapping >= ov
+                % the fields of one axis cover [0.5, L + 0.5] with neighbors overlapping >= ov
                 iv = sortrows(iv);
                 tc.verifyEqual(iv(1, 1), 0.5, 'AbsTol', 1e-9, [what ': starts at the edge']);
                 tc.verifyEqual(iv(end, 2), L + 0.5, 'AbsTol', 1e-9, [what ': ends at the edge']);
@@ -911,7 +911,7 @@ classdef tMapView < matlab.uitest.TestCase
             other = uipanel(g);
             other.Layout.Column = 2;
             m.setImage(tc.PageT, [], [], 1);
-            m.setPoints(tc.Ids, tc.XY, tc.Grey);
+            m.setPoints(tc.Ids, tc.XY, tc.Gray);
             tMapView.waitForLayout(f, m.Panel, [500 500]);
             po = getpixelposition(other, true);
             pin = po(1:2) - 1 + po(3:4) / 2;
@@ -1147,7 +1147,7 @@ classdef tMapView < matlab.uitest.TestCase
             v.Panel.Layout.Row = 2;
             v.HoverInterval = 0;
             v.setImage(tc.PageT, tc.PageC, [], tc.UmPerPx);
-            v.setPoints(tc.Ids, tc.XY, tc.Grey);
+            v.setPoints(tc.Ids, tc.XY, tc.Gray);
             drawnow;
             pause(0.3);
             host.Visible = 'on';                        % shown: no code of the owner runs after this

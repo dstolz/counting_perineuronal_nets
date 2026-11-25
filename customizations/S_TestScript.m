@@ -111,16 +111,9 @@ CellDiscovery;
 
 
 
-%% Fix neighbors
+%% Curate detections (review, fix neighbors, classify)
 
-CellNeighborResolution;
-
-
-
-
-%% Classify observations
-
-CellQualityControl;
+CellCurator(histRoot);
 
 
 

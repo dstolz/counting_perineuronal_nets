@@ -43,7 +43,7 @@ classdef AssistRunner < handle
 %                           tests and the fallback)
 %     MinNewLabels 150      training labels new since the last fit before a refit starts
 %     RefreshSec 15         the project is read again at most this often while labels change
-%     MissingFeatIdleSec 3  idle seconds before the features of a labelled source that is not on
+%     MissingFeatIdleSec 3  idle seconds before the features of a labeled source that is not on
 %                           screen are computed (its image pages are read here: ~0.3 s blocking)
 %     HoldoutTarget 400, HoldoutFraction 0.05   (curation.BlindTiles.holdoutSize)
 %     Holdout true          choose the holdout lists when there are none
@@ -54,14 +54,14 @@ classdef AssistRunner < handle
 %   FEATURES. Thread workers cannot read TIFF files (imread is not supported there), so the index,
 %   read in the background, has no image features of its own. The runner computes the features of
 %   each source on screen from the pages the window already holds (curation.Features.compute in
-%   the background) and keeps them in assistfeat_<hash of SourceId>.mat; a labelled source that is
+%   the background) and keeps them in assistfeat_<hash of SourceId>.mat; a labeled source that is
 %   not on screen gets its features in idle time (its pages are read here). The fit joins them to
 %   the index's training rows by CellID (positions within 0.01 px; a moved cell is left out until
 %   its source is opened again).
 %
 %   MODELS. One per kind, saved at curation.ProjectIndex.modelPath(parentDir, kind) with a sidecar
 %   assist_<kind>.json (number, labels, sections, animals, AUCs, time). A fit starts when
-%   curation.AssistModel.enoughLabels holds for the labelled rows with features and at least
+%   curation.AssistModel.enoughLabels holds for the labeled rows with features and at least
 %   MinNewLabels of them are new since the last fit (one fit in flight per kind; another starts when
 %   it ends if still warranted). Groups are animals (grouped cross-validation), Ids the RowIds.
 %
@@ -69,7 +69,7 @@ classdef AssistRunner < handle
 %   of the project), MinLabels 200, MinPerClass 30, Number, NTrain, NSections, NAnimals (of the
 %   model), AUC (out of fold), AUCRescore (the rescore baseline on the same rows), Refitting,
 %   BlindN (labels decided blind, Good or Bad), BlindMatch (of those, where the proposal, P >= 0.5,
-%   equalled the decision; P = ModelP, else the cold start), IndexState ("none" | "reading" |
+%   equaled the decision; P = ModelP, else the cold start), IndexState ("none" | "reading" |
 %   "ready" | "failed"), Note.
 %
 %   See also curation.AssistModel, curation.ProjectIndex, curation.Features, curation.BlindTiles,
@@ -364,7 +364,7 @@ classdef AssistRunner < handle
         function s = secondsToNextStep(r, idleSec)
             %SECONDSTONEXTSTEP  When step() next has something to start while nothing is in flight:
             %   the project read again after labels changed (RefreshSec), or the features of a
-            %   labelled source that is not on screen (MissingFeatIdleSec of idle). Inf: nothing.
+            %   labeled source that is not on screen (MissingFeatIdleSec of idle). Inf: nothing.
             if nargin < 2, idleSec = 0; end
             s = Inf;
             if r.Closed || r.IndexState ~= "ready", return; end
@@ -563,7 +563,7 @@ classdef AssistRunner < handle
                     r.startFit(j);
                 end
             end
-            % features of a labelled source that is not on screen (its pages are read here)
+            % features of a labeled source that is not on screen (its pages are read here)
             if idleSec >= r.Options.MissingFeatIdleSec && ~isempty(r.Missing) && ...
                     ~r.hasJob(["missing" "feat"])
                 M = r.Missing(1);
@@ -628,7 +628,7 @@ classdef AssistRunner < handle
                 r.Kinds(j).Candidates = s.Candidates;
                 r.Kinds(j).PerSource = s.PerSource;
             end
-            % labelled sources without features that are not on screen
+            % labeled sources without features that are not on screen
             have = strings(1, 0);
             if ~isempty(r.Sources), have = [r.Sources.SourceId]; end
             M = S.Missing;
@@ -857,7 +857,7 @@ classdef AssistRunner < handle
             if ~(isfinite(um) && um > 0)
                 error('curation:AssistRunner:noScale', 'No pixel size for %s.', sid);
             end
-            F = curation.Features.compute(pageT, pageC, rows, um, struct('NeighbourMask', logical(rows.InLocs(:))));
+            F = curation.Features.compute(pageT, pageC, rows, um, struct('NeighborMask', logical(rows.InLocs(:))));
             C = struct('Format', curation.AssistRunner.FEAT_FORMAT, 'SourceId', string(sid), 'CellID', ids, ...
                 'X', x, 'Y', y, 'F', F, 'Names', curation.Features.names(), 'Version', curation.Features.VERSION, ...
                 'Um', um);
@@ -905,7 +905,7 @@ classdef AssistRunner < handle
         end
 
         function [F, y, groups, sections, ids] = trainingSet(idx, kind, featDir)
-            %TRAININGSET  Labelled rows of KIND (curation.AssistModel.trainingMask) that have features:
+            %TRAININGSET  Labeled rows of KIND (curation.AssistModel.trainingMask) that have features:
             %   the index's own where it has them, else the runner's (by CellID, X/Y within 0.01 px).
             K = numel(curation.Features.names());
             [T, Fi] = idx.table(kind);

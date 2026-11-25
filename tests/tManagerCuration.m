@@ -1,6 +1,6 @@
 classdef tManagerCuration < matlab.unittest.TestCase
     %TMANAGERCURATION  CellDatasetManager integration with the curation store: scan status,
-    %   the Curate button and its tooltip, and the relabelled legacy buttons.
+    %   the Curate button and its tooltip, and no launch buttons for the removed legacy tools.
 
     properties
         Folder
@@ -39,21 +39,20 @@ classdef tManagerCuration < matlab.unittest.TestCase
             tc.verifyTrue(isfile(src.CurationPath), 'status must point at the store snapshot');
         end
 
-        function curateButtonAndLegacyLabels(tc)
+        function curateButtonAndNoLegacyButtons(tc)
             before = findall(groot, 'Type', 'figure');
-            app = CellDatasetManager(); %#ok<NASGU>
+            app = CellDatasetManager('', 'UseSettings', false); %#ok<NASGU>
             fig = setdiff(findall(groot, 'Type', 'figure'), before);
             tc.addTeardown(@() delete(fig(isvalid(fig))));
             tc.assertNumElements(fig, 1, 'the manager opens exactly one window');
 
             btn = findall(fig, 'Type', 'uibutton');
             texts = string(arrayfun(@(b) string(b.Text), btn));
-            cur = btn(texts == "Curate...");
+            cur = btn(startsWith(texts, "Curate..."));
             tc.assertNumElements(cur, 1, 'there must be one Curate button');
             tc.verifyGreaterThan(strlength(string(cur.Tooltip)), 40, ...
                 'the Curate button needs a descriptive tooltip');
-            tc.verifyTrue(any(texts == "Legacy: resolve..."), 'old resolver button is marked Legacy');
-            tc.verifyTrue(any(texts == "Legacy: QC..."), 'old QC button is marked Legacy');
+            tc.verifyFalse(any(startsWith(texts, "Legacy")), 'the legacy launch buttons are removed');
             tc.verifyFalse(any(texts == "QC review..."), 'old label must be gone');
 
             % Every launch-row button explains itself.

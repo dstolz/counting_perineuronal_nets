@@ -1,13 +1,13 @@
 classdef MapMarkers
-    %MAPMARKERS  How the points of the section map and the locator look: a colour and a symbol per
+    %MAPMARKERS  How the points of the section map and the locator look: a color and a symbol per
     %   cell state (static; no window code). The reviewer chooses them in curation.MarkerDialog
     %   (CellCurator: Markers... on the map's tool bar); CellCurator keeps them in its settings.
     %
     %   S = curation.MapMarkers.defaults()
     %       struct with one field per CLASSES entry (Unreviewed, Good, Bad, Uncertain, Flagged), each
     %       a struct Color (1 x 3, 0-255), Symbol (a SYMBOLS code: 'o', 's', 'd', ...) and Filled
-    %       (logical; ignored for the line symbols + x *). Colours from curation.UiText.colors;
-    %       labelled and flagged cells are open circles (the cell stays visible inside), cells to
+    %       (logical; ignored for the line symbols + x *). Colors from curation.UiText.colors;
+    %       labeled and flagged cells are open circles (the cell stays visible inside), cells to
     %       review are filled blue squares.
     %   S = curation.MapMarkers.validate(S)
     %       S with every missing or invalid part replaced by its default (settings of an older
@@ -15,12 +15,12 @@ classdef MapMarkers
     %   [styles, layerOf] = curation.MapMarkers.layerStyles(S)
     %       the distinct styles (struct array Marker, Filled: curation.MapView.setMarkerStyles) and,
     %       per CLASSES entry, the index of its style. Classes that look alike share one scatter, so a
-    %       relabel between them is only a colour change.
+    %       relabel between them is only a color change.
     %   [rgb, cls] = curation.MapMarkers.forCells(S, label, labelSource, flag, excluded, auditRole)
-    %       per cell its colour (N x 3, 0-255) and class (index into CLASSES): Good, Bad,
-    %       Uncertain; to review (also an audit tile waiting for its blind judgement, whatever label
+    %       per cell its color (N x 3, 0-255) and class (index into CLASSES): Good, Bad,
+    %       Uncertain; to review (also an audit tile waiting for its blind judgment, whatever label
     %       it had); a flag wins over the label. Excluded cells keep their symbol and DimFactor of
-    %       their colour (curation.UiText.colors).
+    %       their color (curation.UiText.colors).
     %   g = curation.MapMarkers.glyph(symbol, filled)   the character a legend shows for a style
     %   img = curation.MapMarkers.swatch(s, bg, px)     a PX x PX x 3 uint8 picture of marker S (Symbol,
     %                                                   Filled, Color) on background BG (0-255):

@@ -61,7 +61,7 @@ classdef Trainer < handle
 %   See also curation.Export, curation.Rescore, CellToolkit.launchPythonAsync.
 
     properties (SetAccess = private)
-        State string = "idle"        % idle | running | succeeded | failed | cancelled
+        State string = "idle"        % idle | running | succeeded | failed | canceled
         ExitCode double = NaN
         Command struct = struct()
         ExportRoot char = ''
@@ -311,8 +311,8 @@ classdef Trainer < handle
             if t.State ~= "running", return; end
             try t.Proc.destroyForcibly(); catch, end
             t.stopTimer();
-            t.State = "cancelled";
-            t.say("[curation.Trainer] cancelled");
+            t.State = "canceled";
+            t.say("[curation.Trainer] canceled");
             t.closeLog();
             t.Proc = []; t.Reader = [];
         end

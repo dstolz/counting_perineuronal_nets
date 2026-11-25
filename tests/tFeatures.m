@@ -1,6 +1,6 @@
 classdef tFeatures < matlab.unittest.TestCase
     %TFEATURES  curation.Features: intensity-scale invariance, ring vs blob separation, exact
-    %   border / neighbour distances, companion handling, no NaN for interior points, names.
+    %   border / neighbor distances, companion handling, no NaN for interior points, names.
     %   The Benchmark test times 2,800 candidates on 3277 x 2355 pages (budget 1.5 s).
     %   Run: pwsh -File tools\Run-Tests.ps1 tFeatures [-IncludeSlow for the benchmark]
 
@@ -79,8 +79,8 @@ classdef tFeatures < matlab.unittest.TestCase
             rr = F(:, names == "ringRatio");
             ct = F(:, names == "contrast");
             isRing = kinds' == "ring";
-            tc.verifyGreaterThan(min(rr(isRing)), 0.5, 'nets: annulus much brighter than the centre');
-            tc.verifyLessThan(max(rr(~isRing)), 0, 'somata: the centre is the brightest');
+            tc.verifyGreaterThan(min(rr(isRing)), 0.5, 'nets: annulus much brighter than the center');
+            tc.verifyLessThan(max(rr(~isRing)), 0, 'somata: the center is the brightest');
             tc.verifyLessThan(max(ct(isRing)), 0);
             tc.verifyGreaterThan(min(ct(~isRing)), 0);
             pr = F(:, names == "peakRadiusUm");
@@ -101,7 +101,7 @@ classdef tFeatures < matlab.unittest.TestCase
             tc.verifyGreaterThan(mean(fP(tpP, c) < 0.25), 0.9);
         end
 
-        function borderAndNeighbourDistancesExact(tc)
+        function borderAndNeighborDistancesExact(tc)
             H = 100; W = 200; upp = 2;
             page = 100 + zeros(H, W);
             X = [1; 50.5; 100; 103; 180; 60; 60];
@@ -121,9 +121,9 @@ classdef tFeatures < matlab.unittest.TestCase
             dens = F(:, names == "densityN");
             tc.verifyEqual(dens, sum(D <= 50, 2));
 
-            % neighbour mask: row 4 does not count as a neighbour, but still gets its own values
+            % neighbor mask: row 4 does not count as a neighbor, but still gets its own values
             m = true(numel(X), 1); m(4) = false;
-            F2 = curation.Features.compute(page, [], T, upp, struct('NeighbourMask', m));
+            F2 = curation.Features.compute(page, [], T, upp, struct('NeighborMask', m));
             Dm = D; Dm(:, 4) = Inf;
             tc.verifyEqual(F2(:, names == "nnUm"), min(min(Dm, [], 2), 200), 'AbsTol', 1e-9);
             tc.verifyEqual(F2(4, names == "nnUm"), 10, 'AbsTol', 1e-12);
@@ -134,7 +134,7 @@ classdef tFeatures < matlab.unittest.TestCase
             T = tc.Truth.ECM1.locs;
             upp = tc.Truth.umPerPixel;
             [F0, names] = curation.Features.compute(tc.PageE, [], T, upp);
-            comp = ismember(names, ["compContrast", "compCentreZ"]);
+            comp = ismember(names, ["compContrast", "compCenterZ"]);
             tc.verifyTrue(all(isnan(F0(:, comp)), 'all'), 'no companion -> NaN');
             F1 = curation.Features.compute(tc.PageE, tc.PageP, T, upp);
             interior = F1(:, names == "borderUm") > 25;
@@ -161,8 +161,8 @@ classdef tFeatures < matlab.unittest.TestCase
             % a candidate whose whole window is outside the page: NaN image features, no error
             T2 = table([-100; 50], [-100; 50], 'VariableNames', {'X', 'Y'});
             F2 = curation.Features.compute(tc.PageP, [], T2, upp);
-            tc.verifyTrue(all(isnan(F2(1, names == "centreZ"))));
-            tc.verifyTrue(isfinite(F2(2, names == "centreZ")));
+            tc.verifyTrue(all(isnan(F2(1, names == "centerZ"))));
+            tc.verifyTrue(isfinite(F2(2, names == "centerZ")));
         end
     end
 
@@ -197,7 +197,7 @@ classdef tFeatures < matlab.unittest.TestCase
             end
             s = curation.Features.pageStats(page);
             tc.verifyEqual(s.Median, median(tissue(:)), 'AbsTol', 1e-12, 'page median of the tissue');
-            tc.verifyEqual(s.Pad, 0, 'the padding value is recognised');
+            tc.verifyEqual(s.Pad, 0, 'the padding value is recognized');
         end
     end
 
@@ -230,9 +230,9 @@ classdef tFeatures < matlab.unittest.TestCase
                 fprintf('%-16s %10.4g %10.4g %10.4g %10.4g %7.1f%%\n', names(j), median(v, 'omitnan'), ...
                     prctile(v, 1), prctile(v, 99), max(abs(v)), 100 * mean(isnan(v)));
             end
-            notRescore = ~ismember(names, ["rescore", "rescoreRank", "compContrast", "compCentreZ"]);
+            notRescore = ~ismember(names, ["rescore", "rescoreRank", "compContrast", "compCenterZ"]);
             tc.verifyTrue(all(isfinite(F(interior, notRescore)), 'all'), 'interior candidates: finite features');
-            % sane scales: page-normalised levels within a few hundred noise units, local noise
+            % sane scales: page-normalized levels within a few hundred noise units, local noise
             % comparable to the page noise, profile bins of order one spread
             med = median(F(interior, :), 1, 'omitnan');
             tc.verifyLessThan(abs(med(names == "bgLevel")), 50, 'local background near the tissue median');

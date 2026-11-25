@@ -22,7 +22,7 @@ classdef tCuratorTraining < matlab.unittest.TestCase
             tc.applyFixture(matlab.unittest.fixtures.EnvironmentVariableFixture('CELLDB_NO_CLIENT', '1'));
             tc.Root = fx.Folder;
             tc.Parent = fullfile(tc.Root, 'project');
-            % 4 sections of 3 animals, PV labelled; sections 1 and 3 complete and swept
+            % 4 sections of 3 animals, PV labeled; sections 1 and 3 complete and swept
             tc.Truth = tExportStage2.makeProject(tc.Parent, tExportStage1.LAYOUT, @tExportStage1.labelAll);
         end
     end
@@ -54,7 +54,7 @@ classdef tCuratorTraining < matlab.unittest.TestCase
         end
 
         function reviewOnePage(tc, app)
-            %reviewOnePage  Open the ECM1 channel of the section on screen (unlabelled) and confirm a
+            %reviewOnePage  Open the ECM1 channel of the section on screen (unlabeled) and confirm a
             %   page there: the review keys work while the Training tab shows or a fine-tune runs.
             t = tc.Truth.(matlab.lang.makeValidName(tExportStage1.LAYOUT(4, 2)));
             app.openSource(t.paths.ecm1Locs);
@@ -114,7 +114,7 @@ classdef tCuratorTraining < matlab.unittest.TestCase
 
         function makeLargeProject(parent, nAnimals, nSections)
             %makeLargeProject  NANIMALS x NSECTIONS small synthetic sections (two sources each): half
-            %   of every PV2 source labelled by a person (true cells Good, false ones Bad); the odd
+            %   of every PV2 source labeled by a person (true cells Good, false ones Bad); the odd
             %   sections' PV2 marked complete and swept.
             k = 0;
             for a = 1:nAnimals
@@ -252,7 +252,7 @@ classdef tCuratorTraining < matlab.unittest.TestCase
             parent = fullfile(tc.Root, 'large');
             t0 = tic;
             tCuratorTraining.makeLargeProject(parent, 5, 4);
-            fprintf('\n[training] large project: 40 sources written and labelled in %.1f s\n', toc(t0));
+            fprintf('\n[training] large project: 40 sources written and labeled in %.1f s\n', toc(t0));
             app = CellCurator('UseSettings', false, 'PrepareNext', false, 'Assist', false, 'ConfirmAudit', false, ...
                 'TrainingOptions', struct('CacheDir', fullfile(tc.Root, 'cache2')));
             tc.addTeardown(@() tCuratorTraining.closeApp(app));

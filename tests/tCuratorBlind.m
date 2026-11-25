@@ -40,7 +40,7 @@ classdef tCuratorBlind < matlab.unittest.TestCase
         end
 
         function px = border(app, k)
-            %border  The colour of tile K's left border in the shown mosaic.
+            %border  The color of tile K's left border in the shown mosaic.
             r = app.Gallery.Layout.Rect(k, :);
             px = double(squeeze(app.Gallery.Mosaic(r(2) + round(r(4) / 2), r(1), :)))';
         end
@@ -74,11 +74,11 @@ classdef tCuratorBlind < matlab.unittest.TestCase
             o = find(~P.Blind);
             tc.verifyEqual(st.get('AuditRole', P.Ids(b)), repmat("holdout", 4, 1));
             % neutral border, not the default's; not untouched; the context line says what they need
-            tc.verifyEqual(tCuratorBlind.border(app, b(1)), C.Blind, 'a blind tile wears the neutral grey');
+            tc.verifyEqual(tCuratorBlind.border(app, b(1)), C.Blind, 'a blind tile wears the neutral gray');
             tc.verifyNotEqual(tCuratorBlind.border(app, o(1)), C.Blind);
             tc.verifyEqual(nnz(app.Page.Untouched), numel(o), 'blind tiles are not untouched tiles');
             tc.verifySubstring(char(app.ContextText), sprintf('Enter: mark the %d untouched', numel(o)));
-            tc.verifySubstring(char(app.ContextText), 'and 4 audit tiles (grey border) need g, b or u');
+            tc.verifySubstring(char(app.ContextText), 'and 4 audit tiles (gray border) need g, b or u');
             % the P range shown is the ordinary tiles' only
             Po = P.P(~P.Blind);
             tc.verifySubstring(char(app.ContextText), sprintf('P %.2f', min(Po)));
@@ -103,8 +103,8 @@ classdef tCuratorBlind < matlab.unittest.TestCase
             tc.verifyEqual(st.get('Label', P.Ids(b)), repmat("", 4, 1), 'blind tiles never get the default');
             tc.verifyEqual(app.Page.PageId, P.PageId, 'the page stays while a blind tile is undecided');
             tc.verifyEqual(app.Cursor, b(1), 'the cursor goes to the first one');
-            tc.verifySubstring(char(app.StatusText), '4 audit tiles (grey border) still need g, b or u');
-            tc.verifySubstring(char(app.ContextText), '4 audit tiles (grey border) need g, b or u before the next page');
+            tc.verifySubstring(char(app.StatusText), '4 audit tiles (gray border) still need g, b or u');
+            tc.verifySubstring(char(app.ContextText), '4 audit tiles (gray border) need g, b or u before the next page');
             % decide them: keys, a label button, a right-click; LabelSource blind, no ProposalP
             app.hoverTile(b(1)); app.handleKey('b', {});
             app.hoverTile(b(2)); app.handleKey('g', {});
@@ -113,7 +113,7 @@ classdef tCuratorBlind < matlab.unittest.TestCase
             tc.verifyEqual(st.get('Label', P.Ids(b(1:3))), ["Bad"; "Good"; "Uncertain"]);
             tc.verifyEqual(st.get('LabelSource', P.Ids(b(1:3))), repmat("blind", 3, 1));
             tc.verifyTrue(all(isnan(st.get('ProposalP', P.Ids(b(1:3))))), 'no proposal was shown');
-            tc.verifyEqual(tCuratorBlind.border(app, b(1)), C.Bad, 'decided: its label colour');
+            tc.verifyEqual(tCuratorBlind.border(app, b(1)), C.Bad, 'decided: its label color');
             app.handleKey('return', {});
             tc.verifyEqual(app.Page.PageId, P.PageId, 'one is still undecided');
             app.hoverTile(b(4)); app.handleKey('u', {});
@@ -212,9 +212,9 @@ classdef tCuratorBlind < matlab.unittest.TestCase
             fa = findall(app.Figure, 'Tag', 'btn:finishAudit');
             tc.verifySubstring(fa.Text, 'Audit tiles to judge: 0');
             tc.verifySubstring(fa.Text, 'nothing to do');
-            tc.verifyTrue(logical(fa.Enable), 'a satisfied row stays readable (not a greyed-out button)');
+            tc.verifyTrue(logical(fa.Enable), 'a satisfied row stays readable (not a grayed-out button)');
             tc.verifyGreaterThan(mean(fa.FontColor), 0.8, 'light text');
-            tc.verifyLessThan(mean(fa.BackgroundColor), 0.4, 'on the dark "done" colour');
+            tc.verifyLessThan(mean(fa.BackgroundColor), 0.4, 'on the dark "done" color');
             % drawn once per source
             tc.verifyEqual(nnz(st.get('AuditRole') == "confirm-audit"), numel(a));
         end
@@ -222,7 +222,7 @@ classdef tCuratorBlind < matlab.unittest.TestCase
 
     methods (Test)
         function idleConfirmAuditIsNoUndoStepAndLeavesNoOrphans(tc)
-            % (pass C, 3a) the queue runs out without an Enter (the last tiles labelled by hand): the
+            % (pass C, 3a) the queue runs out without an Enter (the last tiles labeled by hand): the
             % confirm audit is drawn between pages with the store's system form. Ctrl+Z undoes the
             % reviewer's own last label, never the draw; undoing the confirmations it was drawn from
             % clears those roles, so no unconfirmed row is ever shown as a confirm-audit tile.

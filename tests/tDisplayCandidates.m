@@ -5,7 +5,7 @@ classdef (TestTags = {'Slow', 'RealData'}) tDisplayCandidates < matlab.unittest.
     %   source (24 middle-band candidates, then the 8 most likely cells; candidates stacked top to
     %   bottom in the order printed) in the folder CURATOR_DISPLAY_OUT names (default tempdir), and
     %   the numbers. Checks that the chosen default (curation.DisplayDefaults, "chosen") shows the
-    %   middle-band cells' centres at least half bright without saturating any more pixels than the
+    %   middle-band cells' centers at least half bright without saturating any more pixels than the
     %   page limits did.
 
     properties
@@ -70,7 +70,7 @@ classdef (TestTags = {'Slow', 'RealData'}) tDisplayCandidates < matlab.unittest.
                     goodC = arrayfun(@(k) prctile(cen(k), 95), good);
                     fprintf(['\n[display] %s %s: %d cells, page limits [%.1f %.1f] (page units); crop pixels p50 %.0f ' ...
                         'p90 %.0f p99 %.0f p99.5 %.0f p99.8 %.0f p99.9 %.0f (of 255) = page %.1f/%.1f/%.1f/%.1f/%.1f/%.1f; ' ...
-                        'centre p95 of the shown middle-band cells: median %.0f; of the likely-good: median %.0f\n'], ...
+                        'center p95 of the shown middle-band cells: median %.0f; of the likely-good: median %.0f\n'], ...
                         stem, keys(ch), height(L), lim, q, toPage(q), median(midC), median(goodC));
                     rows = {};
                     for k = 1:size(C, 1)
@@ -89,7 +89,7 @@ classdef (TestTags = {'Slow', 'RealData'}) tDisplayCandidates < matlab.unittest.
                         lut = 255 * min(1, (0:255)' / 255 * g) .^ gam;
                         dm = median(lut(round(midC) + 1));
                         sat = mean(arrayfun(@(kk) mean(lut(cen(kk) + 1) >= 254.5), good));
-                        fprintf('[display]   %-40s gain %.2f gamma %.2f: middle-band centre p95 shown at %.0f/255; likely-good centres saturated %.1f%%\n', ...
+                        fprintf('[display]   %-40s gain %.2f gamma %.2f: middle-band center p95 shown at %.0f/255; likely-good centers saturated %.1f%%\n', ...
                             C{k, 1}, g, gam, dm, 100 * sat);
                         if k == 1, satBefore = sat; end
                         if contains(C{k, 1}, "(chosen)")

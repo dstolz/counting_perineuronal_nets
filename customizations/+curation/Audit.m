@@ -9,7 +9,7 @@ classdef Audit
 %   n   = curation.Audit.confirmAuditSize(halfWidth, rate, opts)   confirm-audit tiles needed
 %   [a, V] = curation.Audit.aucDeLong(S, y)              AUCs of the columns of S and their covariance
 %   mask = curation.Audit.exportExclusionMask(T)         rows no model may ever train on
-%   mask = curation.Audit.evidenceMask(T)                random blind-labelled rows
+%   mask = curation.Audit.evidenceMask(T)                random blind-labeled rows
 %   E = curation.Audit.evidence(index, kind, model)      P of the random blind rows and candidates
 %   E = curation.Audit.evidence(T, F, model)
 %   ids = curation.Audit.sampleHoldout(index, kind, opts)
@@ -65,12 +65,12 @@ classdef Audit
 %   rejectThreshold(p, isGood, isBlind, sections, opts)   (EXPERIMENTAL)
 %     p         N x 1 P(Good): for blind rows out-of-fold or from a model that never trained on
 %               them. Rows with finite p are the population. NaN for rows that are neither.
-%     isGood    N x 1: logical or double with NaN for unlabelled rows (Uncertain counts as Good)
+%     isGood    N x 1: logical or double with NaN for unlabeled rows (Uncertain counts as Good)
 %     isBlind   N x 1 logical: the random blind evidence (evidenceMask)
 %     sections  N x 1 string (the clusters)
 %     opts      MinLabels 1500, MinSections 8, MinBlind 200, MaxMissRate 0.01, MaxGoodLost 0.01,
 %               Confidence 0.95, Bound "clustered" | "binomial", Weighting "poststrat" | "none"
-%               (or Weights), MinBlindPerBin 10, Bootstrap 1000, Seed 1, Labelled
+%               (or Weights), MinBlindPerBin 10, Bootstrap 1000, Seed 1, Labeled
 %     Gates: labels/sections, blind rows, at least one Good among the blind rows (else the share
 %     lost cannot be estimated and tau is NaN), at least two bins. Thresholds are the lower edges
 %     of bins of consecutive blind P values (>= MinBlindPerBin rows each, ties never split): never
@@ -120,7 +120,7 @@ classdef Audit
 %       interval needs for TargetHalfWidth (at the observed rate once 30 tiles of that default
 %       were judged blind, at AssumedRate before). Table
 %       ConfirmByBand: Band (from the P shown when it was confirmed: PriorProposalP, else
-%       ProposalP), Default, N, Changed, Rate, Lo, Hi. Catch tiles: CatchN, CatchHits (labelled
+%       ProposalP), Default, N, Changed, Rate, Lo, Hi. Catch tiles: CatchN, CatchHits (labeled
 %       Bad), CatchHitRate.
 %     MODEL ACCURACY (holdout; blind labels Good/Bad only)  HoldoutN, HoldoutGood, HoldoutPending,
 %       HoldoutAUCModel (ModelP) and HoldoutAUCRescore (raw rescore) with 95% DeLong intervals
@@ -165,30 +165,30 @@ classdef Audit
             o = curation.Audit.fill(opts, struct('MinLabels', 1500, 'MinSections', 8, 'MinBlind', 200, ...
                 'MaxMissRate', 0.01, 'MaxGoodLost', 0.01, 'Confidence', 0.95, 'Bound', "clustered", ...
                 'Weighting', "poststrat", 'Weights', [], 'MinBlindPerBin', 10, 'Bootstrap', 1000, ...
-                'Seed', 1, 'Labelled', []));
+                'Seed', 1, 'Labeled', []));
             p = double(p(:));
             n = numel(p);
             if islogical(isGood)
                 g = double(isGood(:));
-                labelled = true(n, 1);
+                labeled = true(n, 1);
             else
                 g = double(isGood(:));
-                labelled = ~isnan(g);
+                labeled = ~isnan(g);
             end
-            if ~isempty(o.Labelled), labelled = logical(o.Labelled(:)); end
+            if ~isempty(o.Labeled), labeled = logical(o.Labeled(:)); end
             isBlind = logical(isBlind(:));
             sections = string(sections(:));
             if isscalar(sections), sections = repmat(sections, n, 1); end
-            if numel(g) ~= n || numel(isBlind) ~= n || numel(sections) ~= n || numel(labelled) ~= n
+            if numel(g) ~= n || numel(isBlind) ~= n || numel(sections) ~= n || numel(labeled) ~= n
                 error('curation:Audit:badArgument', 'p, isGood, isBlind and sections need one entry per row.');
             end
             sections(ismissing(sections)) = "";
             conf = o.Confidence;
 
             info = curation.Audit.emptyInfo(o);
-            info.NumLabels = nnz(labelled);
-            info.NumLabelSections = numel(unique(sections(labelled)));
-            ev = isBlind & labelled & isfinite(p) & ~isnan(g);
+            info.NumLabels = nnz(labeled);
+            info.NumLabelSections = numel(unique(sections(labeled)));
+            ev = isBlind & labeled & isfinite(p) & ~isnan(g);
             info.NumBlind = nnz(ev);
             tau = NaN;
 
@@ -213,7 +213,7 @@ classdef Audit
             end
             if ~any(g(ev) > 0)
                 info.Reason = sprintf(['Auto-reject cannot estimate the share of cells it would lose: ' ...
-                    'no blind tile labelled Good among the %s blind tiles.'], curation.Audit.fmtInt(info.NumBlind));
+                    'no blind tile labeled Good among the %s blind tiles.'], curation.Audit.fmtInt(info.NumBlind));
                 info.Gate = "goods";
                 return;
             end
@@ -285,7 +285,7 @@ classdef Audit
             nEff = W .^ 2 ./ W2;
             upBin = curation.Audit.betaUpper(mHat .* nEff, nEff, conf);
 
-            % clustered: design effect from the between-section variance (linearisation)
+            % clustered: design effect from the between-section variance (linearization)
             [~, ~, si] = unique(ss);
             C = max(si);
             Sc = cumsum(accumarray([si binOf], w .* gs, [C nb]), 2);
@@ -318,7 +318,7 @@ classdef Audit
                 up = upClu;
             end
             goodLost = Kw / Kw(end);
-            cand = pop & isnan(g);                 % unlabelled candidates with a P
+            cand = pop & isnan(g);                 % unlabeled candidates with a P
             if ~any(cand), cand = pop; end
             pc = p(cand);
             nRej = cumsum(histcounts(pc, [-Inf; thr]))';    % rows with p < each threshold
@@ -364,7 +364,7 @@ classdef Audit
             %   other evidence rows and the candidates (active, unreviewed, no audit role, not
             %   excluded, no person's label) -> model.predict(F); candidates without features ->
             %   their stored ModelP ONLY when their ModelVersion is model.Version; everything else
-            %   NaN. E.isGood: rows a person labelled (Good, Bad or Uncertain) -> Good or Uncertain
+            %   NaN. E.isGood: rows a person labeled (Good, Bad or Uncertain) -> Good or Uncertain
             %   (conservative), else NaN. E.isBlind = evidenceMask(T). E.sections = T.Section.
             %   E.NoP: evidence or candidate rows left without a P (no features and no ModelP of
             %   this model). E.Warnings: what was left out and why. E.T = T.
@@ -811,8 +811,8 @@ classdef Audit
                         t = t + " By band: " + join(parts, ", ") + ".";
                     end
                     if ~isnan(s.EstCellsLeftBad)
-                        t = t + sprintf([' Among the %s tiles still labelled Bad by bulk confirmation an estimated %s ' ...
-                            '(95%% CI %s to %s) are cells; among the %s still labelled Good by it, an estimated %s ' ...
+                        t = t + sprintf([' Among the %s tiles still labeled Bad by bulk confirmation an estimated %s ' ...
+                            '(95%% CI %s to %s) are cells; among the %s still labeled Good by it, an estimated %s ' ...
                             '(CI %s to %s) are not.'], f(s.ConfirmedBadUnaudited), f(s.EstCellsLeftBad), ...
                             f(s.EstCellsLeftBadLo), f(s.EstCellsLeftBadHi), f(s.ConfirmedGoodUnaudited), ...
                             f(s.EstNonCellsKeptGood), f(s.EstNonCellsKeptGoodLo), f(s.EstNonCellsKeptGoodHi));
@@ -825,7 +825,7 @@ classdef Audit
                     t = t + " Reviewer consistency cannot be measured yet: no confirmed tile has been shown again blind.";
                 end
                 if s.CatchN > 0
-                    t = t + sprintf(' Attention checks: %s of %s known non-cells were labelled Bad (%s).', ...
+                    t = t + sprintf(' Attention checks: %s of %s known non-cells were labeled Bad (%s).', ...
                         f(s.CatchHits), f(s.CatchN), pc(s.CatchHitRate));
                 end
                 % model accuracy
@@ -855,7 +855,7 @@ classdef Audit
                             "were cells or possibly cells"), pc(s.RejectAuditRate), pc(s.RejectAuditLo), ...
                             pc(s.RejectAuditHi), nn(round(s.EstCellsLost), "cell", "cells"), f(ceil(s.EstCellsLostUpper)));
                     else
-                        t = t + " No audited reject has been labelled yet, so cells lost cannot be estimated.";
+                        t = t + " No audited reject has been labeled yet, so cells lost cannot be estimated.";
                     end
                 end
                 if s.ReviewerCounts ~= ""

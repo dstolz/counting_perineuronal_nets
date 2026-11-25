@@ -169,7 +169,7 @@ classdef tTooltips < matlab.unittest.TestCase
         function mapControlsHaveTooltips(tc)
             % every control of the map (tool bar, action bars, locator) and of the finish checklist
             app = tc.openApp(true);
-            app.showCentre("map");              % creates the map and its action bars
+            app.showCenter("map");              % creates the map and its action bars
             app.showRightTab("map");            % and the locator
             app.showQueue('sweep');             % the sweep bar shows
             drawnow;
@@ -190,7 +190,7 @@ classdef tTooltips < matlab.unittest.TestCase
                 'btn_lassoCancel', "[Esc]", 'btn_regionRemove', "[Del]", 'btn_regionKeep', "[Esc]", ...
                 'btn_pairAccept', "[Enter]", 'btn_pairOther', "[k]", 'btn_pairSkip', "[" + curation.UiText.RIGHT + "]", ...
                 'btn_pairBack', "[" + curation.UiText.LEFT + "]", 'btn_sweepPrev', "[Backspace]", ...
-                'btn_sweepNext', "[Space]", 'ef_sweepWidth', "micrometres", 'btn_finishFlagged', "Flagged", ...
+                'btn_sweepNext', "[Space]", 'ef_sweepWidth', "micrometers", 'btn_finishFlagged', "Flagged", ...
                 'btn_finishPairs', "close pairs", 'btn_finishVanished', "Vanished good", ...
                 'btn_finishSweep', "only needed if this section will be used to train the detector", ...
                 'btn_finishComplete', "[Enter]", 'btn_finishNext', "[n]", 'tab_map', "Click a place");
@@ -224,7 +224,7 @@ classdef tTooltips < matlab.unittest.TestCase
             want = struct('btn_auditReport', "audit tab", 'btn_saveReport', "unavailable now", ...
                 'tab_audit', "blind audit tiles", 'ta_audit', "save report", 'lbl_assistSource', "200 labels", ...
                 'lbl_assistAccuracy', "out-of-fold auc", 'lbl_assistAgreement', "audit tiles only", ...
-                'btn_finishAudit', "grey border");
+                'btn_finishAudit', "gray border");
             for f = string(fieldnames(want))'
                 tag = regexprep(f, '_', ':', 'once');
                 c = findall(app.Figure, 'Tag', tag);
@@ -240,7 +240,7 @@ classdef tTooltips < matlab.unittest.TestCase
                 sb = findall(app.Figure, 'Tag', 'gl:status');
                 tc.verifyGreaterThanOrEqual(numel(sb.Children), 3, 'and the lamp beside it');
             end
-            % blind tiles: their colour is in the legend
+            % blind tiles: their color is in the legend
             C = curation.UiText.colors();
             sw = findall(app.Figure, 'Tag', 'legend:blind:1');
             tc.assertNumElements(sw, 1);
@@ -298,7 +298,7 @@ classdef tTooltips < matlab.unittest.TestCase
             % the app never rejects a detection unseen: no queue, legend, label or tooltip says so
             tc.verifyFalse(any(CellCurator.QUEUES == "browseAuto"), 'no auto-rejected queue');
             app = tc.openApp(true);
-            app.showCentre("map");
+            app.showCenter("map");
             app.showRightTab("audit");
             drawnow;
             all = findall(app.Figure);
@@ -329,8 +329,8 @@ classdef tTooltips < matlab.unittest.TestCase
             tc.verifyGreaterThanOrEqual(g.RowHeight{2}, 12 * n, 'the text row holds every line');
         end
 
-        function legendMatchesTheTileColours(tc)
-            % the legend's swatches are drawn in the colours the tiles use (curation.UiText.colors;
+        function legendMatchesTheTileColors(tc)
+            % the legend's swatches are drawn in the colors the tiles use (curation.UiText.colors;
             % tCuratorGestures checks the tile borders against the same values)
             C = curation.UiText.colors();
             app = tc.openApp(false);
@@ -342,12 +342,12 @@ classdef tTooltips < matlab.unittest.TestCase
                 for j = 1:size(cols, 1)
                     sw = findall(app.Figure, 'Tag', sprintf('legend:%s:%d', f, j));
                     tc.assertNumElements(sw, 1, "legend swatch " + f);
-                    tc.verifyEqual(round(255 * sw.BorderColor), cols(j, :), "legend colour of " + f);
+                    tc.verifyEqual(round(255 * sw.BorderColor), cols(j, :), "legend color of " + f);
                 end
             end
             badge = findall(app.Figure, 'Tag', 'legend:flag:1:badge');
             tc.assertNumElements(badge, 1);
-            tc.verifyEqual(round(255 * badge.BackgroundColor), C.Flag, 'legend colour of the flag badge');
+            tc.verifyEqual(round(255 * badge.BackgroundColor), C.Flag, 'legend color of the flag badge');
             items = curation.UiText.legendItems();
             tc.verifyEqual(numel(items), 8);
             tc.verifyEqual(C.Good, [0 158 115]);
@@ -355,7 +355,7 @@ classdef tTooltips < matlab.unittest.TestCase
             tc.verifyEqual(C.Uncertain, [240 228 66]);
             tc.verifyEqual(C.Flag, [204 121 167]);
             tc.verifyEqual(C.Blind, [140 140 140]);
-            tc.verifyFalse(isfield(C, 'AutoRejected'), 'no auto-reject colour: the app never rejects unseen');
+            tc.verifyFalse(isfield(C, 'AutoRejected'), 'no auto-reject color: the app never rejects unseen');
             tc.verifyEqual(C.Cursor, [255 255 255]);
             tc.verifyEqual(C.Selection, [86 180 233]);
         end

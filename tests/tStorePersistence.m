@@ -344,7 +344,7 @@ classdef tStorePersistence < matlab.unittest.TestCase
             tc.verifyFalse(isfile(lockFile));
         end
 
-        function readOnlyOptionIsHonouredAndWritesNothing(tc)
+        function readOnlyOptionIsHonoredAndWritesNothing(tc)
             s = tc.openKey('ECM1');
             s.setLabel(s.T.CellID(1:3), 'Good', 'human');
             s.flush(); s.close();

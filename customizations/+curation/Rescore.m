@@ -21,8 +21,8 @@ classdef Rescore < handle
 %   cell per store; default pending(store)) are scored on the DETECTOR's scale, exactly as
 %   CellDiscovery rescores: the model input of the source's page is regenerated
 %   (CellToolkit.modelInputFactsFor + modelInputFromFile from the manifest's detection facts:
-%   resized to 0.645 um/px, normalised to 0-255) and the points are mapped like the detector's
-%   output, Xp = X * resize, Yp = Y * resize (score.py rounds them to the crop centre). The image
+%   resized to 0.645 um/px, normalized to 0-255) and the points are mapped like the detector's
+%   output, Xp = X * resize, Yp = Y * resize (score.py rounds them to the crop center). The image
 %   is written as a temporary HDF5 file (score.py reads .h5 directly, same values as the scratch
 %   TIFF CellDiscovery scores on); the input CSV has the columns idx (consumed as the index by
 %   score.py), imgName, Xp, Yp, rescore_key. One score.py process per scoring model (all
@@ -35,7 +35,7 @@ classdef Rescore < handle
 %   curation.Trainer.defaultPython), RepoRoot, Assume (model-input facts to assume, see
 %   CellToolkit.modelInputFactsFor), Wait (false), Timeout (600 s, with Wait), OnDone
 %   (fn(job)), KeepFiles (false), PollPeriod 0.5.
-%   job also has: State (running | succeeded | failed | cancelled), Facts (per store: the facts
+%   job also has: State (running | succeeded | failed | canceled), Facts (per store: the facts
 %   used, with what was assumed), Log (output lines), Error, WorkDir.
 %
 %   WRITING THE SCORES BACK: store.setRescore(Result.CellID, Result.Rescore, Result.Model) (not
@@ -223,7 +223,7 @@ classdef Rescore < handle
         function cancel(job)
             if job.State ~= "running", return; end
             try job.Proc.destroyForcibly(); catch, end
-            job.State = "cancelled";
+            job.State = "canceled";
             job.finish();
         end
 

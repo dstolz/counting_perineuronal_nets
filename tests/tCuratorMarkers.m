@@ -1,6 +1,6 @@
 classdef tCuratorMarkers < matlab.unittest.TestCase
     %tCuratorMarkers  The map's markers (curation.MapMarkers, curation.MarkerDialog): the defaults
-    %   (cells to review: filled blue squares; labelled cells: open circles), the Markers... window
+    %   (cells to review: filled blue squares; labeled cells: open circles), the Markers... window
     %   (every change shown on the map, the legend and the locator at once; OK keeps, Cancel / Esc /
     %   closing goes back), and the markers remembered between sessions (only the kept ones).
     %
@@ -86,7 +86,7 @@ classdef tCuratorMarkers < matlab.unittest.TestCase
             tc.verifyTrue(S.Unreviewed.Filled);
             c = S.Unreviewed.Color;
             tc.verifyGreaterThan(c(3), max(c(1:2)) + 50, 'bluish');
-            tc.verifyNotEqual(c, curation.UiText.colors().Selection, 'not the selection colour');
+            tc.verifyNotEqual(c, curation.UiText.colors().Selection, 'not the selection color');
             for k = ["Good" "Bad" "Uncertain" "Flagged"]
                 tc.verifyEqual(S.(k).Symbol, 'o');
                 tc.verifyFalse(S.(k).Filled, k + ": an open circle (the cell stays visible)");
@@ -97,7 +97,7 @@ classdef tCuratorMarkers < matlab.unittest.TestCase
 
             app = tc.openApp();
             tc.verifyEqual(app.MarkerStyle, S);
-            app.showCentre("map");
+            app.showCenter("map");
             m = app.Map;
             tc.verifyEqual(numel(m.Layers), 2);
             id = tCuratorMarkers.unreviewedCell(app);
@@ -116,7 +116,7 @@ classdef tCuratorMarkers < matlab.unittest.TestCase
             tCuratorMarkers.verifyLegend(tc, app, 'unreviewed', S.Unreviewed);
             tCuratorMarkers.verifyLegend(tc, app, 'good', S.Good);
             img = tCuratorMarkers.legendItem(app, 'unreviewed').ImageSource;
-            tc.verifyEqual(double(squeeze(img(9, 9, :)))', S.Unreviewed.Color, 'a filled square: its colour inside');
+            tc.verifyEqual(double(squeeze(img(9, 9, :)))', S.Unreviewed.Color, 'a filled square: its color inside');
             img = tCuratorMarkers.legendItem(app, 'good').ImageSource;
             tc.verifyEqual(double(squeeze(img(9, 9, :)))', curation.UiText.colors().Background, ...
                 'an open circle: the background inside');
@@ -132,7 +132,7 @@ classdef tCuratorMarkers < matlab.unittest.TestCase
 
         function dialogShowsChangesAtOnceOkKeepsCancelGoesBack(tc)
             app = tc.openApp();
-            app.showCentre("map");
+            app.showCenter("map");
             m = app.Map;
             S0 = app.MarkerStyle;
             id = tCuratorMarkers.unreviewedCell(app);

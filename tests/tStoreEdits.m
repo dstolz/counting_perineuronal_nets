@@ -105,7 +105,7 @@ classdef tStoreEdits < matlab.unittest.TestCase
             tc.verifyFalse(ismember(id, s.kept().CellID));
         end
 
-        function labellingSeveralIdsAtOnce(tc)
+        function labelingSeveralIdsAtOnce(tc)
             s = tc.openEcm();
             ids = s.T.CellID(10:19);
             s.setLabel(ids, 'Good', 'confirmed');
@@ -178,7 +178,7 @@ classdef tStoreEdits < matlab.unittest.TestCase
             tc.verifyEqual(s.counts().added, 1);
         end
 
-        function addCellSnapPosSourceIsHonoured(tc)
+        function addCellSnapPosSourceIsHonored(tc)
             s = tc.openEcm();
             id = s.addCell([50 60], struct('PosSource', 'snap'));
             tc.verifyEqual(tc.rowOf(s, id).PosSource, "snap");

@@ -13,7 +13,7 @@ classdef tCelldbInvariance < matlab.unittest.TestCase
 %   state keeps its provenance sidecar, and the outbox holds nothing (absent, disabled), waits (unreachable)
 %   or has sent the record (connected). The client states need the labclient package and are skipped without it.
 %
-%   The only thing normalised before the files are compared byte for byte is the ReviewedAt column of
+%   The only thing normalized before the files are compared byte for byte is the ReviewedAt column of
 %   <stem>_curation.csv, which holds the time each label was set (an ISO 8601 time with its offset: it
 %   differs between any two runs, and is replaced by "<time>"). Nothing else differs between two runs: the
 %   reviewer is fixed, the synthetic detections come from a seed, and _final.csv, the journal's session id
@@ -100,7 +100,7 @@ classdef tCelldbInvariance < matlab.unittest.TestCase
             R.elapsed = toc(t);
             R.rec = rec;
             R.counts = c.store.counts();
-            R.curationCsv = normalise(string(fileread(c.store.Paths.csv)));
+            R.curationCsv = normalize(string(fileread(c.store.Paths.csv)));
             R.finalCsv = string(fileread(c.store.Paths.final));
             R.finalName = fileSuffix(c.store.Paths.final);
             R.records = dir(fullfile(top, "ds", ".provenance", "*.json"));
@@ -118,7 +118,7 @@ classdef tCelldbInvariance < matlab.unittest.TestCase
             [fake, top] = tc.enter(State);
             got = tc.makeCuration(top);
 
-            tc.verifyEqual(got.curationCsv, ref.curationCsv, "<stem>_curation.csv, byte for byte (ReviewedAt normalised)");
+            tc.verifyEqual(got.curationCsv, ref.curationCsv, "<stem>_curation.csv, byte for byte (ReviewedAt normalized)");
             tc.verifyEqual(got.finalCsv, ref.finalCsv, "<stem>_final.csv, byte for byte");
             tc.verifyEqual(got.finalName, ref.finalName);
             tc.verifyEqual(got.counts, ref.counts, "store.counts()");
@@ -153,8 +153,8 @@ classdef tCelldbInvariance < matlab.unittest.TestCase
     end
 end
 
-function t = normalise(t)
-%NORMALISE The curation snapshot with the times of the labels (ReviewedAt) replaced: nothing else.
+function t = normalize(t)
+%NORMALIZE The curation snapshot with the times of the labels (ReviewedAt) replaced: nothing else.
 t = regexprep(t, "\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?([+-]\d\d:\d\d|Z)", "<time>");
 end
 

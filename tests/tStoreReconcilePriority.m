@@ -21,14 +21,14 @@ classdef tStoreReconcilePriority < matlab.unittest.TestCase
 
     %% ---- finding 5: pass priority ---------------------------------------------------------------
     methods (Test)
-        function reviewedRowGetsTheDetectionBeforeAnUnreviewedNeighbour(tc)
+        function reviewedRowGetsTheDetectionBeforeAnUnreviewedNeighbor(tc)
             s = tc.mem([100 100; 110 100]);
             g = idAt(s, 100, 100); u = idAt(s, 110, 100);
             s.setLabel(g, "Good");
             rep = s.reconcile(mkLocs([106 100; tc.Fill]));   % 6 px from G, 4 px from U
             tc.verifyTrue(s.get('InLocs', g), 'the reviewed row takes the detection');
             tc.verifyEqual(s.get('DET_X', g), 106);
-            tc.verifyEqual(s.get('State', u), "stale", 'the unreviewed neighbour loses it');
+            tc.verifyEqual(s.get('State', u), "stale", 'the unreviewed neighbor loses it');
             tc.verifyEqual(rep.nVanishedGood, 0, 'the reviewed Good is not left "vanished"');
             tc.verifyEqual(rep.nAppended, 0);
         end
@@ -52,7 +52,7 @@ classdef tStoreReconcilePriority < matlab.unittest.TestCase
             rep = s.reconcile(mkLocs([100 100; 108 100; tc.Fill]));   % 2 px from M, 4 px from U
             tc.verifyTrue(s.get('InLocs', m), 'the merged duplicate takes its re-detection');
             tc.verifyEqual(s.get('State', m), "merged", 'and stays merged');
-            tc.verifyEqual(s.get('State', u), "stale", 'the unreviewed neighbour does not');
+            tc.verifyEqual(s.get('State', u), "stale", 'the unreviewed neighbor does not');
             tc.verifyEqual(rep.nAppended, 0);
             tc.verifyEqual(s.counts().kept, 1, 'the cell is counted once');
         end

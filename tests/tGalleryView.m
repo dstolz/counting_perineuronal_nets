@@ -162,7 +162,7 @@ classdef tGalleryView < matlab.uitest.TestCase
             tc.verifyEqual(string(ax.YDir), "reverse");
         end
 
-        function testHitTestRoundTripsTileCentres(tc)
+        function testHitTestRoundTripsTileCenters(tc)
             g = tc.View;
             [r, c] = g.capacity();
             K = r * c - 3;                                  % a partial page: the last 3 slots are empty

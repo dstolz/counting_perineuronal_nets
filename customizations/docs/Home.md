@@ -17,8 +17,7 @@ tool you need.
 | **[Cell Dataset Manager](CellDatasetManager.md)** | Finds every dataset under a folder, shows how far each has moved through the pipeline, and launches the other tools on a chosen dataset. | **Any time.** As your home base / status dashboard. |
 | **[Cell Discovery](CellDiscovery.md)** | Runs automatic cell detection on a whole folder of images and writes one results file (`*_locs.csv`) per image. | **First.** To find cells in new images. |
 | **[Cell Curator](CellCurator.md)** | Shows the detections a screenful at a time so you can mark the wrong ones and confirm the rest; adds missed cells, moves, merges duplicates and excludes damaged regions; writes the final list of kept cells. | **Second.** To review, correct and finish each section. |
-| **[Cell Neighbor Resolver](CellNeighborResolution.md)** *(Legacy)* | Finds pairs of detections that sit too close together and lets you keep one, keep both, or merge them. Superseded by Cell Curator; kept for now. | Only if you need it. |
-| **[Cell Localization QC](CellQualityControl.md)** *(Legacy)* | Shows every detection as a small image crop so you can mark each one Good / Bad / Uncertain. Superseded by Cell Curator; kept for now. | Only if you need it. |
+| **[Cell Analysis](CellAnalysis.md)** | Measures every cell (distance from the brain surface, luminance, morphology, the shape of the nets) and plots the distributions within a section and across sections, grouped by subject, by the lab database's tags or by your own groups. | **Third.** To look at and export the results. |
 
 Cell Discovery and Cell Curator are normally used **in order**, but each one can
 also be used on its own. The **Cell Dataset Manager** sits above them: open it
@@ -41,6 +40,11 @@ first to see what still needs doing, then launch the right tool from there (its
             │
             ▼
    *_final.csv: the kept cells of each source
+            │
+            ▼
+   ┌──────────────────────┐
+   │ Cell Analysis        │   measure the kept cells, plot and export
+   └──────────────────────┘
 ```
 
 ---
@@ -60,10 +64,18 @@ first to see what still needs doing, then launch the right tool from there (its
    (`*_final.csv`) of kept cells is written; the detector's `*_locs.csv` is
    never changed. See the **[Cell Curator guide](CellCurator.md)**.
 
-The older **Cell Neighbor Resolver** (duplicates) and **Cell Localization QC**
-(Good / Bad grading) are still present, marked *Legacy*, until Cell Curator
-covers everything they did. Cell Curator imports their results the first time it
-opens a source.
+3. **Analyze** — Press **Analyze…** in the **Cell Dataset Manager** (or run
+   `CellAnalysis('<folder>')`), then **Measure all**. Every kept cell gets its
+   distance from the brain surface, its luminance and its morphology; plot any
+   of them for one section or across sections, grouped by subject or by your
+   own groups, and export the numbers. See the
+   **[Cell Analysis guide](CellAnalysis.md)**.
+
+Cell Curator replaced two older tools, the **Cell Neighbor Resolver**
+(duplicates) and **Cell Localization QC** (Good / Bad grading), which have been
+removed. If you used them, Cell Curator imports what they saved the first time
+it opens a source (see
+[Coming from the old tools](CellCurator.md#coming-from-the-old-tools)).
 
 ---
 
@@ -106,8 +118,7 @@ These terms come up across the tools.
 
 - **`*_locs.csv`** — The localization file written by Cell Discovery, with one
   row per detected cell (columns include `X`, `Y`, `class`, `score`). Cell
-  Curator reads it and never modifies it (the Legacy Neighbor Resolver edits it
-  in place).
+  Curator reads it and never modifies it.
 
 - **Curation files** — What Cell Curator writes for each source:
   `<name>_curation.csv` (your decisions), a journal beside it,
@@ -120,17 +131,16 @@ These terms come up across the tools.
   - **PV staining** → a `pv_*` model (often the second page, "C2").
 
 - **Rescore model (Stage 2)** — An optional second model that re-grades each
-  detection with a `0–1` quality estimate. Available in Cell Discovery, Cell
-  Curator (for cells you add or move) and the Neighbor Resolver.
+  detection with a `0–1` quality estimate. Available in Cell Discovery and Cell
+  Curator (for cells you add or move).
 
 - **Multi-page TIFF** — A single `.tif` file holding several channels as
   "pages" (e.g. page 1 = WFA, page 2 = PV). Cell Discovery can map a different
   model to each page.
 
 - **Score vs. Rescore** — *Score* is the detector's raw confidence. *Rescore* is
-  the optional Stage-2 quality estimate. Both can be used for sorting,
-  filtering, and threshold classification in the QC tool; Cell Curator uses the
-  rescore to propose a label for each page.
+  the optional Stage-2 quality estimate. Cell Curator uses the rescore to
+  propose a label for each page.
 
 - **Dataset manifest** — A small sidecar file (`<base>.celldataset.json`) each
   tool keeps next to your image. It is the toolkit's record of which image and
@@ -155,8 +165,7 @@ These terms come up across the tools.
 
 - **Original data is preserved.** Cell Curator never modifies `*_locs.csv`; its
   decisions go to separate curation files and are saved as you work, with
-  **Undo** (`Ctrl+Z`). The Legacy QC tool writes separate `*_QC.csv` files; the
-  Legacy Neighbor Resolver edits `*_locs.csv` in place.
+  **Undo** (`Ctrl+Z`).
 
 ---
 
@@ -166,8 +175,6 @@ These terms come up across the tools.
 - **[Cell Discovery](CellDiscovery.md)** — batch cell detection
 - **[Cell Curator](CellCurator.md)** — review, correct and finish detections
 - **[Cell Curation Reference](CellCuration-Reference.md)** — for maintainers: files, schema, tests, limitations
-- **[Cell Neighbor Resolver](CellNeighborResolution.md)** *(Legacy)* — resolving duplicate detections
-- **[Cell Localization QC](CellQualityControl.md)** *(Legacy)* — manual quality control review
 - **[Cell Dataset Manifest](CellDatasetManifest.md)** — the per-dataset record behind the tools (schema + code API)
 
 ---

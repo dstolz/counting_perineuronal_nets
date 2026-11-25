@@ -1,13 +1,13 @@
 ﻿classdef CellToolkit
 % CELLTOOLKIT  Shared helpers for the Cell* MATLAB GUIs.
 %   A stateless utility class collecting functionality common to
-%   CellDiscovery, CellNeighborResolution, and CellQualityControl so the
-%   three GUIs share one tested implementation instead of three copies.
+%   CellDiscovery, CellCurator, CellDatasetManager and CellDatasetManifest so
+%   they share one tested implementation instead of separate copies.
 %
 %   Every method is Static — call them on the class, no instance needed:
 %       root            = CellToolkit.detectRepoRoot();
 %       [det, score]    = CellToolkit.discoverModels(root);
-%       files           = CellToolkit.scanFiles(root, '(?i)_locs\.csv$');
+%       files           = CellToolkit.recDir(root);
 %
 %   Running the Python models
 %   -------------------------
@@ -36,12 +36,12 @@
 %       lines = CellToolkit.drainReader(reader);   % poll from a timer
 %
 %   The config is a plain struct, so a caller may also build/modify it by
-%   hand; pythonConfig only supplies sensible defaults and normalises types.
+%   hand; pythonConfig only supplies sensible defaults and normalizes types.
 %
 %   The model input
 %   ---------------
 %   The image the detector and the Stage-2 scorer read (LSM correction, top-hat,
-%   resize to 0.645 um/px, normalisation to 0-255) is built by ONE pipeline,
+%   resize to 0.645 um/px, normalization to 0-255) is built by ONE pipeline,
 %   used by CellDiscovery and by the curation exports / rescoring:
 %       [img, info]  = CellToolkit.modelInputPage(page, facts);
 %       img          = CellToolkit.modelInputFromFile(tif, pageNo, facts);
@@ -146,7 +146,7 @@
         end
 
         function cfg = pythonConfig(varargin)
-            % Build a normalised Python-invocation config struct. Accepts
+            % Build a normalized Python-invocation config struct. Accepts
             % name-value pairs or a single struct to override these defaults:
             %   PythonExe  : interpreter (default 'python')
             %   CondaExe   : conda executable (default detectConda())
@@ -178,7 +178,7 @@
                     cfg.(name) = varargin{k+1};
                 end
             end
-            % Normalise all fields to char for downstream command building.
+            % Normalize all fields to char for downstream command building.
             cfg.PythonExe  = char(string(cfg.PythonExe));
             cfg.CondaExe   = char(string(cfg.CondaExe));
             cfg.CondaEnv   = char(string(cfg.CondaEnv));
@@ -214,7 +214,7 @@
 
         function [status, output] = runPython(cfg, scriptArgs)
             % Run a Python command synchronously via system(), returning the
-            % exit status and combined stdout/stderr. Honours cfg.WorkingDir.
+            % exit status and combined stdout/stderr. Honors cfg.WorkingDir.
             parts  = CellToolkit.pythonCommandParts(cfg, scriptArgs);
             cmd    = CellToolkit.commandString(parts);
             wd     = char(CellToolkit.fieldOr(cfg, 'WorkingDir', ''));
@@ -340,7 +340,7 @@
 
         function args = predictArgs(model, imagePath, opts)
             % Assemble a predict.py argument list (excluding the interpreter).
-            % opts is an optional struct; recognised fields:
+            % opts is an optional struct; recognized fields:
             %   output, device, batchSize, threshold, rescoreModel
             % A blank/NaN threshold is omitted (predict.py then uses the
             % checkpoint default); an empty rescoreModel skips rescoring.
@@ -380,7 +380,7 @@
             %   locsCsv : localizations CSV to rescore (score.py's 'locs' arg).
             %             Must carry imgName, Xp and Yp columns; the first
             %             column is consumed as the pandas index.
-            % opts is an optional struct; recognised fields:
+            % opts is an optional struct; recognized fields:
             %   root      : directory the imgName paths are resolved against
             %   device, batchSize, metric, patchSize, output
             if nargin < 3, opts = struct(); end
@@ -442,43 +442,6 @@
             allFiles = cell(numel(listing), 1);
             for k = 1:numel(listing)
                 allFiles{k} = fullfile(listing(k).folder, listing(k).name);
-            end
-        end
-
-        function [matched, keepMask] = filterByRegex(files, pattern)
-            % Keep files whose basename (name + extension, not the full path)
-            % matches a case-insensitive regular expression. An empty pattern
-            % keeps everything. Bad matches on individual names are ignored.
-            files = files(:);
-            if isempty(files)
-                matched = {}; keepMask = false(0, 1);
-                return;
-            end
-            if nargin < 2 || isempty(pattern)
-                matched = files; keepMask = true(numel(files), 1);
-                return;
-            end
-            keepMask = false(numel(files), 1);
-            for k = 1:numel(files)
-                [~, nm, ext] = fileparts(files{k});
-                try
-                    if ~isempty(regexpi([nm ext], pattern, 'once'))
-                        keepMask(k) = true;
-                    end
-                catch
-                    % Treat a regex failure on this name as a non-match.
-                end
-            end
-            matched = files(keepMask);
-        end
-
-        function files = scanFiles(rootDir, pattern)
-            % Convenience: recursively list files under rootDir, optionally
-            % filtered by a case-insensitive basename regex. This is the core
-            % of every "scan a folder for CSVs/images" operation.
-            files = CellToolkit.recDir(rootDir);
-            if nargin >= 2 && ~isempty(pattern)
-                files = CellToolkit.filterByRegex(files, pattern);
             end
         end
 
@@ -563,7 +526,7 @@
         end
 
         function um = tiffPixelSizeUm(file, page)
-            % Micrometres per pixel of a TIFF page from its calibration, or NaN
+            % Micrometers per pixel of a TIFF page from its calibration, or NaN
             % when the file carries no usable physical scale.
             %
             % Two conventions are understood:
@@ -588,7 +551,7 @@
             xr = double(pg.XResolution(1));
             if ~isfinite(xr) || xr <= 0, return; end
 
-            unitUm = NaN;   % micrometres per resolution unit
+            unitUm = NaN;   % micrometers per resolution unit
             if isfield(info, 'ImageDescription')
                 desc = pg.ImageDescription;
                 if isempty(desc), desc = info(1).ImageDescription; end   % ImageJ: first page only
@@ -758,31 +721,6 @@
             end
         end
 
-        function [img, cache] = readImagePageCached(imagePath, pageIndex, cache)
-            % Read a TIFF page, memoising it in a struct cache keyed by page so
-            % repeated requests for the same page avoid re-reading from disk.
-            %   cache : struct used as the store (pass struct() the first time)
-            % Returns the page image (or [] on failure) and the updated cache,
-            % which the caller stores back to retain the memoisation.
-            %
-            % Usage:
-            %   [img, app.PageCache] = CellToolkit.readImagePageCached(p, k, app.PageCache);
-            if nargin < 3 || ~isstruct(cache)
-                cache = struct();
-            end
-            field = sprintf('p%d', pageIndex);
-            if isfield(cache, field)
-                img = cache.(field);
-                return;
-            end
-            try
-                img = imread(char(imagePath), pageIndex);
-                cache.(field) = img;
-            catch
-                img = [];
-            end
-        end
-
     end
 
     %% ===================================================================
@@ -792,7 +730,7 @@
     %  CellDiscovery never saves the image the models see: per page it is the
     %  TIFF page after optional bidirectional-LSM correction (jointly over the
     %  pages corrected together), morphological background subtraction
-    %  (top-hat), resize to the training pixel size and intensity normalisation
+    %  (top-hat), resize to the training pixel size and intensity normalization
     %  to 0-255, stored in the class its scratch TIFF uses. predict.py divides
     %  it by 255; score.py (Stage 2) crops 64 x 64 patches from it raw.
     %  modelInputPage is that one pipeline, shared by CellDiscovery (which calls
@@ -821,7 +759,7 @@
 
     properties (Constant)
         TRAIN_UM_PER_PIXEL = 0.645      % pixel size the shipped models were trained at
-        NORM_PERCENTILES   = [1 99.9]   % CellDiscovery's intensity normalisation
+        NORM_PERCENTILES   = [1 99.9]   % CellDiscovery's intensity normalization
         NORM_TARGET        = 255
     end
 
@@ -829,7 +767,7 @@
 
         function facts = modelInputFacts(s)
             % Canonical model-input facts: every field of the FACTS list above,
-            % defaults filled in (no resize, no background, no LSM, not normalised).
+            % defaults filled in (no resize, no background, no LSM, not normalized).
             % s may be any struct holding some of them, e.g. a manifest detection stage.
             facts = struct('resize', 1, 'resizeMode', '', 'srcUmPerPixel', NaN, 'bgRadius', 0, ...
                 'correctLSM', false, 'lsmPages', [], 'lsmOptions', struct(), ...
@@ -869,7 +807,7 @@
             %   4 class       as CellDiscovery's scratch TIFF stores it (modelInputClass)
             % info: full (after step 1, source resolution: CellDiscovery's snap input),
             % resized (after step 2: what CellDiscovery saves as *_resized.tif), normLimits
-            % ([] when not normalised), size ([h w] of out), facts (as used).
+            % ([] when not normalized), size ([h w] of out), facts (as used).
             if nargin < 2, facts = struct(); end
             facts = CellToolkit.modelInputFacts(facts);
             if facts.bgRadius > 0
@@ -1033,9 +971,9 @@
             %   bgRadius    ASSUMED 0 (no background subtraction)
             %   correctLSM  ASSUMED false
             %   normalized  ASSUMED true with [1 99.9] -> 255, today's CellDiscovery default.
-            %               Detections made before 2026-11-23 (no normalisation in
-            %               CellDiscovery yet) saw the unnormalised page; a model trained
-            %               for use with today's pipeline must see the normalised one.
+            %               Detections made before 2026-11-23 (no normalization in
+            %               CellDiscovery yet) saw the unnormalized page; a model trained
+            %               for use with today's pipeline must see the normalized one.
             %   normLimits  recomputed from the regenerated image
             % rep (struct): assumed, inferred (string arrays), resizeSource, resizeFromCalibration,
             % resizeFromLocs, calibrationUm, notes (string array), text (one line per fact).
@@ -1304,7 +1242,7 @@
         end
 
         function tf = parseLogical(x, dflt)
-            % Robustly coerce a value to a scalar logical. Recognises numeric
+            % Robustly coerce a value to a scalar logical. Recognizes numeric
             % truthiness and common textual forms (true/yes/on/1, false/no/off/0).
             if nargin < 2, dflt = false; end
             if islogical(x)

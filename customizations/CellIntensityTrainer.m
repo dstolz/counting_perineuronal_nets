@@ -1,5 +1,5 @@
 classdef CellIntensityTrainer < handle
-% CELLINTENSITYTRAINER  Build pixel-labelled training data for CellIntensity.
+% CELLINTENSITYTRAINER  Build pixel-labeled training data for CellIntensity.
 %   The random-forest pixel classifier used by CellIntensity needs tiles
 %   paired with per-pixel cell/background masks. Hand-painting hundreds of
 %   80x80 masks is the slow part, so this tool makes it semi-automatic:
@@ -21,7 +21,7 @@ classdef CellIntensityTrainer < handle
 %       % Or from an in-memory image + points:
 %       CellIntensityTrainer.fromImage(img, [X Y]);
 %
-%       % Pool detections from several CSVs into one labelling session:
+%       % Pool detections from several CSVs into one labeling session:
 %       CellIntensityTrainer.fromCsvList(["a_locs.csv"; "b_locs.csv"], ...
 %           struct('MaxTiles', 1160, 'Shuffle', true));
 %
@@ -61,7 +61,7 @@ classdef CellIntensityTrainer < handle
         ThrSlider
         ThrLabel
         IncludeBox
-        KeepCentreBox
+        KeepCenterBox
         TitleLabel
         StatsLabel
         ProgressLabel
@@ -74,13 +74,13 @@ classdef CellIntensityTrainer < handle
     %  ===================================================================
     methods
         function app = CellIntensityTrainer(dataset)
-            % Open the labelling GUI on a prepared dataset struct (use the
+            % Open the labeling GUI on a prepared dataset struct (use the
             % static fromCsv / fromImage helpers to build one from a source).
             if nargin < 1 || isempty(dataset)
                 error('CellIntensityTrainer:noData', ...
                     'Provide a dataset; build one with fromCsv/fromImage.');
             end
-            app.Dataset = CellIntensityTrainer.normaliseDataset(dataset);
+            app.Dataset = CellIntensityTrainer.normalizeDataset(dataset);
             app.buildUI();
             app.showTile(1);
         end
@@ -88,7 +88,7 @@ classdef CellIntensityTrainer < handle
 
     methods (Static)
         function app = fromCsv(csvPath, opts)
-            % Build a dataset from one locs CSV and open the labeller.
+            % Build a dataset from one locs CSV and open the labeler.
             if nargin < 2, opts = struct(); end
             ds  = CellIntensityTrainer.buildFromCsv(csvPath, opts);
             app = CellIntensityTrainer(ds);
@@ -115,13 +115,13 @@ classdef CellIntensityTrainer < handle
     methods (Static)
 
         function ds = buildFromImage(img, xy, opts)
-            % Extract tiles centred on each [X Y] point and auto-propose masks.
-            %   opts fields: TileSize (80), ThrMult (1.0), KeepCentre (true),
+            % Extract tiles centered on each [X Y] point and auto-propose masks.
+            %   opts fields: TileSize (80), ThrMult (1.0), KeepCenter (true),
             %                MaxTiles (Inf), Shuffle (false).
             if nargin < 3, opts = struct(); end
             sz   = CellIntensityTrainer.optOr(opts, 'TileSize',  CellIntensity.TileSize);
             thr  = CellIntensityTrainer.optOr(opts, 'ThrMult',   1.0);
-            keep = CellIntensityTrainer.optOr(opts, 'KeepCentre', true);
+            keep = CellIntensityTrainer.optOr(opts, 'KeepCenter', true);
             maxT = CellIntensityTrainer.optOr(opts, 'MaxTiles',  Inf);
             shuf = CellIntensityTrainer.optOr(opts, 'Shuffle',   false);
 
@@ -158,10 +158,10 @@ classdef CellIntensityTrainer < handle
         function ds = buildFromCsvList(csvPaths, opts)
             % Pool detections from several locs CSVs into one dataset. MaxTiles
             % / Shuffle are applied across the pool (not per CSV), so you can
-            % cap a balanced labelling session at, e.g., 1160 tiles total.
+            % cap a balanced labeling session at, e.g., 1160 tiles total.
             if nargin < 2, opts = struct(); end
             csvPaths = cellstr(string(csvPaths));
-            % Build each CSV without per-file capping; cap the pool afterwards.
+            % Build each CSV without per-file capping; cap the pool afterward.
             perOpts = opts;
             perOpts.MaxTiles = Inf;
             perOpts.Shuffle  = false;
@@ -191,17 +191,17 @@ classdef CellIntensityTrainer < handle
             ds = CellIntensityTrainer.subsetDataset(ds, order);
         end
 
-        function mask = proposeMask(tile, thrMult, keepCentre)
+        function mask = proposeMask(tile, thrMult, keepCenter)
             % Auto-propose a cell mask by Otsu thresholding the tile, scaled by
             % thrMult (>1 = stricter/smaller, <1 = looser/larger), then reduced
             % to the central connected component.
             if nargin < 2 || isempty(thrMult),   thrMult = 1.0;  end
-            if nargin < 3 || isempty(keepCentre), keepCentre = true; end
+            if nargin < 3 || isempty(keepCenter), keepCenter = true; end
             t   = CellIntensityTrainer.toUnit(tile);
             lvl = min(max(graythresh(t) * thrMult, 0), 1);
             mask = t > lvl;
-            if keepCentre
-                mask = CellIntensity.keepCentreComponent(mask);
+            if keepCenter
+                mask = CellIntensity.keepCenterComponent(mask);
             end
         end
 
@@ -232,7 +232,7 @@ classdef CellIntensityTrainer < handle
         function ds = loadDataset(path)
             % Load a dataset struct previously saved with saveDataset.
             s = load(char(path), 'dataset');
-            ds = CellIntensityTrainer.normaliseDataset(s.dataset);
+            ds = CellIntensityTrainer.normalizeDataset(s.dataset);
         end
 
     end
@@ -298,12 +298,12 @@ classdef CellIntensityTrainer < handle
                 'Tooltip', 'Empty the mask (exclude all pixels)');
             clearBtn.Layout.Row = 6; clearBtn.Layout.Column = 2;
 
-            app.KeepCentreBox = uicheckbox(panel, ...
+            app.KeepCenterBox = uicheckbox(panel, ...
                 'Text', 'Keep central component', ...
-                'Value', app.Dataset.source.keepCentre, ...
+                'Value', app.Dataset.source.keepCenter, ...
                 'ValueChangedFcn', @(~, ~) app.onReset(), ...
-                'Tooltip', 'Auto-proposals keep only the cell nearest the centre');
-            app.KeepCentreBox.Layout.Row = 7; app.KeepCentreBox.Layout.Column = [1 2];
+                'Tooltip', 'Auto-proposals keep only the cell nearest the center');
+            app.KeepCenterBox.Layout.Row = 7; app.KeepCenterBox.Layout.Column = [1 2];
 
             app.IncludeBox = uicheckbox(panel, 'Text', 'Include this tile (I)', ...
                 'Value', true, ...
@@ -372,7 +372,7 @@ classdef CellIntensityTrainer < handle
             app.Dataset.thrMult(i) = val;
             app.ThrLabel.Text = sprintf('Threshold x%.2f', val);
             app.Dataset.masks{i} = CellIntensityTrainer.proposeMask( ...
-                app.Dataset.tiles{i}, val, app.KeepCentreBox.Value);
+                app.Dataset.tiles{i}, val, app.KeepCenterBox.Value);
             app.Dataset.edited(i) = false;
             app.render();
         end
@@ -380,7 +380,7 @@ classdef CellIntensityTrainer < handle
         function onReset(app)
             i = app.Idx;
             app.Dataset.masks{i} = CellIntensityTrainer.proposeMask( ...
-                app.Dataset.tiles{i}, app.Dataset.thrMult(i), app.KeepCentreBox.Value);
+                app.Dataset.tiles{i}, app.Dataset.thrMult(i), app.KeepCenterBox.Value);
             app.Dataset.edited(i) = false;
             app.render();
         end
@@ -418,7 +418,7 @@ classdef CellIntensityTrainer < handle
                 app.Dataset.edited(i) = true;
                 app.render();
             catch err
-                if ~strcmp(err.identifier, 'images:roi:cancelled')
+                if ~strcmp(err.identifier, 'images:roi:canceled')
                     rethrow(err);
                 end
             end
@@ -518,10 +518,10 @@ classdef CellIntensityTrainer < handle
             ds.thrMult  = repmat(thr, 1, n);
             ds.edited   = false(1, n);
             ds.tileSize = sz;
-            ds.source   = struct('keepCentre', logical(keep), 'csv', {{}});
+            ds.source   = struct('keepCenter', logical(keep), 'csv', {{}});
         end
 
-        function ds = normaliseDataset(ds)
+        function ds = normalizeDataset(ds)
             % Fill in any missing fields so older/hand-built datasets load.
             n = numel(ds.tiles);
             if ~isfield(ds, 'masks'),    ds.masks    = repmat({false(CellIntensity.TileSize)}, 1, n); end
@@ -530,7 +530,15 @@ classdef CellIntensityTrainer < handle
             if ~isfield(ds, 'edited'),   ds.edited   = false(1, n); end
             if ~isfield(ds, 'tileSize'), ds.tileSize = CellIntensity.TileSize; end
             if ~isfield(ds, 'source'),   ds.source   = struct(); end
-            if ~isfield(ds.source, 'keepCentre'), ds.source.keepCentre = true; end
+            if ~isfield(ds.source, 'keepCenter')
+                % datasets saved before 2026-11-25 spell the field "keepCentre"
+                if isfield(ds.source, 'keepCentre')
+                    ds.source.keepCenter = logical(ds.source.keepCentre);
+                    ds.source = rmfield(ds.source, 'keepCentre');
+                else
+                    ds.source.keepCenter = true;
+                end
+            end
             ds.included = logical(ds.included);
             ds.edited   = logical(ds.edited);
         end

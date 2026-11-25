@@ -26,7 +26,7 @@ classdef tCropCache < matlab.unittest.TestCase
 
     methods (Test)
         function testOrientationXIsColumnYIsRow(tc)
-            % a blob at (X, Y) is centred in the tile of a cell at (X, Y); one at +X is to the right,
+            % a blob at (X, Y) is centered in the tile of a cell at (X, Y); one at +X is to the right,
             % one at +Y is below
             blob = [180.3 70.6];
             page = tCropCache.blobPage(200, 300, blob, 2, 1000);
@@ -39,9 +39,9 @@ classdef tCropCache < matlab.unittest.TestCase
             k = 80 / 40;    % tile px per page px
             tc.verifyEqual(tCropCache.centroid(c.Crops(:, :, c.rowsOf(5))), [mid mid], 'AbsTol', 0.5);
             tc.verifyEqual(tCropCache.centroid(c.Crops(:, :, c.rowsOf(6))), [mid + 8 * k, mid], 'AbsTol', 0.5, ...
-                'a blob 8 px right of the cell (+X) must appear right of the tile centre');
+                'a blob 8 px right of the cell (+X) must appear right of the tile center');
             tc.verifyEqual(tCropCache.centroid(c.Crops(:, :, c.rowsOf(7))), [mid, mid + 6 * k], 'AbsTol', 0.5, ...
-                'a blob 6 px below the cell (+Y) must appear below the tile centre');
+                'a blob 6 px below the cell (+Y) must appear below the tile center');
             % the tile's brightest pixel is at the blob
             [~, i] = max(double(c.Crops(:, :, c.rowsOf(5))), [], 'all', 'linear');
             [r, cc] = ind2sub([80 80], i);
@@ -74,7 +74,7 @@ classdef tCropCache < matlab.unittest.TestCase
             tc.verifyTrue(all(t(:, 1:35) == 0, 'all'), 'columns outside the page must be padded with 0');
             tc.verifyTrue(all(t(1:33, :) == 0, 'all'), 'rows outside the page must be padded with 0');
             tc.verifyTrue(all(t(34:end, 36:end) > 0, 'all'), 'the part on the page must be drawn');
-            tc.verifyEqual(tCropCache.centroid(t), [40.5 40.5], 'AbsTol', 0.6, 'the border cell stays centred');
+            tc.verifyEqual(tCropCache.centroid(t), [40.5 40.5], 'AbsTol', 0.6, 'the border cell stays centered');
             % the far corner: columns/rows past the page are 0
             t3 = c.Crops(:, :, 3);
             tc.verifyTrue(all(t3(:, end) == 0) && all(t3(end, :) == 0));
@@ -178,7 +178,7 @@ classdef tCropCache < matlab.unittest.TestCase
             page = tCropCache.blobPage(100, 100, [50 50], 3, 100, 20);
             c = curation.CropCache.build(page, [], (1:6)', repmat([50 50], 6, 1) + (0:5)' * [1 0], 1, TilePx = 24, WindowUm = 30);
             base = struct('BorderPx', 3, 'CornerPx', 5);
-            [m0, L] = c.compose(1:6, 2, 3, base);   % no colours: plain tiles
+            [m0, L] = c.compose(1:6, 2, 3, base);   % no colors: plain tiles
             HW = L.Size(1) * L.Size(2);
 
             s = base;
@@ -255,7 +255,7 @@ classdef tCropCache < matlab.unittest.TestCase
             tc.verifyEqual(b.Crops, a.Crops, 'x1000 page (double): identical target tiles');
             tc.verifyEqual(b.CropsC, a.CropsC, 'x1000 page (double): identical companion tiles');
             tc.verifyEqual(b.Limits, a.Limits * 1000, 'RelTol', 1e-12, 'the limits keep the page units');
-            % single pages: scaling is itself rounded in single precision, so allow one grey level
+            % single pages: scaling is itself rounded in single precision, so allow one gray level
             as = curation.CropCache.build(single(page), [], ids, xy, 1.657);
             bs = curation.CropCache.build(single(page) * 1000, [], ids, xy, 1.657);
             d = abs(double(as.Crops) - double(bs.Crops));

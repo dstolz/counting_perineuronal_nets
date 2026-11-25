@@ -126,6 +126,16 @@ classdef tStoreInvariants < matlab.unittest.TestCase
             expected = char(t, 'yyyy-MM-dd''T''HH:mm:ss') + "Z";
             tc.verifySubstring(string(fp), "mtime=" + expected, 'a daylight-saving change must not alter the stamp');
             tc.verifyTrue(curation.Reconciler.sameStamp(fp, f));
+            % the stamp is computed without datetime (speed of a first open): it must be the text
+            % datetime gives, for any time (a leap day, a year's last second, milliseconds cut off)
+            for ms = [951782399999, 951782400000, 1709164800123, 1735689599999, 1782907200001, 86399000]
+                tc.assumeTrue(java.io.File(f).setLastModified(ms), 'the file time could not be set');
+                ms2 = double(java.io.File(f).lastModified());
+                t = datetime(ms2 / 1000, 'ConvertFrom', 'posixtime', 'TimeZone', 'UTC');
+                expected = char(t, 'yyyy-MM-dd''T''HH:mm:ss') + "Z";
+                tc.verifySubstring(string(curation.Reconciler.fingerprint(f, 2)), "mtime=" + expected, ...
+                    sprintf('file time %d ms', ms));
+            end
         end
 
         function legacyLocalFingerprintOfAnUnchangedFileDoesNotReconcile(tc)

@@ -21,7 +21,7 @@ classdef FakeRescoreJob < handle
 
     properties (Access = private)
         T0
-        Cancelled logical = false
+        Canceled logical = false
     end
 
     methods (Static)
@@ -56,8 +56,8 @@ classdef FakeRescoreJob < handle
 
     methods
         function s = get.State(job)
-            if job.Cancelled
-                s = "cancelled";
+            if job.Canceled
+                s = "canceled";
             elseif toc(job.T0) < job.DelaySec
                 s = "running";
             elseif job.Fail
@@ -68,7 +68,7 @@ classdef FakeRescoreJob < handle
         end
 
         function cancel(job)
-            job.Cancelled = true;
+            job.Canceled = true;
         end
     end
 

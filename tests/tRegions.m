@@ -191,7 +191,7 @@ classdef tRegions < matlab.unittest.TestCase
             tc.verifyEqual(r.kind, "reference");
             tc.verifyEqual(r.scope, "image");
             tc.verifyEqual(r.xy, [10.5 20.5; 40.5 20.5; 40.5 60.5; 10.5 60.5]);
-            % Convention: covers MATLAB pixel centres 11..40 x 21..60 = 30 x 40 pixels
+            % Convention: covers MATLAB pixel centers 11..40 x 21..60 = 30 x 40 pixels
             [xx, yy] = meshgrid(1:100, 1:100);
             in = inpolygon(xx, yy, r.xy(:, 1), r.xy(:, 2));
             tc.verifyEqual(nnz(in), 30 * 40);

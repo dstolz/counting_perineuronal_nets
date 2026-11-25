@@ -3,6 +3,8 @@ classdef LegacyImport
 %   Pure functions over a store's column struct (see curation.Store, "Column schema"); they never
 %   read or write the legacy files themselves except reading the QC CSV in readQc, and never
 %   modify or delete them. curation.Store runs this once per source (Meta.LegacyImported).
+%   The two apps (CellNeighborResolution, CellQualityControl) are removed from the repository;
+%   their last version is in commit 1874dc1. Their files stay on disk, so this import stays.
 %
 %   [C, rep] = curation.LegacyImport.apply(C, L, Q, opts)
 %       C     store columns (rows created from the locs table L, or an older store)
@@ -80,7 +82,7 @@ classdef LegacyImport
 %     finite, else X/Y), exact against the raw locs X/Y, then within TolPx against the current
 %     effective X/Y, then within TolPx against DET_X/Y. Only when height(Q) == height(L) and at
 %     least 95% of QC rows matched their own row index (QC row i -> locs row i) are the
-%     remaining unmatched QC rows assigned by row index; those carry a QC re-centring and their
+%     remaining unmatched QC rows assigned by row index; those carry a QC re-centering and their
 %     QC X/Y is imported as a move (X/Y, PosSource=human) when it differs by more than 0.01 px.
 %     Imported rows: QCReviewed true (non-empty QCLabel when there is no QCReviewed column).
 %       Good/Bad/Uncertain (any case) -> Label, LabelSource=legacy-qc, Reviewed=true, Reviewer=
@@ -273,9 +275,9 @@ classdef LegacyImport
             % merged-result rows from labels: row r carrying a Merged label a-b with r > a, b
             isResultTok = isMergedSt(pidx) & tokRow ~= tokA & tokRow ~= tokB ...
                 & tokRow > max(tokA, tokB);
-            resultRowsLabelled = unique(tokRow(isResultTok));
-            if ~isempty(resultRowsLabelled)
-                nOrig = min(nOrig, min(resultRowsLabelled) - 1);
+            resultRowsLabeled = unique(tokRow(isResultTok));
+            if ~isempty(resultRowsLabeled)
+                nOrig = min(nOrig, min(resultRowsLabeled) - 1);
             end
             appended = (1:nL)' > nOrig;
             rep.nOrig = nOrig;

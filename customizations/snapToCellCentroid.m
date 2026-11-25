@@ -5,10 +5,10 @@ function [XYnew, info] = snapToCellCentroid(I, XY, opts)
 %   locations XY by snapping each one to the intensity-weighted centroid of
 %   the cell mass it sits on or near, using the source image I. This is a
 %   localization-refinement step: the FasterRCNN detector returns a point per
-%   cell, but that point is the centre of a predicted box and can land off the
-%   true centre of the stained structure. Snapping recovers a consistent,
-%   reproducible centre (the centre of intensity mass) for downstream cropping,
-%   rescoring, neighbour resolution, and morphology.
+%   cell, but that point is the center of a predicted box and can land off the
+%   true center of the stained structure. Snapping recovers a consistent,
+%   reproducible center (the center of intensity mass) for downstream cropping,
+%   rescoring, neighbor resolution, and morphology.
 %
 %   [XYnew, info] = snapToCellCentroid(I, XY, opts) also returns per-point
 %   diagnostics and the resolved parameter set (see "Outputs" below).
@@ -17,7 +17,7 @@ function [XYnew, info] = snapToCellCentroid(I, XY, opts)
 %   refined inside its own window using locally-estimated background and
 %   threshold, and a detection is only moved when a plausible blob is found
 %   within a bounded search radius. Points with no nearby mass are left exactly
-%   where they were (never silently dragged onto a neighbouring cell).
+%   where they were (never silently dragged onto a neighboring cell).
 %
 %   Two cell shapes are handled out of the box via CellType presets:
 %     * "round" — parvalbumin (PV) somata: a single compact, roughly circular
@@ -27,12 +27,12 @@ function [XYnew, info] = snapToCellCentroid(I, XY, opts)
 %                 or broken ring around a DARK central hole (the unstained
 %                 soma), not a solid disk. A bright-mass centroid would land on
 %                 the ring wall — biased toward whichever arc is brightest —
-%                 rather than the hole at the centre, so this preset defaults to
+%                 rather than the hole at the center, so this preset defaults to
 %                 the "radial-symmetry" method, which votes each ring-wall
-%                 pixel's gradient back toward the centre and recovers the hole
+%                 pixel's gradient back toward the center and recovers the hole
 %                 even when the ring is incomplete. The preset also uses a
 %                 larger window matched to the net's diameter. Orientation is
-%                 irrelevant to a centre, so no orientation needs to be known.
+%                 irrelevant to a center, so no orientation needs to be known.
 %     * "auto"  — balanced settings that work acceptably for either (default).
 %
 %   Inputs
@@ -107,13 +107,13 @@ function [XYnew, info] = snapToCellCentroid(I, XY, opts)
 %                             "weighted-centroid" segments the local mass and
 %                               takes its intensity-weighted centroid (best for
 %                               solid, round somata such as PV).
-%                             "radial-symmetry" finds the centre of a ring/halo
+%                             "radial-symmetry" finds the center of a ring/halo
 %                               by voting each bright ring-wall pixel's gradient
 %                               inward and outward by the expected ring radius;
 %                               votes from the whole annulus — even a single arc
 %                               of an OPEN or reticular net — pile up at the dark
-%                               centre. This is the right choice for PNNs, where
-%                               the centre is a hole rather than a bright peak.
+%                               center. This is the right choice for PNNs, where
+%                               the center is a hole rather than a bright peak.
 %                             "mean-shift" iteratively climbs to the local
 %                               intensity mode with a Gaussian kernel (threshold
 %                               free). NB it climbs to the BRIGHTEST point, so it
@@ -129,11 +129,11 @@ function [XYnew, info] = snapToCellCentroid(I, XY, opts)
 %       KernelRadius        Gaussian kernel sigma (px) for "mean-shift".
 %                           Default NaN => auto.
 %       RingRadius          Expected ring/halo radius (px) for "radial-symmetry"
-%                           — the distance from the dark centre to the bright
+%                           — the distance from the dark center to the bright
 %                           wall. Default NaN => auto (~ half the cell diameter).
 %       RingRadiusTolerance Fractional half-width of the radius band voted over
 %                           for "radial-symmetry", so a range of net sizes and
-%                           ring thicknesses all reinforce the same centre.
+%                           ring thicknesses all reinforce the same center.
 %                           Default NaN => auto.
 %       GradientPercentile  For "radial-symmetry": percentile of gradient
 %                           magnitude above which a pixel is treated as a ring
@@ -142,9 +142,9 @@ function [XYnew, info] = snapToCellCentroid(I, XY, opts)
 %       DarkCenter          For "radial-symmetry": when true (default) bias the
 %                           vote map toward locations that are darker than their
 %                           surroundings, so the snap lands in the net's hole
-%                           rather than on the wall. Set false for bright-centred
+%                           rather than on the wall. Set false for bright-centered
 %                           targets.
-%       RefineIterations    Re-centre the window on the new centroid and repeat,
+%       RefineIterations    Re-center the window on the new centroid and repeat,
 %                           up to this many passes (early-out on convergence).
 %                           Default 2.
 %       ConvergenceTol      Stop iterating once a pass moves less than this many
@@ -182,7 +182,7 @@ function [XYnew, info] = snapToCellCentroid(I, XY, opts)
 %       T2.X = T2.SNAP_X;  T2.Y = T2.SNAP_Y;   % apply the snap
 %
 %       % PNNs (open, ring-like nets), with a QC overlay. CellType="oval"
-%       % already selects the radial-symmetry ring-centre finder by default:
+%       % already selects the radial-symmetry ring-center finder by default:
 %       [xy, info] = snapToCellCentroid('img.tif', [T.X T.Y], ...
 %                        CellType="oval", Plot=true);
 %
@@ -190,7 +190,7 @@ function [XYnew, info] = snapToCellCentroid(I, XY, opts)
 %   imfill, bwareaopen, bwlabel, regionprops, graythresh, strel,
 %   imgradientxy).
 %
-%   See also findCellNeighbors, correctBidirectionalLSMArtifact.
+%   See also correctBidirectionalLSMArtifact.
 
     arguments
         I
@@ -233,7 +233,7 @@ function [XYnew, info] = snapToCellCentroid(I, XY, opts)
         opts.Plot (1,1) logical = false
     end
 
-    % --- Normalise the detection input (numeric matrix or table) -----------
+    % --- Normalize the detection input (numeric matrix or table) -----------
     isTableIn = istable(XY);
     if isTableIn
         Tin = XY;
@@ -392,7 +392,7 @@ function R = resolveParams(opts)
     if isnan(opts.MinBlobArea),      R.MinBlobArea      = max(1, round(k.minA * pi * rad^2)); end
     if isnan(opts.MaxBlobArea),      R.MaxBlobArea      = round(k.maxA * pi * rad^2);  end
 
-    % radial-symmetry (ring-centre) parameters
+    % radial-symmetry (ring-center) parameters
     if isnan(opts.RingRadius),          R.RingRadius          = max(2, k.ring * rad); end
     if isnan(opts.RingRadiusTolerance), R.RingRadiusTolerance = k.ringtol;            end
     if isnan(opts.GradientPercentile),  R.GradientPercentile  = k.gradpct;            end
@@ -400,7 +400,7 @@ function R = resolveParams(opts)
     R.GradientPercentile  = min(max(R.GradientPercentile, 1), 99);
 
     % Resolve the "auto" method from the cell-shape preset: ring-like PNNs use
-    % the radial-symmetry centre finder (the centre is a dark hole, not a bright
+    % the radial-symmetry center finder (the center is a dark hole, not a bright
     % peak); compact somata use the bright-mass centroid.
     if R.Method == "auto"
         switch opts.CellType
@@ -411,7 +411,7 @@ function R = resolveParams(opts)
         end
     end
 
-    % Integerise the pixel-indexing / structuring-element parameters.
+    % Integerize the pixel-indexing / structuring-element parameters.
     R.WindowRadius = max(3, round(R.WindowRadius));
     R.MinBlobArea  = max(1, round(R.MinBlobArea));
     R.MaxBlobArea  = max(R.MinBlobArea + 1, round(R.MaxBlobArea));
@@ -557,13 +557,13 @@ function [nx, ny, snapped, area, ecc, ori, reason] = snapWeightedCentroid(In, x0
         move = hypot(nx - cx, ny - cy);
         cx = nx; cy = ny;
         if move <= R.ConvergenceTol
-            break;   % converged: re-centring no longer moves the estimate
+            break;   % converged: re-centering no longer moves the estimate
         end
     end
 end
 
 function t = computeThreshold(sub, R)
-    % Per-window foreground threshold on the [0,1] normalised window.
+    % Per-window foreground threshold on the [0,1] normalized window.
     switch R.ThresholdMethod
         case "otsu"
             t = graythresh(sub) * R.ThresholdScale;
@@ -619,21 +619,21 @@ function [nx, ny, snapped, reason] = snapMeanShift(In, x0, y0, R)
 end
 
 % =====================================================================
-%  Per-point snapping: radial-symmetry ring-centre finder
+%  Per-point snapping: radial-symmetry ring-center finder
 % =====================================================================
 function [nx, ny, snapped, reason] = snapRadialSymmetry(In, x0, y0, R)
-    % Snap to the centre of a ring / halo (a bright wall around a DARK hole),
+    % Snap to the center of a ring / halo (a bright wall around a DARK hole),
     % robust to OPEN, partial, or reticular nets where the bright pixels form an
     % arc or mesh rather than a closed circle — the typical appearance of a
     % perineuronal net.
     %
-    % Idea (a localised Fast Radial Symmetry Transform, Loy & Zelinsky 2003):
+    % Idea (a localized Fast Radial Symmetry Transform, Loy & Zelinsky 2003):
     % every bright ring-wall pixel has an intensity gradient that points across
     % the wall, i.e. along the local radius. Stepping from each wall pixel both
-    % inward and outward by the expected ring radius lands on the ring centre, so
-    % each wall pixel "votes" for the centre. Votes from anywhere on the annulus
-    % — even a single surviving arc — accumulate at the geometric centre, while
-    % off-centre locations collect only incoherent votes. Because the net centre
+    % inward and outward by the expected ring radius lands on the ring center, so
+    % each wall pixel "votes" for the center. Votes from anywhere on the annulus
+    % — even a single surviving arc — accumulate at the geometric center, while
+    % off-center locations collect only incoherent votes. Because the net center
     % is a dark hole (not a bright peak), the vote map is additionally biased
     % toward dark locations, which prevents the snap from settling on the bright
     % wall the way a brightest-point method (mean-shift) would.
@@ -643,7 +643,7 @@ function [nx, ny, snapped, reason] = snapRadialSymmetry(In, x0, y0, R)
     snapped = false; reason = "no ring";
 
     % Vote over a band of radii so a range of net sizes / wall thicknesses all
-    % reinforce the same centre. Cap the count to keep the central peak tight.
+    % reinforce the same center. Cap the count to keep the central peak tight.
     ringR = max(2, R.RingRadius);
     tol   = min(max(R.RingRadiusTolerance, 0), 0.95);
     rLo   = max(1, ringR * (1 - tol));
@@ -683,7 +683,7 @@ function [nx, ny, snapped, reason] = snapRadialSymmetry(In, x0, y0, R)
         uy = Gy(edge) ./ Gmag(edge);     % unit radial direction (y = row)
 
         % Accumulate symmetric votes at +/- each radius along the gradient. The
-        % centre is hit by inner-wall pixels (one sign) and outer-wall pixels
+        % center is hit by inner-wall pixels (one sign) and outer-wall pixels
         % (the other), so both signs reinforce it.
         A = zeros(sh, sw);
         for r = radii
@@ -700,12 +700,12 @@ function [nx, ny, snapped, reason] = snapRadialSymmetry(In, x0, y0, R)
             reason = "no symmetry votes"; break;
         end
 
-        % Coalesce votes from neighbouring radii / edges into a smooth peak.
+        % Coalesce votes from neighboring radii / edges into a smooth peak.
         A = imgaussfilt(A, max(1, 0.3 * ringR));
 
-        % Favour dark centres: a net centre is a hole inside the bright wall, so
+        % Favor dark centers: a net center is a hole inside the bright wall, so
         % scale the votes by how dark each candidate is (bounded to [0.5,1] so a
-        % faint centre is still admissible).
+        % faint center is still admissible).
         if R.DarkCenter
             S = A .* (1 - 0.5 * min(max(sub, 0), 1));
         else
@@ -732,7 +732,7 @@ function [nx, ny, snapped, reason] = snapRadialSymmetry(In, x0, y0, R)
             reason = "weak radial symmetry"; break;
         end
 
-        % Sub-pixel centre: vote-weighted centroid in a small neighbourhood of
+        % Sub-pixel center: vote-weighted centroid in a small neighborhood of
         % the peak (uses the raw votes A, not the darkness-biased S).
         ringHalf = 2;
         xa = max(1, px - ringHalf):min(sw, px + ringHalf);
@@ -754,7 +754,7 @@ function [nx, ny, snapped, reason] = snapRadialSymmetry(In, x0, y0, R)
         move = hypot(nx - cx, ny - cy);
         cx = nx; cy = ny;
         if move <= R.ConvergenceTol
-            break;   % converged: re-centring no longer moves the estimate
+            break;   % converged: re-centering no longer moves the estimate
         end
     end
 end

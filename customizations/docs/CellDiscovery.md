@@ -64,6 +64,18 @@ CellDiscovery
   full path). The default `(?i)\.tif$` matches any `.tif` file,
   case-insensitively. Edit it to narrow the search (for example, to match only
   files whose name contains `C1`).
+- **Subject tags** and **Check subjects**: narrow the list to the files whose
+  subject (the `SUBJ-ID` in the file name) carries given tags in the lab
+  database, so a batch detects one cohort: type `cohort:a -qc:fail` and press
+  Enter. Tags separated by spaces must all hold, a leading `-` means "does not
+  have", `cohort:*` means any tag of that namespace, a bare word is a bare tag.
+  The filter goes by the tags this computer last read: **Check subjects** asks
+  the lab database about the subjects of the found files (a few seconds;
+  nothing else here talks to the server). A file whose subject was never
+  checked, whose subject the database does not have, or whose name names no
+  subject is not listed while a filter is set; the count label says how many
+  files the filter left out, and its tooltip why. The filter is not kept
+  between sessions: the window opens with every file listed.
 - **Search** — Re-runs the search. The green label shows how many files matched
   and how many of them are already done, for example
   `132 files found · 97 done (3 *_resized.tif hidden)`.
@@ -73,7 +85,7 @@ CellDiscovery
   the page table and when a batch ends. By default **all** files are
   processed. To process only some, **Ctrl+click** to select a subset.
 - **Resized TIFs are left out.** The `*_resized.tif` files are this tool's own
-  output (see [Output files](#output-files)), not images to analyse, so the
+  output (see [Output files](#output-files)), not images to analyze, so the
   search never lists them. The label says how many it left out.
 
 ### Python Environment
@@ -117,7 +129,7 @@ under these options reminds you where the results go:
   CSV.
 - **Save final resized image as TIF…** — Saves the pre-processed image the
   model saw (LSM correction, background subtraction, resize) as
-  `*_resized.tif`, **before** intensity normalisation so its intensities stay
+  `*_resized.tif`, **before** intensity normalization so its intensities stay
   comparable with the source. Useful with the QC tool's "Use resized CSVs"
   mode.
 
@@ -209,11 +221,11 @@ Columns:
 | **Suffix** | Letters added to the output file name for this page. The result is named `<name>_<suffix><page>_locs.csv`, so with the default `page`, page 1 gives `<name>_page1_locs.csv`. Use letters only and **do not put the page number in the suffix** (it is added for you); other tools read the page number from that name, and a suffix that is empty or has digits or other characters gets a `[WARN]` line when you start. |
 | **Detection Model** | The model used to find cells. Choose `(skip)` to not process this page. |
 | **Rescore Model** | Optional Stage-2 model that adds a quality score. `(none)` = no rescoring. |
-| **Correct LSM** | Tick to apply bidirectional-scanner artifact correction first. |
+| **Correct LSM** | Check to apply bidirectional-scanner artifact correction first. |
 | **Bg radius** | Background-subtraction disk radius in pixels (`0` = off). |
 | **Resize x (0=auto)** | Resize factor applied before detection. `0` = computed from the TIFF's pixel-size calibration so the model sees 0.645 µm/pixel; `1` = no resize. |
-| **Snap** | Tick to refine detected locations with `snapToCellCentroid` after detection (post-processing). |
-| **Normalize** | Tick (default) to put the image on the intensity scale the models were trained on before detection. |
+| **Snap** | Check to refine detected locations with `snapToCellCentroid` after detection (post-processing). |
+| **Normalize** | Check (default) to put the image on the intensity scale the models were trained on before detection. |
 
 - **Single-page images** only ever use the row for **page 1**.
 - Use **Add page** / **Remove page** to manage rows for multi-page TIFFs.
@@ -235,7 +247,7 @@ Pre-processing is applied to the image **before** detection, configured per page
 in the mapping table:
 
 - **Correct LSM** — Fixes the comb/stripe artifact that bidirectional laser
-  scanning microscopes can produce. When at least one page has this ticked, the
+  scanning microscopes can produce. When at least one page has this checked, the
   **LSM options…** button becomes available so you can fine-tune the correction
   parameters (with sensible defaults and a *Reset defaults* button).
 - **Bg radius** — Morphological background subtraction; removes slowly-varying
@@ -254,21 +266,21 @@ in the mapping table:
 - **Normalize** — The models were trained on 8-bit images, and the number of
   detections follows the image brightness when an image is on another scale
   (16-bit, floating-point projections, a dim or bright acquisition). With this
-  ticked, the page's 1st–99.9th intensity percentiles (after background
+  checked, the page's 1st–99.9th intensity percentiles (after background
   subtraction and resize) are stretched to the 8-bit range before detection
   and rescoring; a `[NORM]` line reports the two intensities used. Only what
   the models see is changed: the source image, the saved `*_resized.tif` and
-  the snap input keep their original intensities. Counts from normalised and
-  un-normalised runs are **not comparable**, so use one setting for all the
-  images of a study. Whether a page was normalised is recorded in the
+  the snap input keep their original intensities. Counts from normalized and
+  un-normalized runs are **not comparable**, so use one setting for all the
+  images of a study. Whether a page was normalized is recorded in the
   dataset manifest.
 
 Large images are processed as overlapping 640×640 tiles (120-pixel overlap);
-each tile contributes only the cells centred away from its edges, so a cell cut
-by a tile edge is reported once, at its true centre.
+each tile contributes only the cells centered away from its edges, so a cell cut
+by a tile edge is reported once, at its true center.
 
-**Show resized image in results** — When ticked, the preview shows the
-processed image the model actually saw; when unticked, it shows the original raw
+**Show resized image in results** — When checked, the preview shows the
+processed image the model actually saw; when unchecked, it shows the original raw
 page with detections overlaid.
 
 ---
@@ -278,14 +290,14 @@ page with detections overlaid.
 Post-processing runs **after** detection, on the original-image coordinates,
 configured per page via the **Snap** column:
 
-- **Snap** — Tick to run
+- **Snap** — Check to run
   [`snapToCellCentroid`](../snapToCellCentroid.m) on the page's detections.
   This *localization-refinement* step pulls each detected point to the refined
-  cell centre, recovering a consistent, reproducible centre for downstream
-  cropping, rescoring, and neighbour resolution. How the centre is found
+  cell center, recovering a consistent, reproducible center for downstream
+  cropping, rescoring, and neighbor resolution. How the center is found
   depends on the **Method**:
   - `radial-symmetry` — the default for ring-like PNNs (`oval` preset). Votes
-    each bright ring-wall pixel toward the **centre of the ring**, so the snap
+    each bright ring-wall pixel toward the **center of the ring**, so the snap
     lands in the dark hole even when the net is an open/broken arc. Use this for
     nets, where a brightness-based method would settle on the wall instead.
   - `weighted-centroid` — intensity-weighted centroid of the segmented local
@@ -294,14 +306,14 @@ configured per page via the **Snap** column:
     wall, not the hole — not recommended for rings).
   - `auto` (default) — picks `radial-symmetry` for `oval`, `weighted-centroid`
     otherwise.
-- **Snap options…** — Enabled once at least one page has **Snap** ticked. Opens
+- **Snap options…** — Enabled once at least one page has **Snap** checked. Opens
   a dialog with a **page selector** so every page can carry its **own** snap
   parameters — e.g. a PNN page using the `oval` preset while a PV page uses
   `round`. Tune the cell-shape preset, method, pixel size (`auto` = the source
   image's own pixel size, from its calibration), cell diameter, the
-  ring radius / dark-centre options (for `radial-symmetry`), threshold (for
+  ring radius / dark-center options (for `radial-symmetry`), threshold (for
   `weighted-centroid`), search radius, and more (with a *Reset page* button).
-- **Apply to X/Y** (in the Snap options dialog) — When ticked, the snapped
+- **Apply to X/Y** (in the Snap options dialog) — When checked, the snapped
   coordinates overwrite the detector's `X`/`Y`. Either way the snap is recorded
   non-destructively in extra columns (see below), so the original detection is
   preserved when this is left off.
@@ -321,11 +333,9 @@ image**:
 | `<name>_<suffix><page>_locs.csv` | Always | One row per detected cell: `X`, `Y`, `class`, `score`, and more. When **Snap** is on, also `SNAP_X`, `SNAP_Y`, `SNAP_Shift`, `SNAP_Snapped`. With the default suffix: `<name>_page1_locs.csv`. |
 | `<name>_<suffix><page>_locs_resized.csv` | When resizing is used | Same detections, but in resized-image coordinates. |
 | `<name>_<suffix><page>_locs.png` | When *Save annotated PNG* is on | Preview image with detections overlaid. |
-| `<name>_resized.tif` | When *Save resized TIF* is on | **One file per image**, holding all its pages: the pre-processed image the model received, before intensity normalisation. It is not an input for this tool (the search leaves it out). In Ignore mode an existing one is kept. |
+| `<name>_resized.tif` | When *Save resized TIF* is on | **One file per image**, holding all its pages: the pre-processed image the model received, before intensity normalization. It is not an input for this tool (the search leaves it out). In Ignore mode an existing one is kept. |
 
-These `*_locs.csv` files are the input to **[Cell Curator](CellCurator.md)** (and
-to the Legacy **[Cell Neighbor Resolver](CellNeighborResolution.md)** and
-**[Cell Localization QC](CellQualityControl.md)** tools).
+These `*_locs.csv` files are the input to **[Cell Curator](CellCurator.md)**.
 
 ---
 
