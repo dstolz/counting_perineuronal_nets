@@ -200,6 +200,27 @@ classdef tCuratorGestures < matlab.uitest.TestCase
             tc.verifyTrue(isvalid(app.MapPanel));
         end
 
+        function evenTilesButtonAndKey(tc)
+            % Even tiles [t]: the state button and the key scale each tile to the source's typical level
+            app = tc.openApp();
+            b = tCuratorGestures.byTag(app, 'btn:evenTiles');
+            tc.verifyFalse(app.EvenTiles);
+            tc.verifyEmpty(app.Gallery.Style.TileLevel, 'off: one contrast for the page');
+            m0 = app.Gallery.Mosaic;
+            tc.press(b);
+            tc.verifyTrue(app.EvenTiles, 'pressing the button turns it on');
+            lv = app.Gallery.Style.TileLevel;
+            tc.verifySize(lv, [1 2]);
+            tc.verifyTrue(all(lv >= 1 & lv <= 255));
+            tc.verifyNotEqual(app.Gallery.Mosaic, m0, 'the tiles are drawn again, leveled');
+            tc.verifySubstring(app.StatusText, 'Even tiles on');
+            tc.verifyTrue(app.handleKey('t'));
+            tc.verifyFalse(app.EvenTiles, 't turns it off');
+            tc.verifyFalse(logical(b.Value), 'the button follows the key');
+            tc.verifyEmpty(app.Gallery.Style.TileLevel);
+            tc.verifyEqual(app.Gallery.Mosaic, m0, 'off again: the page contrast as before');
+        end
+
         function keyCallbacksReachTheSeam(tc)
             % matlab.uitest has no key gesture for a figure: call the figure's key callbacks with the
             % event fields a real key press carries.

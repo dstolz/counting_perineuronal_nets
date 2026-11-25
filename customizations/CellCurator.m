@@ -76,8 +76,9 @@ classdef CellCurator < handle
 %   Map (Tab or v, or the Map view button): the whole section in the center, one point per cell
 %   colored by its state (excluded cells dimmed; merged and stale rows not drawn), with the
 %   exclusion regions and the reference ROI strip (<image stem>_roi.roi beside the image, drawn
-%   only). Tools: Select [s], Add [a], Move [m], Lasso [l] (Esc: back to Select); Snap to center
-%   refines added and moved positions with snapToCellCentroid. g/b/u/f/x act on the selected
+%   only). Tools: Select [s], Add [a], Move [m], Lasso [l] (Esc: back to Select); Shift held as a
+%   moved cell is dropped (or Shift+click with Add) snaps it to its center with snapToCellCentroid
+%   (Shift is pressed after the press: a Shift+press selects). g/b/u/f/x act on the selected
 %   points; Enter or a double-click shows the selected cell in the gallery; [.] in the gallery
 %   shows the pointed-at cell on the map. A lasso offers Good/Bad/Uncertain, Exclude region [e]
 %   (store.addRegion of an image-scope exclusion region; the store keeps Excluded equal to
@@ -99,7 +100,10 @@ classdef CellCurator < handle
 %   Display: the crops keep each page's fixed limits (one contrast per page, never per tile); the
 %   default brightness and gamma of a source come from its cells' crops (curation.DisplayDefaults:
 %   99.5th percentile of the crop pixels, gamma 0.8), and [ ] ; ' (and the sliders) act relative to
-%   them; [0] resets. The map and the locator use the same mapping.
+%   them; [0] resets. The map and the locator use the same mapping. Even tiles [t] (a state button,
+%   kept in the settings) scales each tile so its cell's center shows at the source's typical
+%   cell level (curation.CropCache TileLevel: factor 1/3-3, before brightness and gamma); tiles and
+%   inspector only, the map keeps the page contrast.
 %
 %   Rescore: cells a person added or moved have no Stage-2 score for their position. "Score
 %   edited cells" (left) and the finish checklist's "Cells waiting for a score" row run
@@ -134,11 +138,13 @@ classdef CellCurator < handle
 %     app.hoverTile(k)                           the pointer is over tile k (0 = off the tiles)
 %     app.confirmPage(), app.showQueue(name), app.nextSource(), app.previousPage(), app.nextPage(),
 %     app.undo(), app.redo(), app.waitForLayout(timeout)
-%     app.showCenter("map" | "gallery"), app.setMapTool(name), app.setSnap(tf)
+%     app.showCenter("map" | "gallery"), app.setMapTool(name)
 %     app.mapClick(xy, selectionType)            a press and release on the map at image point XY
 %                                                (the view is centered on XY first when XY is not
-%                                                in view); goes through curation.MapView's events
-%     app.mapDrag(fromXY, toXY)                  a drag on the map (Move tool: moves the point)
+%                                                in view); goes through curation.MapView's events;
+%                                                'extend' is a Shift+click (Add tool: snapped)
+%     app.mapDrag(fromXY, toXY, modifiers)       a drag on the map (Move tool: moves the point;
+%                                                MODIFIERS held at the release, "shift": snapped)
 %     app.mapLasso(polygon)                      a lasso drawn along POLYGON (M x 2, image px)
 %     app.mapHover(xy)                           the pointer over image point XY of the map
 %     app.lassoAction(name)                      good | bad | uncertain | exclude | merge | cancel
@@ -158,7 +164,7 @@ classdef CellCurator < handle
 %   PageId, Number, Total, Untouched), QueueName, MapPanel, StatusText, ContextText, SourceKey, Datasets,
 %   DatasetIndex, SourceIndex, Session, Sessions, DisplayMode, Gain, Gamma, Zoom, Cursor,
 %   HoverTile, InspectedTile, Selection, LastTimings, CenterView, Map, Locator, MapTool,
-%   MapSelection, MapTask, PairList, PairIndex, SnapOn, Lasso, SelectedRegion, SweepFieldUm,
+%   MapSelection, MapTask, PairList, PairIndex, Lasso, SelectedRegion, SweepFieldUm,
 %   Assist (the curation.AssistRunner, [] when off), AuditReport, Rescorer, Training, MarkerStyle
 %   (the map's markers), MarkerDialog (the open markers window, [] when none), Counters
 %   (LocatorUpdates: refreshes of the locator; ModelApplies: predictions applied; HoldoutApplied:
@@ -226,6 +232,7 @@ classdef CellCurator < handle
         DisplayMode string = "target"
         Gain double = 1
         Gamma double = 1
+        EvenTiles logical = false          % [t]: each tile scaled to the source's typical cell level
         Zoom double = 1
         Cursor double = 0
         HoverTile double = 0
@@ -246,7 +253,7 @@ classdef CellCurator < handle
         MapTask string = ""                % "" | "pairs" | "sweep"
         PairList = []                      % curation.Pairs.find clusters of the Close pairs queue
         PairIndex double = 0
-        SnapOn logical = false
+        ShiftDown logical = false          % Shift held (its key press/release; resynced at each press)
         Lasso = []                         % struct Polygon, Ids while the lasso bar is up
         SelectedRegion double = 0
         SweepFieldUm double = 600
@@ -377,8 +384,8 @@ classdef CellCurator < handle
             % brightness and gamma are relative to each source's default (curation.DisplayDefaults)
             obj.Gain = CellCurator.clamp(double(s.GainRel), CellCurator.GainLimits, 1);
             obj.Gamma = CellCurator.clamp(double(s.GammaRel), CellCurator.GammaLimits, 1);
-            obj.Zoom = CellCurator.clamp(double(s.Zoom), CellCurator.ZoomSteps([1 end]), 1);
-            obj.SnapOn = isscalar(s.SnapOn) && logical(s.SnapOn);
+            obj.EvenTiles = isscalar(s.EvenTiles) && logical(s.EvenTiles);
+            obj.Zoom =CellCurator.clamp(double(s.Zoom), CellCurator.ZoomSteps([1 end]), 1);
             obj.SweepFieldUm = CellCurator.clamp(double(s.SweepFieldUm), [100 5000], 600);
             obj.MarkerStyle = curation.MapMarkers.validate(s.MarkerStyles);
             obj.MarkerSaved = obj.MarkerStyle;
@@ -504,7 +511,9 @@ classdef CellCurator < handle
             %   released Enter/Space arms the next confirm (the key-repeat guard).
             if obj.Closed, return; end
             k = CellCurator.normalizeKey(key);
-            if k == "c"
+            if k == "shift"
+                obj.ShiftDown = false;
+            elseif k == "c"
                 obj.holdCompanion(false);
             elseif any(k == ["return" "space"])
                 obj.ConfirmArmed = true;
@@ -536,6 +545,12 @@ classdef CellCurator < handle
             ctrl = any(mods == "control" | mods == "command");
             shift = any(mods == "shift");
             key = CellCurator.normalizeKey(key);
+            if any(key == ["shift" "control" "alt" "command"])
+                % a modifier alone is no command and leaves a drag going: Shift held as a moved
+                % cell is dropped snaps it to its center (onMapPointDrop)
+                if key == "shift", obj.ShiftDown = true; end
+                return
+            end
             obj.LastInputTic = tic;
             obj.stopWarmUp();
             obj.endDrag();
@@ -592,6 +607,7 @@ classdef CellCurator < handle
                 case ";", obj.setGamma(obj.Gamma * 1.15);
                 case "'", obj.setGamma(obj.Gamma / 1.15);
                 case "0", obj.resetDisplay();
+                case "t", obj.setEvenTiles(~obj.EvenTiles);
                 case "+", obj.stepZoom(1);
                 case "-", obj.stepZoom(-1);
                 case "?", obj.toggleHelp();
@@ -1010,8 +1026,8 @@ classdef CellCurator < handle
 
         function buildTopBar(obj, root)
             U = @curation.UiText.label;
-            tb = uigridlayout(root, [1 12], 'Padding', [0 0 0 0], 'ColumnSpacing', 6, 'RowHeight', {'1x'});
-            tb.ColumnWidth = {'1x', 105, 210, 140, 115, 66, 90, 48, 90, 112, 108, 76};
+            tb = uigridlayout(root, [1 13], 'Padding', [0 0 0 0], 'ColumnSpacing', 6, 'RowHeight', {'1x'});
+            tb.ColumnWidth = {'1x', 105, 210, 140, 115, 66, 90, 48, 90, 100, 112, 108, 76};
             tb.Layout.Row = 1;
             tb.Layout.Column = 1;
             obj.UI.Folder = uilabel(tb, 'Text', U('noFolder'), 'FontWeight', 'bold', 'Tag', 'lbl:folder');
@@ -1038,7 +1054,10 @@ classdef CellCurator < handle
                 'MajorTicks', [], 'MinorTicks', [], 'Tag', 'sl:gamma', ...
                 'ValueChangedFcn', @(s, ~) obj.uiCall(@() obj.setGamma(s.Value)));
             CellToolkit.setTooltip(obj.UI.Gamma, curation.UiText.tip('gamma'));
-            obj.UI.Undo = uibutton(tb, 'Text', U('undo'), 'Tag', 'btn:undo', 'Enable', 'off', ...
+            obj.UI.EvenTiles = uibutton(tb, 'state', 'Text', U('evenTiles'), 'Tag', 'btn:evenTiles', ...
+                'Value', obj.EvenTiles, 'ValueChangedFcn', @(s, ~) obj.uiCall(@() obj.setEvenTiles(s.Value)));
+            CellToolkit.setTooltip(obj.UI.EvenTiles, curation.UiText.tip('evenTiles'));
+            obj.UI.Undo =uibutton(tb, 'Text', U('undo'), 'Tag', 'btn:undo', 'Enable', 'off', ...
                 'ButtonPushedFcn', @(~, ~) obj.uiCall(@() obj.undo()));
             obj.UI.Redo = uibutton(tb, 'Text', U('redo'), 'Tag', 'btn:redo', 'Enable', 'off', ...
                 'ButtonPushedFcn', @(~, ~) obj.uiCall(@() obj.redo()));
@@ -1309,7 +1328,7 @@ classdef CellCurator < handle
             ma.Layout.Column = 1;
             mg = uigridlayout(ma, [3 1], 'RowHeight', {30, '1x', 22}, 'ColumnWidth', {'1x'}, ...
                 'Padding', [0 0 0 0], 'RowSpacing', 3, 'BackgroundColor', bg);
-            tb = uigridlayout(mg, [1 10], 'ColumnWidth', {86, 76, 80, 82, 6, 130, '1x', 90, 110, 4}, ...
+            tb = uigridlayout(mg, [1 10], 'ColumnWidth', {86, 76, 80, 82, 6, 0, '1x', 90, 110, 4}, ...
                 'RowHeight', {'1x'}, 'Padding', [4 3 4 1], 'ColumnSpacing', 4, 'BackgroundColor', bg);
             tb.Layout.Row = 1;
             tools = CellCurator.MAP_TOOLS;
@@ -1324,10 +1343,6 @@ classdef CellCurator < handle
                 CellToolkit.setTooltip(b, T(ids(i)));
                 obj.UI.ToolButtons(i) = b;
             end
-            obj.UI.Snap = uicheckbox(tb, 'Text', U('snap'), 'Value', obj.SnapOn, 'Tag', 'cb:snap', ...
-                'FontColor', [0.92 0.92 0.92], 'ValueChangedFcn', @(s, ~) obj.uiCall(@() obj.setSnap(s.Value)));
-            obj.UI.Snap.Layout.Row = 1; obj.UI.Snap.Layout.Column = 6;
-            CellToolkit.setTooltip(obj.UI.Snap, T('snap'));
             obj.UI.MapInfo = uilabel(tb, 'Text', '', 'FontColor', [0.92 0.92 0.92], 'Tag', 'lbl:mapInfo', ...
                 'HorizontalAlignment', 'right');
             obj.UI.MapInfo.Layout.Row = 1; obj.UI.MapInfo.Layout.Column = 7;
@@ -1733,6 +1748,7 @@ classdef CellCurator < handle
 
         function onButtonDown(obj, e)
             obj.LastInputTic = tic;
+            obj.ShiftDown = false;   % Shift pressed during the drag arrives as a key press (resync: a missed release)
             hit = [];
             try hit = e.HitObject; catch, end
             if isempty(hit)
@@ -2479,7 +2495,7 @@ classdef CellCurator < handle
                 corner(f, :) = repmat(C.Flag, nnz(f), 1);
             end
             [g, gam] = obj.displayGG();
-            s = struct('Mode', obj.effectiveMode(), 'Gain', g, 'Gamma', gam, ...
+            s = struct('Mode', obj.effectiveMode(), 'Gain', g, 'Gamma', gam, 'TileLevel', obj.tileLevel(), ...
                 'BorderRGB', col, 'BorderPx', CellCurator.BorderPx, 'CornerRGB', corner, ...
                 'CornerPx', CellCurator.CornerPx, 'Gap', CellCurator.Gap, 'Background', C.Background);
         end
@@ -3120,6 +3136,39 @@ classdef CellCurator < handle
             obj.setStatus(curation.UiText.msg('displayReset', obj.SourceKey, g(1), gam(1)));
         end
 
+        function setEvenTiles(obj, tf)
+            %SETEVENTILES  [t] / Even tiles: scale each tile so its cell's center is shown at the level
+            %   of the source's typical cell (curation.CropCache TileLevel), or show the page contrast.
+            obj.EvenTiles = logical(tf);
+            if logical(obj.UI.EvenTiles.Value) ~= obj.EvenTiles, obj.UI.EvenTiles.Value = obj.EvenTiles; end
+            if obj.CenterView == "gallery"
+                obj.rerender();                  % (schedules the inspector)
+            else
+                obj.GalleryStale = true;         % the map shows points, not tiles: it keeps its look
+                obj.schedule("inspector");
+            end
+            if obj.EvenTiles
+                obj.setStatus(curation.UiText.msg('evenTilesOn'));
+            else
+                obj.setStatus(curation.UiText.msg('evenTilesOff'));
+            end
+        end
+
+        function lv = tileLevel(obj)
+            %TILELEVEL  The TileLevel of the tile style: [] when Even tiles is off, else the center
+            %   level [target companion] of the source's typical cell (curation.DisplayDefaults, crop
+            %   units before Gain/Gamma), so the brightness and gamma keys keep their meaning.
+            lv = [];
+            if ~obj.EvenTiles, return; end
+            lv = [128 128];
+            sess = obj.Session;
+            if ~isempty(sess) && isstruct(sess.Display) && isfield(sess.Display, 'Typical')
+                t = double(sess.Display.Typical);
+                ok = isfinite(t) & t >= 1;
+                lv(ok) = t(ok);
+            end
+        end
+
         function [g, gam] = displayGG(obj)
             %DISPLAYGG  The display gain and gamma [target companion] of the tiles and the maps: the
             %   source's default (curation.DisplayDefaults, chosen from its crops) times the
@@ -3287,8 +3336,9 @@ classdef CellCurator < handle
             c = obj.Session.Cache;
             modes = ["target" "companion" "overlay"];
             [gg, gm] = obj.displayGG();
+            lv = obj.tileLevel();
             for i = 1:3
-                s = struct('Mode', modes(i), 'Gain', gg, 'Gamma', gm, 'BorderPx', 0);
+                s = struct('Mode', modes(i), 'Gain', gg, 'Gamma', gm, 'TileLevel', lv, 'BorderPx', 0);
                 imgs(i).CData = c.compose(id, 1, 1, s);
             end
             st = obj.Store;
@@ -3536,7 +3586,6 @@ classdef CellCurator < handle
                 on = open && (i == 1 || ~ro);
                 obj.setEnable(obj.UI.ToolButtons(i), on, T(names(i)), Dz(names(i), why));
             end
-            obj.setEnable(obj.UI.Snap, ~ro, T('snap'), Dz('snap', why));
             obj.setEnable(obj.UI.FitMap, open, T('fitMap'), Dz('fitMap', CellCurator.WhyNoSource));
         end
 
@@ -5081,12 +5130,13 @@ classdef CellCurator < handle
             S.DisplayMode = char(obj.DisplayMode);
             S.GainRel = obj.Gain;
             S.GammaRel = obj.Gamma;
+            S.EvenTiles = obj.EvenTiles;
             if ~isempty(obj.Training) && isvalid(obj.Training)
                 S.LastStage2Export = obj.Training.LastStage2;
                 S.LastStage1Export = obj.Training.LastStage1;
             end
             S.Zoom = obj.Zoom;
-            S.SnapOn = obj.SnapOn;
+            if isfield(S, 'SnapOn'), S = rmfield(S, 'SnapOn'); end   % the old checkbox (Shift snaps now)
             S.SweepFieldUm = obj.SweepFieldUm;
             S.MarkerStyles = obj.MarkerSaved;
             if ~isempty(obj.ParentDir), S.LastFolder = obj.ParentDir; end
@@ -5194,13 +5244,6 @@ classdef CellCurator < handle
             obj.updateContext();
         end
 
-        function setSnap(obj, tf)
-            %SETSNAP  Snap added and moved cells to their center (snapToCellCentroid) or not.
-            obj.SnapOn = logical(tf);
-            if obj.UI.Snap.Value ~= obj.SnapOn, obj.UI.Snap.Value = obj.SnapOn; end
-            obj.updateContext();
-        end
-
         function mapClick(obj, xy, selectionType)
             %MAPCLICK  A press and release at image point XY of the map ('normal' | 'alt' | 'extend'
             %   (Shift+click) | 'open' (double click)), through curation.MapView's own handlers.
@@ -5224,8 +5267,10 @@ classdef CellCurator < handle
             end
         end
 
-        function mapDrag(obj, fromXY, toXY)
-            %MAPDRAG  Press at FROMXY, move to TOXY, release (Move tool: moves the point there).
+        function mapDrag(obj, fromXY, toXY, modifiers)
+            %MAPDRAG  Press at FROMXY, move to TOXY, release with MODIFIERS held (Move tool: moves
+            %   the point there; "shift" snaps it to its center).
+            if nargin < 4, modifiers = strings(1, 0); end
             if obj.CenterView ~= "map", obj.showCenter("map"); end
             if ~obj.mapShowing(), return; end
             fromXY = double(fromXY(1, 1:2));
@@ -5237,7 +5282,7 @@ classdef CellCurator < handle
             for t = [0.34 0.67 1]
                 m.onMotion(struct('AxesPoint', fromXY + t * (toXY - fromXY)));
             end
-            m.onButtonUp(struct('AxesPoint', toXY));
+            m.onButtonUp(struct('AxesPoint', toXY, 'Modifier', string(modifiers)));
         end
 
         function mapLasso(obj, poly)
@@ -5969,11 +6014,9 @@ classdef CellCurator < handle
                 txt = M('ctxMapMany', CellCurator.cellsText(numel(sel)));
                 return
             end
-            snap = '';
-            if obj.SnapOn, snap = M('ctxSnapOn'); end
             switch obj.MapTool
-                case "add",   tail = M('ctxMapAdd', snap);
-                case "move",  tail = M('ctxMapMove', snap);
+                case "add",   tail = M('ctxMapAdd');
+                case "move",  tail = M('ctxMapMove');
                 case "lasso", tail = M('ctxMapLasso');
                 otherwise,    tail = M('ctxMapSelect');
             end
@@ -6374,14 +6417,15 @@ classdef CellCurator < handle
         function onMapEmptyClick(obj, info)
             obj.LastInputTic = tic;
             st = string(info.SelectionType);
-            if st ~= "normal", return; end
+            shift = st == "extend" && any(lower(string(info.Modifier)) == "shift");
+            if st ~= "normal" && ~(shift && string(info.Tool) == "add"), return; end
             if ~isempty(obj.Lasso)
                 obj.cancelLasso(true);
                 return
             end
             switch string(info.Tool)
                 case "add"
-                    obj.addCellAt(info.XY);
+                    obj.addCellAt(info.XY, shift);          % Shift+click: snapped to its center
                 case "select"
                     id = obj.regionAt(info.XY);
                     if id > 0
@@ -6410,7 +6454,10 @@ classdef CellCurator < handle
                 obj.Map.movePoints(id, info.FromXY);
                 return
             end
-            [xy, posSrc, shift] = obj.refinePosition(info.ToXY);
+            % Shift held as the button is released snaps the drop to the cell's center
+            snap = obj.ShiftDown;
+            if isfield(info, 'Modifier'), snap = snap || any(lower(string(info.Modifier)) == "shift"); end
+            [xy, posSrc, shift] = obj.refinePosition(info.ToXY, snap);
             st = obj.Store;
             st.beginBatch(curation.UiText.msg('txnMove', double(id)));
             try
@@ -6429,11 +6476,12 @@ classdef CellCurator < handle
             obj.afterMapEdit(curation.UiText.msg('moved', double(id), d, obj.snapText(posSrc, shift)));
         end
 
-        function addCellAt(obj, xy)
-            %ADDCELLAT  The Add tool: a new cell (Good, human, reviewed) at XY, snapped when Snap to
-            %   center is on; inside an exclusion region the store excludes it at once.
+        function addCellAt(obj, xy, snap)
+            %ADDCELLAT  The Add tool: a new cell (Good, human, reviewed) at XY, snapped to its center
+            %   when SNAP (a Shift+click); inside an exclusion region the store excludes it at once.
+            if nargin < 3, snap = false; end
             if ~obj.canEdit(), return; end
-            [xy, posSrc, shift] = obj.refinePosition(xy);
+            [xy, posSrc, shift] = obj.refinePosition(xy, snap);
             st = obj.Store;
             st.beginBatch(curation.UiText.msg('txnAdd', xy(1), xy(2)));
             try
@@ -6448,15 +6496,15 @@ classdef CellCurator < handle
             obj.afterMapEdit(curation.UiText.msg('added', double(id), xy(1), xy(2), obj.snapText(posSrc, shift)));
         end
 
-        function [p, posSrc, shift] = refinePosition(obj, xy)
-            %REFINEPOSITION  XY refined with snapToCellCentroid when Snap to center is on (on a window
-            %   of the target page around XY; CellType oval for nets, round for PV). POSSRC "snap" when
-            %   the snap moved it, else "human"; SHIFT the distance moved (NaN: snapping is off).
+        function [p, posSrc, shift] = refinePosition(obj, xy, snap)
+            %REFINEPOSITION  XY refined with snapToCellCentroid when SNAP (Shift held; on a window of
+            %   the target page around XY; CellType oval for nets, round for PV). POSSRC "snap" when
+            %   the snap moved it, else "human"; SHIFT the distance moved (NaN: no snap asked).
             p = double(xy(1, 1:2));
             posSrc = "human";
             shift = NaN;
             sess = obj.Session;
-            if ~obj.SnapOn || isempty(sess) || isempty(sess.PageT), return; end
+            if ~snap || isempty(sess) || isempty(sess.PageT), return; end
             um = CellCurator.umOf(obj.Store);
             page = sess.PageT;
             [H, W] = size(page);
@@ -7979,7 +8027,7 @@ classdef CellCurator < handle
 
         function S = defaultSettings()
             S = struct('LastFolder', '', 'WindowPosition', [80 60 1500 900], 'DisplayMode', 'target', ...
-                'GainRel', 1, 'GammaRel', 1, 'Zoom', 1, 'LastDataset', '', 'LastSource', '', 'SnapOn', false, ...
+                'GainRel', 1, 'GammaRel', 1, 'EvenTiles', false, 'Zoom', 1, 'LastDataset', '', 'LastSource', '', ...
                 'SweepFieldUm', 600, 'LastStage2Export', '', 'LastStage1Export', '', ...
                 'MarkerStyles', curation.MapMarkers.defaults());
         end

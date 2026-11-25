@@ -66,16 +66,17 @@ classdef UiText
                         'in the gallery. Esc returns here from every other tool.'];
                 case 'toolAdd'
                     t = ['Add tool [a]: click where the detector missed a cell to add one there (labeled ' ...
-                        'Good). A click on an existing cell selects it instead.'];
+                        'Good). Shift+click snaps it to the center of the stained structure nearby (the hole ' ...
+                        'of a net, the body of a PV cell; snapToCellCentroid). A click on an existing cell ' ...
+                        'selects it instead.'];
                 case 'toolMove'
-                    t = 'Move tool [m]: drag a cell to where it belongs; its tiles are cut again at the new place.';
+                    t = ['Move tool [m]: drag a cell to where it belongs; its tiles are cut again at the new ' ...
+                        'place. Hold Shift as you release the mouse button to snap it to the center of the ' ...
+                        'stained structure nearby (the hole of a net, the body of a PV cell; ' ...
+                        'snapToCellCentroid); without Shift it lands exactly where you drop it.'];
                 case 'toolLasso'
                     t = ['Lasso tool [l]: draw around cells, then label them all, make the area an exclusion ' ...
                         'region (tissue folds, edges) or merge them into one cell.'];
-                case 'snap'
-                    t = ['Snap to center: a cell you add or move lands on the center of the stained structure ' ...
-                        'nearby (the hole of a net, the body of a PV cell), found by snapToCellCentroid. ' ...
-                        'Off: exactly where you click or drop it.'];
                 case 'fitMap'
                     t = 'Show the whole section. The wheel zooms about the pointer; dragging pans; + and - zoom too.';
                 case 'markers'
@@ -266,6 +267,11 @@ classdef UiText
                 case 'gamma'
                     t = ['Mid-tone contrast (gamma) of every tile and of the map, relative to the source''s ' ...
                         'default. Keys: ; darker, '' brighter, 0 back to the default.'];
+                case 'evenTiles'
+                    t = ['Even out the tiles [t]: each tile is brightened or darkened so its cell''s center ' ...
+                        'shows at the level of this source''s typical cell (at most 3x either way, so an ' ...
+                        'empty tile stays dark). Off: one contrast for the whole page, so a dim cell looks ' ...
+                        'dim. Brightness and gamma still apply on top; the map is not changed.'];
                 case 'undo'
                     t = 'Undo the last change [Ctrl+Z]. The page it was made on comes back on screen.';
                 case 'redo'
@@ -350,6 +356,7 @@ classdef UiText
                 case 'openNext',    s = 'Open next source [n]';
                 case 'brightness',  s = 'Brightness';
                 case 'gamma',       s = 'Gamma';
+                case 'evenTiles',   s = 'Even tiles [t]';
                 case 'queuesHead',  s = 'Queues';
                 case 'progressHead', s = 'Progress';
                 case 'sectionsHead', s = 'Sections';
@@ -363,7 +370,6 @@ classdef UiText
                 case 'toolAdd',     s = 'Add [a]';
                 case 'toolMove',    s = 'Move [m]';
                 case 'toolLasso',   s = 'Lasso [l]';
-                case 'snap',        s = 'Snap to center';
                 case 'fitMap',      s = 'Whole section';
                 case 'markers',     s = ['Markers' E];
                 case 'markerTitle', s = 'Map markers';
@@ -492,8 +498,8 @@ classdef UiText
                 case 'mapNoSource',  s = 'Open a source first: the map shows the section of the source on screen.';
                 case 'mapShown',     s = ['Map of %s' S '%s cells' S 'Tab returns to the gallery.'];
                 case 'toolSelectOn', s = 'Select tool: click a cell to select it; drag to pan.';
-                case 'toolAddOn',    s = 'Add tool: click where the detector missed a cell.';
-                case 'toolMoveOn',   s = 'Move tool: drag a cell to where it belongs.';
+                case 'toolAddOn',    s = 'Add tool: click where the detector missed a cell (Shift+click snaps it to its center).';
+                case 'toolMoveOn',   s = 'Move tool: drag a cell to where it belongs (hold Shift as you release to snap it to its center).';
                 case 'toolLassoOn',  s = 'Lasso tool: draw around cells.';
                 case 'toolReadOnly', s = 'Read-only: cells cannot be added, moved or lassoed in this window.';
                 case 'mapNoTarget',  s = 'Select a cell on the map first (click it), or point at one.';
@@ -504,7 +510,7 @@ classdef UiText
                 case 'added',        s = 'Added cell %d (Good) at X %.1f, Y %.1f%s.';
                 case 'moved',        s = 'Moved cell %d by %.1f px%s.';
                 case 'snapped',      s = ' (snapped %.1f px to the center)';
-                case 'snapNone',     s = ' (snap found no structure nearby: placed where clicked)';
+                case 'snapNone',     s = ' (snap found no structure nearby: placed where you put it)';
                 case 'addOutside',   s = 'That is outside the image: no cell was added.';
                 case 'lassoMarked',  s = 'Marked %s %s (lasso).';
                 case 'lassoEmpty',   s = 'The lasso holds no cells: only Exclude region applies.';
@@ -550,9 +556,8 @@ classdef UiText
                 % ---- map and edits: context line
                 case 'ctxMap',       s = ['Map of %s' S '%s cells' D '%s'];
                 case 'ctxMapSelect', s = ['click a cell to select it' S 'Tab: back to the gallery'];
-                case 'ctxMapAdd',    s = 'Add tool: click where the detector missed a cell%s';
-                case 'ctxMapMove',   s = 'Move tool: drag a cell to where it belongs%s';
-                case 'ctxSnapOn',    s = ' (snapped to its center)';
+                case 'ctxMapAdd',    s = ['Add tool: click where the detector missed a cell' S 'Shift+click: snapped to its center'];
+                case 'ctxMapMove',   s = ['Move tool: drag a cell to where it belongs' S 'hold Shift as you release: snapped to its center'];
                 case 'ctxMapLasso',  s = 'Lasso tool: draw around cells to label, exclude or merge them';
                 case 'ctxMapOne',    s = ['Cell %d selected (%s)' D 'Enter: show it in the gallery' S 'g b u f x: label it'];
                 case 'ctxMapMany',   s = ['%s selected' D 'g b u f x: label them all' S 'Esc: clear'];
@@ -771,6 +776,8 @@ classdef UiText
                 case 'companionHeld', s = 'Showing the other channel while c is held.';
                 case 'gain',         s = 'Brightness %.2fx of the default (0 resets it).';
                 case 'gamma',        s = 'Gamma %.2fx of the default (0 resets it).';
+                case 'evenTilesOn',  s = ['Even tiles on' S 'every cell is shown at the level of a typical cell of this source (t turns it off).'];
+                case 'evenTilesOff', s = ['Even tiles off' S 'one contrast for the whole page: a dim cell looks dim.'];
                 case 'zoom',         s = ['Tile zoom %d%%' S '%d tiles per page.'];
                 case 'showQueue',    s = ['Showing %s' S '%s cells.'];
                 case 'note',         s = 'Saved the note of cell %d.';
@@ -860,8 +867,8 @@ classdef UiText
                 "v",          "",        "v",            "toggleView",  "Same as Tab"
                 ".",          "",        ".",            "showOnMap",   "Show the pointed-at (or cursor) cell on the map, selected"
                 "s",          "",        "s",            "toolSelect",  "Map: Select tool (click a cell; Shift+click adds; drag pans)"
-                "a",          "",        "a",            "toolAdd",     "Map: Add tool (click where a cell was missed)"
-                "m",          "",        "m",            "toolMove",    "Map: Move tool (drag a cell to its place)"
+                "a",          "",        "a",            "toolAdd",     "Map: Add tool (click where a cell was missed; Shift+click snaps)"
+                "m",          "",        "m",            "toolMove",    "Map: Move tool (drag a cell to its place; Shift at release snaps)"
                 "l",          "",        "l",            "toolLasso",   "Map: Lasso tool (draw around cells)"
                 "e",          "",        "e",            "lassoExclude", "After a lasso: make the area an exclusion region"
                 "j",          "",        "j",            "merge",       "Merge: the lassoed cells into one, or the close pair on screen (the higher-scored cell is kept)"
@@ -880,6 +887,7 @@ classdef UiText
                 ";",          "",        ";",            "gammaUp",     "Darker mid-tones (gamma up)"
                 "'",          "",        "'",            "gammaDown",   "Brighter mid-tones (gamma down)"
                 "0",          "",        "0",            "resetDisplay", "Brightness and gamma back to the default of this source (chosen from its cells' crops)"
+                "t",          "",        "t",            "evenTiles",   "Even tiles on or off: each tile scaled so its cell shows at a typical level, not too bright or too dark"
                 "+",          "",        "+",            "zoomIn",      "Larger tiles (fewer per page); map: zoom in"
                 "-",          "",        "-",            "zoomOut",     "Smaller tiles (more per page); map: zoom out"
                 "?",          "",        "?",            "help",        "Show or hide this list"

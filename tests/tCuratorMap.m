@@ -385,15 +385,15 @@ classdef tCuratorMap < matlab.unittest.TestCase
             miss = truth.missedIdx;
             tc.assumeGreaterThanOrEqual(numel(miss), 2, 'the fixture has missed cells');
             app.handleKey('tab', {});
-            app.setSnap(true);
-            tc.verifyTrue(logical(findall(app.Figure, 'Tag', 'cb:snap').Value));
+            tc.verifyEmpty(findall(app.Figure, 'Tag', 'cb:snap'), 'no checkbox: Shift snaps');
+            % Add: Shift+click snaps
             app.setMapTool('add');
             c = truth.cellsXY(miss(1), :);
             off = [3 -2];
             n0 = st.NumRows;
             m = app.Map;
             near = min(hypot(m.XY(:, 1) - c(1) - off(1), m.XY(:, 2) - c(2) - off(2)));
-            app.mapClick(c + off);
+            app.mapClick(c + off, 'extend');
             tc.assertEqual(st.NumRows, n0 + 1, sprintf(['%s (scale %.3f, view %s, panel %s, tool %s, ' ...
                 'nearest point %.1f px, selection %s)'], app.StatusText, m.Scale, mat2str(m.viewRect(), 5), ...
                 mat2str(getpixelposition(m.Panel, true)), m.Tool, near, mat2str(app.MapSelection)));
@@ -403,14 +403,33 @@ classdef tCuratorMap < matlab.unittest.TestCase
             tc.verifyEqual(st.get('PosSource', id), "snap", 'snapped: PosSource snap');
             tc.verifyLessThan(norm(p - c), norm(off), 'snapped toward the true center');
             tc.verifyEqual(app.Map.XY(app.Map.rowsOf(id), :), p, 'AbsTol', 1e-6, 'drawn where it was snapped');
-            % a move with snap on also refines the drop
+            % Move without Shift: exactly where dropped, PosSource human
             app.setMapTool('move');
             app.mapDrag(p, c + [-3 3]);
+            tc.verifyEqual([st.get('X', id), st.get('Y', id)], c + [-3 3], 'AbsTol', 1e-6, 'no Shift: no snap');
+            tc.verifyEqual(st.get('PosSource', id), "human");
+            % Move with Shift held at the release: the drop is refined
+            app.mapDrag(c + [-3 3], c + [3 -3], "shift");
             p2 = [st.get('X', id), st.get('Y', id)];
-            tc.verifyEqual(st.get('PosSource', id), "snap");
-            tc.verifyLessThan(norm(p2 - c), norm([-3 3]));
-            % snap off: exactly where clicked, PosSource human
-            app.setSnap(false);
+            tc.verifyEqual(st.get('PosSource', id), "snap", 'Shift at the release: snapped');
+            tc.verifyLessThan(norm(p2 - c), norm([3 -3]));
+            % Shift pressed on the keyboard during the drag: the drag goes on (a key ends a drag
+            % otherwise) and the drop snaps; the release event itself carries no modifier
+            app.mapDrag(p2, c + [-3 -3]);
+            tc.verifyEqual(st.get('PosSource', id), "human");
+            from = [st.get('X', id), st.get('Y', id)];
+            to = c + [3 3];
+            m.onButtonDown(struct('AxesPoint', from, 'SelectionType', 'normal'));
+            m.onMotion(struct('AxesPoint', (from + to) / 2));
+            app.handleKey('shift', {"shift"});
+            tc.verifyEqual(m.Gesture, "move", 'a Shift press does not end the drag');
+            m.onMotion(struct('AxesPoint', to));
+            m.onButtonUp(struct('AxesPoint', to));
+            p3 = [st.get('X', id), st.get('Y', id)];
+            tc.verifyEqual(st.get('PosSource', id), "snap", 'Shift held from the keyboard: snapped');
+            tc.verifyLessThan(norm(p3 - c), norm([3 3]));
+            app.handleKeyRelease('shift');
+            % Add without Shift: exactly where clicked, PosSource human
             app.setMapTool('add');
             c2 = truth.cellsXY(miss(2), :);
             app.mapClick(c2 + off);

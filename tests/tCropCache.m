@@ -305,5 +305,56 @@ classdef tCropCache < matlab.unittest.TestCase
                 Percentiles = [0 100], PerTileContrast = true);
             tc.verifyGreaterThan(max(p.Crops(:, :, 2), [], 'all'), 240, 'per-tile contrast stretches it');
         end
+
+        function testTileLevelEvensOutCells(tc)
+            % a bright cell, a cell at 0.4 of its brightness and an empty place; TileLevel shows both
+            % cells' centers at the asked level (one darkened, one brightened), leaves the empty tile
+            % dark, and changes nothing when []
+            page = tCropCache.blobPage(100, 300, [50 50; 150 50], 6, 1, 0);
+            page(:, 101:200) = page(:, 101:200) * 0.4;
+            xy = [50 50; 150 50; 250 50];
+            c = curation.CropCache.build(page, [], [1; 2; 3], xy, 1, TilePx = 40, WindowUm = 40, ...
+                Percentiles = [0 100]);
+            lev = c.centerLevel([1; 2; 3]);
+            tc.verifySize(lev, [3 2]);
+            tc.verifyTrue(all(isnan(lev(:, 2))), 'no companion: NaN');
+            tc.verifyGreaterThan(lev(1, 1), 180);
+            tc.verifyEqual(lev(2, 1) / lev(1, 1), 0.4, 'AbsTol', 0.03, 'the page contrast keeps the dim cell dim');
+            tc.verifyEqual(lev(3, 1), 0);
+
+            base = struct('BorderPx', 0);
+            plain = c.compose([1; 2; 3], 1, 3, base);
+            s = base; s.TileLevel = [];
+            tc.verifyEqual(c.compose([1; 2; 3], 1, 3, s), plain, 'TileLevel [] changes nothing');
+            s = base; s.TileLevel = 128;
+            m = c.compose([1; 2; 3], 1, 3, s);
+            T = 40;
+            [xx, yy] = meshgrid(1:T, 1:T);
+            disc = hypot(xx - (T + 1) / 2, yy - (T + 1) / 2) <= curation.CropCache.CenterUm * T / 40;
+            for k = 1:2
+                t = m(:, (k - 1) * T + (1:T), 1);
+                v = sort(double(t(disc)));
+                tc.verifyEqual(v(round(0.95 * numel(v))), 128, 'AbsTol', 3, sprintf('cell %d shown at the level', k));
+            end
+            tc.verifyEqual(nnz(m(:, 2 * T + (1:T), :)), 0, 'the empty tile stays dark');
+
+            % the factor is clamped: asking for 2.5x the dim cell's level under a 1.5x limit gives 1.5x
+            s.TileLevel = 2.5 * lev(2, 1);
+            s.TileGainLimits = [1/3 1.5];
+            m = c.compose(2, 1, 1, s);
+            tc.verifyEqual(double(max(m(:))), 1.5 * double(max(c.Crops(:, :, 2), [], 'all')), 'AbsTol', 1);
+            s.TileGainLimits = [];
+
+            % repaint with the same style equals compose
+            s.TileLevel = 128;
+            [m, L] = c.compose([1; 2; 3], 1, 3, s);
+            tc.verifyEqual(c.repaint(plain, L, 2, s), [plain(:, 1:T, :) m(:, T + (1:T), :) plain(:, 2 * T + 1:end, :)]);
+
+            % a moved cell is measured again
+            c.update(2, [50 50]);
+            tc.verifyEqual(c.centerLevel(2), lev(1, :), 'AbsTol', 1);
+            tc.verifyError(@() c.compose(1, 1, 1, struct('TileLevel', 0)), 'CropCache:BadStyle');
+            tc.verifyError(@() c.compose(1, 1, 1, struct('TileLevel', 100, 'TileGainLimits', [2 1])), 'CropCache:BadStyle');
+        end
     end
 end

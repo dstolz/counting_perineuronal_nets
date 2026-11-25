@@ -102,7 +102,8 @@ classdef MapView < handle
     %   CONSUMED is true when the event belongs to the map (the pointer is over its panel, or a press or
     %   drag started there), so the app can hand the others to the gallery. EVT is the figure's event data
     %   (the point is read from fig.CurrentPoint) or, for tests, a struct with AxesPoint ([x y] image
-    %   pixels) or FigurePoint ([x y] figure pixels) and optionally SelectionType, Modifier,
+    %   pixels) or FigurePoint ([x y] figure pixels) and optionally SelectionType, Modifier (of a press
+    %   or of a release),
     %   VerticalScrollCount, Key. m.installRouting() routes the figure's callbacks to this view alone.
     %   m.cancelDrag() ends any gesture in progress (a moved point snaps back, a lasso is dropped, a pan
     %   returns to where it started).
@@ -112,7 +113,8 @@ classdef MapView < handle
     %                       'open'), Modifier (string array), Tool
     %       EmptyClickFcn   XY, SelectionType, Modifier, Tool (only inside the image)
     %       PointDragFcn    Id, XY (where it is now), FromXY
-    %       PointDropFcn    Id, FromXY, ToXY (the view has already moved the point)
+    %       PointDropFcn    Id, FromXY, ToXY (the view has already moved the point), Modifier (the
+    %                       modifier keys held at the release)
     %       LassoDoneFcn    Polygon (M x 2), Ids (visible points inside), SelectionType, Modifier
     %       HoverFcn        Id (0 = none), XY; at most every HoverInterval s, the last one always delivered
     %       ViewChangedFcn  Rect (viewRect), Scale (image pixels per screen pixel), IsFit
@@ -1009,7 +1011,7 @@ classdef MapView < handle
                             'Modifier', D.Modifier, 'Tool', obj.ToolValue));
                     end
                 case "move"
-                    obj.finishMove(D, fp);
+                    obj.finishMove(D, fp, obj.releaseModifiers(evt));
                 case "lasso"
                     obj.finishLasso(D, fp);
             end
@@ -1577,7 +1579,8 @@ classdef MapView < handle
             end
         end
 
-        function finishMove(obj, D, fp)
+        function finishMove(obj, D, fp, mods)
+            %finishMove  MODS: the modifier keys held at the release (the app snaps on Shift).
             if ~D.Moved; return; end                          % a click in the move tool
             row = obj.rowsOf(D.Id);
             set(obj.DragLine, 'XData', NaN, 'YData', NaN);
@@ -1592,7 +1595,7 @@ classdef MapView < handle
             obj.YD(row) = to(2);
             obj.pushPoints(true, false, row);
             if any(obj.Selection == D.Id); obj.drawSelection(); end
-            obj.fire(obj.PointDropFcn, struct('Id', D.Id, 'FromXY', D.FromXY, 'ToXY', to));
+            obj.fire(obj.PointDropFcn, struct('Id', D.Id, 'FromXY', D.FromXY, 'ToXY', to, 'Modifier', mods));
         end
 
         function restoreMoved(obj, id)
@@ -1654,6 +1657,18 @@ classdef MapView < handle
                 try mods = string(obj.Fig.CurrentModifier); catch; end
             end
             mods = reshape(mods, 1, []);
+        end
+
+        function mods = releaseModifiers(obj, evt)
+            %releaseModifiers  Modifier keys held at a release: the struct's Modifier (tests; none
+            %   when it has no such field), else the figure's CurrentModifier.
+            mods = strings(1, 0);
+            if isstruct(evt)
+                if isfield(evt, 'Modifier'), mods = string(evt.Modifier); end
+            elseif isprop(obj.Fig, 'CurrentModifier')
+                try mods = string(obj.Fig.CurrentModifier); catch; end
+            end
+            mods = reshape(lower(mods), 1, []);
         end
 
         function ptr = toolPointer(obj)

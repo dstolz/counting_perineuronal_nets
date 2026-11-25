@@ -184,7 +184,7 @@ classdef tTooltips < matlab.unittest.TestCase
             end
             want = struct( ...
                 'btn_toggleView', "[Tab]", 'btn_showOnMap', "[.]", 'btn_toolSelect', "[s]", 'btn_toolAdd', "[a]", ...
-                'btn_toolMove', "[m]", 'btn_toolLasso', "[l]", 'cb_snap', "snapToCellCentroid", ...
+                'btn_toolMove', "[m]", 'btn_toolLasso', "[l]", ...
                 'btn_fitMap', "whole section", 'btn_lassoGood', "[g]", 'btn_lassoBad', "[b]", ...
                 'btn_lassoUncertain', "[u]", 'btn_lassoExclude', "[e]", 'btn_lassoMerge', "[j]", ...
                 'btn_lassoCancel', "[Esc]", 'btn_regionRemove', "[Del]", 'btn_regionKeep', "[Esc]", ...
@@ -201,6 +201,12 @@ classdef tTooltips < matlab.unittest.TestCase
                 tc.verifySubstring(lower(strjoin(string(c(1).Tooltip), " ")), lower(want.(f)), ...
                     "the tooltip of " + tag + " should mention " + want.(f));
             end
+            % snapping to the center is Shift (no checkbox): the Move and Add tooltips say so
+            tc.verifyEmpty(findall(app.Figure, 'Tag', 'cb:snap'), 'the Snap to center checkbox is gone');
+            tip = string(findall(app.Figure, 'Tag', 'btn:toolMove').Tooltip);
+            tc.verifySubstring(tip, "Hold Shift as you release");
+            tc.verifySubstring(tip, "snapToCellCentroid");
+            tc.verifySubstring(string(findall(app.Figure, 'Tag', 'btn:toolAdd').Tooltip), "Shift+click snaps");
             % the new keys are mapped, and in the cheat sheet (keymapIsInTheCheatSheetAndHandled
             % checks that every mapped key is handled)
             T = curation.UiText.keymap();
@@ -210,7 +216,7 @@ classdef tTooltips < matlab.unittest.TestCase
             delete(app);
             % without a source the map controls are off and say why
             app = tc.openApp(false);
-            for tag = ["btn:toolSelect" "btn:toolAdd" "btn:toggleView" "btn:showOnMap" "cb:snap"]
+            for tag = ["btn:toolSelect" "btn:toolAdd" "btn:toggleView" "btn:showOnMap"]
                 c = findall(app.Figure, 'Tag', tag);
                 tc.verifyFalse(logical(c.Enable), tag + " should be off without a source");
                 tc.verifySubstring(c.Tooltip, 'unavailable now: no source is open yet');

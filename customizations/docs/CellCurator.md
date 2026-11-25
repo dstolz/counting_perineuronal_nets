@@ -62,7 +62,7 @@ bottom.
 **Top bar.** *Open folder…*, a section dropdown, one button per channel of the
 section (for example `ECM1` for the WFA/PNN channel and `PV2`), a display
 dropdown (*Target*, *Overlay*, *Companion*, *Side by side*), *Brightness* and
-*Gamma* sliders, *Undo [Ctrl+Z]*, *Redo [Ctrl+Y]* and *Keys [?]*.
+*Gamma* sliders, *Even tiles [t]*, *Undo [Ctrl+Z]*, *Redo [Ctrl+Y]* and *Keys [?]*.
 
 **Left column.**
 
@@ -201,12 +201,23 @@ guarded.)
 | `[` `]` | Darker, brighter |
 | `;` `'` | Darker, brighter mid-tones (gamma) |
 | `0` | **Reset** brightness and gamma to the default of this source |
+| `t` | **Even tiles** on or off: each cell shown at a typical brightness |
 | `+` `-` | Larger tiles (fewer per page), smaller tiles (more per page) |
 
 Each source starts with a brightness and gamma worked out from its own cells'
 crops, so dim cells are visible. The keys and sliders work relative to that
-default; `0` returns to it. Every tile of a page shares one contrast (never one
-per tile), so brightness differences between tiles are real.
+default; `0` returns to it. By default every tile of a page shares one contrast,
+so brightness differences between tiles are real.
+
+**Even tiles [t]** (the button in the top bar; the app remembers it) brightens or
+darkens each tile on its own, so the center of its cell shows at the level of
+a typical cell of the source: a very bright net no longer washes out and a
+faint one is no longer near black, and you can judge the shape of each. The
+factor is at most 3x either way, so an empty tile stays dark rather than turning
+noise into a "cell". Brightness and gamma still work on top of it. It changes
+only the tiles and the inspector, not the map. Turn it off when how bright a
+cell is matters to your decision: with it on, a faint cell looks like a
+bright one.
 
 ---
 
@@ -323,17 +334,19 @@ selected cell in the gallery.
 | Tool | Key | What it does |
 |------|-----|--------------|
 | **Select** | `s` | Click a cell to select it (Shift+click adds); drag to pan. Click inside an exclusion region to select the region. `g` `b` `u` `f` `x` act on the selected cells |
-| **Add** | `a` | Click where the detector missed a cell; a Good cell is added there. A click on an existing cell selects it instead |
-| **Move** | `m` | Drag a cell to where it belongs; its tiles are cut again at the new place |
+| **Add** | `a` | Click where the detector missed a cell; a Good cell is added there. Shift+click snaps it to its center (below). A click on an existing cell selects it instead |
+| **Move** | `m` | Drag a cell to where it belongs; its tiles are cut again at the new place. Hold Shift as you release the mouse button to snap it to its center (below) |
 | **Lasso** | `l` | Draw around cells, then use the bar that appears |
 
 `Esc` returns to Select from any other tool.
 
-**Snap to center** (a checkbox in the map's tool bar): a cell you add or move
-lands on the center of the stained structure nearby (the hole of a net, the body
-of a PV cell), found with `snapToCellCentroid`. If it finds no structure, the
-cell goes where you clicked and the status bar says so. Off: exactly where you
-click.
+**Snap to center** (Shift): hold Shift as you release a cell you are moving,
+or Shift+click with Add, and the cell lands on the center of the stained
+structure nearby (the hole of a net, the body of a PV cell), found with
+`snapToCellCentroid`. If it finds no structure, the cell goes where you put it
+and the status bar says so. Without Shift it goes exactly where you drop or
+click it. Press Shift after you start the drag: a Shift+press on a cell selects
+it instead of moving it.
 
 Cells you add or move have no Stage-2 score for their new position until you
 [score them](#training-tab-and-score-edited-cells).
@@ -592,6 +605,7 @@ Generated from `curation.UiText.keymap()`. The same list is on screen under
 | `;` | Darker mid-tones (gamma up) |
 | `'` | Brighter mid-tones (gamma down) |
 | `0` | Brightness and gamma back to the default of this source (chosen from its cells' crops) |
+| `t` | Even tiles on or off: each tile scaled so its cell shows at a typical level, not too bright or too dark |
 | `+` | Larger tiles (fewer per page); map: zoom in |
 | `-` | Smaller tiles (more per page); map: zoom out |
 
@@ -770,7 +784,7 @@ changes or deletes the old files.
 | Resolver: find close pairs | *Close pairs* queue (on the map) |
 | Resolver: Keep A / Keep B / Merge | **Merge** keeps the higher-scored cell and marks the other merged. To keep the other one, move or label it as you need |
 | Resolver: Keep Both | `k` / *Keep both* |
-| Resolver: add or move a point | *Add* and *Move* tools, with *Snap to center* |
+| Resolver: add or move a point | *Add* and *Move* tools; Shift snaps to the center |
 | Resolver: delete a point | Label it Bad, or merge it |
 | Resolver: rescore | *Score edited cells* |
 | QC: Good / Bad / Uncertain (`g` `b` `u`) | The same keys |

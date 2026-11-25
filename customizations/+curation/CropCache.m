@@ -38,6 +38,11 @@ classdef CropCache < handle
     %         Gain, Gamma display = min(1, Gain*v)^Gamma on v in [0 1] (Gamma < 1 brightens); scalar or
     %                     [target companion]
     %         LUT         256 x 1 or 256 x 2 lookup table (uint8, or double 0-255) used instead of Gain/Gamma
+    %         TileLevel   [] (default: off) or a level 0-255, scalar or [target companion]: each tile is
+    %                     scaled (before Gain/Gamma/LUT) so its center level (centerLevel) lands there,
+    %                     evening out cells that are much brighter or dimmer than the rest
+    %         TileGainLimits  [min max] of that per-tile factor (default [1/3 3]: an empty or noise-only
+    %                     tile is not stretched into a bright one)
     %         BorderRGB   K x 3 (or 1 x 3) border colors, uint8 or double 0-255; NaN rows: no border
     %         BorderPx    border width in pixels, drawn inside the tile (default 3)
     %         CornerRGB   K x 3 corner badge colors (top right, inside the border); NaN rows: no badge
@@ -52,6 +57,12 @@ classdef CropCache < handle
     %   mosaic = c.repaint(mosaic, layout, tileIdx, style)
     %       Redraw tiles TILEIDX of a composed page with STYLE (a page style: K rows, indexed by tile
     %       number); equals compose with STYLE when only those tiles' styling changed.
+    %
+    %   lev = c.centerLevel(rows)
+    %       numel(rows) x 2 center level of the crops in cache rows ROWS ([target companion], 0-255;
+    %       NaN for the companion when there is none): the 95th percentile of the crop pixels within
+    %       CenterUm of the tile center, the measure curation.DisplayDefaults uses for the typical
+    %       cell. Computed on first use and kept until the crop changes.
     %
     %   See also curation.GalleryView.
 
@@ -83,6 +94,12 @@ classdef CropCache < handle
         RowOfId = zeros(0, 1)      % dense lookup: RowOfId(id + 1) = row, 0 = absent
         DenseLookup = true
         Geoms = struct('Key', {}, 'G', {})
+        Levels = NaN(0, 2)         % centerLevel of each row (NaN: not computed yet)
+        CenterDisc = []            % TilePx x TilePx logical: the pixels centerLevel looks at
+    end
+
+    properties (Constant)
+        CenterUm = 15              % radius of a crop's center for centerLevel (a net is 20-30 um across)
     end
 
     properties (Constant, Access = private)
@@ -139,6 +156,7 @@ classdef CropCache < handle
             [c.Crops, c.CropsC, c.TouchesBorder] = c.extract(xy);
             c.Ids = ids;
             c.XY = xy;
+            c.Levels = NaN(numel(ids), 2);
             c.rebuildLookup();
         end
 
@@ -200,6 +218,7 @@ classdef CropCache < handle
             if obj.HasCompanion; obj.CropsC(:, :, rows) = b; end
             obj.TouchesBorder(rows) = t;
             obj.XY(rows, :) = xy;
+            obj.Levels(rows, :) = NaN;
             obj.Version = obj.Version + 1;
         end
 
@@ -216,6 +235,7 @@ classdef CropCache < handle
             obj.TouchesBorder = [obj.TouchesBorder; t];
             obj.XY = [obj.XY; xy];
             obj.Ids = [obj.Ids; ids];
+            obj.Levels = [obj.Levels; NaN(numel(ids), 2)];
             obj.rebuildLookup();
             obj.Version = obj.Version + 1;
         end
@@ -232,6 +252,7 @@ classdef CropCache < handle
             obj.TouchesBorder = obj.TouchesBorder(keep);
             obj.XY = obj.XY(keep, :);
             obj.Ids = obj.Ids(keep);
+            obj.Levels = obj.Levels(keep, :);
             obj.rebuildLookup();
             obj.Version = obj.Version + 1;
         end
@@ -332,6 +353,26 @@ classdef CropCache < handle
             mosaic = obj.paintDecor(mosaic, g, s, tileIdx(in));
         end
 
+        function lev = centerLevel(obj, rows)
+            %centerLevel  Center level [target companion] of cache rows ROWS (see the class help).
+            rows = double(rows(:));
+            need = rows(any(isnan(obj.Levels(rows, 1:1 + obj.HasCompanion)), 2));
+            if ~isempty(need)
+                need = unique(need);
+                if isempty(obj.CenterDisc)
+                    T = obj.TilePx;
+                    [xx, yy] = meshgrid(1:T, 1:T);
+                    obj.CenterDisc = hypot(xx - (T + 1) / 2, yy - (T + 1) / 2) <= obj.CenterUm * T / obj.WindowUm;
+                    if ~any(obj.CenterDisc(:)), obj.CenterDisc(ceil(T / 2), ceil(T / 2)) = true; end
+                end
+                obj.Levels(need, 1) = curation.CropCache.discLevel(obj.Crops(:, :, need), obj.CenterDisc);
+                if obj.HasCompanion
+                    obj.Levels(need, 2) = curation.CropCache.discLevel(obj.CropsC(:, :, need), obj.CenterDisc);
+                end
+            end
+            lev = obj.Levels(rows, :);
+        end
+
         function [TH, TW] = tileSize(obj, mode)
             %tileSize  Tile height and width in pixels for display MODE ("side" tiles are twice as wide).
             TH = obj.TilePx;
@@ -346,7 +387,8 @@ classdef CropCache < handle
             if ~isstruct(style) || ~isscalar(style)
                 error('CropCache:BadStyle', 'style must be a scalar struct.');
             end
-            s = struct('Mode', "target", 'Gain', 1, 'Gamma', 1, 'LUT', [], 'BorderRGB', [], 'BorderPx', 3, ...
+            s = struct('Mode', "target", 'Gain', 1, 'Gamma', 1, 'LUT', [], 'TileLevel', [], ...
+                'TileGainLimits', [1/3 3], 'BorderRGB', [], 'BorderPx', 3, ...
                 'CornerRGB', [], 'CornerPx', max(2, round(obj.TilePx / 8)), 'Dim', [], 'DimFactor', 0.4, ...
                 'Gap', 0, 'Background', [24 24 24]);
             f = fieldnames(style);
@@ -401,6 +443,20 @@ classdef CropCache < handle
                 x = (0:255)' / 255;
                 s.Lut = uint8(255 * min(1, max(0, x * gain)) .^ gam);
             end
+            % per-tile leveling
+            if ~isempty(s.TileLevel)
+                lv = double(s.TileLevel(:)');
+                if isscalar(lv); lv = [lv lv]; end
+                if numel(lv) ~= 2 || any(~isfinite(lv)) || any(lv <= 0 | lv > 255)
+                    error('CropCache:BadStyle', 'TileLevel must be [] or levels in (0 255], scalar or [target companion].');
+                end
+                s.TileLevel = lv;
+            end
+            gl = double(s.TileGainLimits(:)');
+            if numel(gl) ~= 2 || ~(gl(1) > 0) || ~(gl(2) >= gl(1)) || ~isfinite(gl(2))
+                error('CropCache:BadStyle', 'TileGainLimits must be [min max] with 0 < min <= max.');
+            end
+            s.TileGainLimits = gl;
             ident = uint8(0:255)';
             s.LutIdentity = [isequal(s.Lut(:, 1), ident) isequal(s.Lut(:, 2), ident)];
             s.DimLut = uint8(double(ident) * min(1, max(0, double(s.DimFactor))));
@@ -520,13 +576,16 @@ classdef CropCache < handle
             useC = s.Mode ~= "target";
             st = {};
             if useT
-                st{end + 1} = obj.applyLut(obj.gather(obj.Crops, rowsS), s.Lut(:, 1), s.LutIdentity(1));
+                st{end + 1} = obj.applyLut(obj.level(obj.gather(obj.Crops, rowsS), rowsS, 1, s), ...
+                    s.Lut(:, 1), s.LutIdentity(1));
             end
             if useC
                 if obj.HasCompanion
-                    st{end + 1} = obj.applyLut(obj.gather(obj.CropsC, rowsS), s.Lut(:, 2), s.LutIdentity(2));
+                    st{end + 1} = obj.applyLut(obj.level(obj.gather(obj.CropsC, rowsS), rowsS, 2, s), ...
+                        s.Lut(:, 2), s.LutIdentity(2));
                 elseif s.Mode == "companion"
-                    st{end + 1} = obj.applyLut(obj.gather(obj.Crops, rowsS), s.Lut(:, 1), s.LutIdentity(1));
+                    st{end + 1} = obj.applyLut(obj.level(obj.gather(obj.Crops, rowsS), rowsS, 1, s), ...
+                        s.Lut(:, 1), s.LutIdentity(1));
                 else
                     st{end + 1} = zeros(obj.TilePx, obj.TilePx, numel(rowsS), 'uint8');
                 end
@@ -550,6 +609,22 @@ classdef CropCache < handle
                 A = zeros(T, T, numel(rowsS), 'uint8');
                 A(:, :, v) = crops(:, :, rowsS(v));
             end
+        end
+
+        function A = level(obj, A, rowsS, ch, s)
+            %level  Scale each tile of stack A (cache rows ROWSS, 0 = empty slot) so its center level
+            %   in channel CH reaches s.TileLevel(CH); the factor is clamped to s.TileGainLimits.
+            if isempty(s.TileLevel); return; end
+            v = rowsS > 0;
+            if ~any(v); return; end
+            lev = obj.centerLevel(rowsS(v));
+            k = ones(numel(rowsS), 1);
+            k(v) = s.TileLevel(ch) ./ max(lev(:, ch), 1);
+            k(~isfinite(k)) = 1;
+            k = min(max(k, s.TileGainLimits(1)), s.TileGainLimits(2));
+            change = abs(k - 1) > 1e-3;
+            if ~any(change); return; end
+            A(:, :, change) = uint8(single(A(:, :, change)) .* reshape(single(k(change)), 1, 1, []));
         end
 
         function A = applyLut(~, A, lut, isIdentity)
@@ -628,6 +703,13 @@ classdef CropCache < handle
             for ch = 1:3
                 mosaic(idx + (ch - 1) * HW) = repmat(colors(:, ch)', P, 1);
             end
+        end
+
+        function m = discLevel(A, disc)
+            %discLevel  The 95th percentile of each crop of uint8 stack A within mask DISC (n x 1).
+            n = size(A, 3);
+            P = sort(reshape(A(repmat(disc, 1, 1, n)), [], n), 1);
+            m = double(P(max(1, round(0.95 * size(P, 1))), :))';
         end
 
         function A = lut8(A, lut)

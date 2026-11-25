@@ -155,7 +155,7 @@ classdef (TestTags = {'Benchmark'}) tCuratorMapPerf < matlab.unittest.TestCase
             drawnow;
             app.setMapTool('add');
             for snap = [false true]
-                app.setSnap(snap);
+                if snap, how = 'extend'; else, how = 'normal'; end   % Shift+click snaps
                 n = 10; w = 2;
                 t = zeros(n + w, 1);
                 for i = 1:n + w
@@ -163,7 +163,7 @@ classdef (TestTags = {'Benchmark'}) tCuratorMapPerf < matlab.unittest.TestCase
                     n0 = st.NumRows;
                     tCuratorMapPerf.settle();
                     t1 = tic;
-                    app.mapClick(xy);
+                    app.mapClick(xy, how);
                     drawnow;
                     t(i) = 1000 * toc(t1);
                     ids = st.get('CellID');
@@ -172,7 +172,6 @@ classdef (TestTags = {'Benchmark'}) tCuratorMapPerf < matlab.unittest.TestCase
                 end
                 if snap, R.AddSnap = t(w + 1:end); else, R.Add = t(w + 1:end); end
             end
-            app.setSnap(false);
 
             % 5 next close pair
             ids = st.get('CellID');
