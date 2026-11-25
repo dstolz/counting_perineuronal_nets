@@ -5,7 +5,7 @@ function lamp = addLamp(grid, opts)
 % With the lab database client here (celldb.available), the client's own
 % lamp (labclient.Lamp): the database's state and what waits in the outbox,
 % the Database window on a click, and the sending started when the database
-% is turned on. Without it, a grey button "Database: not installed" whose
+% is turned on. Without it, a gray button "Database: not installed" whose
 % tooltip says what to install and where it is looked for (or that the
 % environment switched it off), and whose click says the same in a window.
 % Never an error: a lamp that cannot be made is [] (and a warning,
